@@ -11,6 +11,15 @@ class Env {
   static String get stripePublishableKey =>
       dotenv.env['STRIPE_PUBLISHABLE_KEY'] ?? '';
 
+  /// Google Cloud OAuth 2.0 **Web** client ID (used as serverClientId so
+  /// google_sign_in returns an ID token Supabase can verify).
+  static String get googleWebClientId =>
+      dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '';
+
+  /// Google Cloud OAuth 2.0 **iOS** client ID.
+  static String get googleIosClientId =>
+      dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '';
+
   static bool get isConfigured =>
       supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 }

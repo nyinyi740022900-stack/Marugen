@@ -63,7 +63,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      setState(() => _error = 'Sign-in is not available yet: $e');
+      setState(() => _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }

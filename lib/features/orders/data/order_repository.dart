@@ -48,34 +48,4 @@ class OrderRepository {
     if (data == null) return null;
     return Order.fromMap(data);
   }
-
-  Future<String> createOrder({
-    required List<Map<String, dynamic>> items,
-    required double total,
-    required String stripePaymentIntentId,
-    Map<String, dynamic>? shippingAddress,
-    String? promoCode,
-    double? discountAmount,
-  }) async {
-    final user = SupabaseService.currentUser;
-    if (user == null) throw Exception('Not logged in');
-    final order = await _client
-        .from('orders')
-        .insert({
-          'user_id': user.id,
-          'status': 'paid',
-          'total': total,
-          'stripe_payment_intent_id': stripePaymentIntentId,
-          'shipping_address': ?shippingAddress,
-          'promo_code': ?promoCode,
-          'discount_amount': ?discountAmount,
-        })
-        .select()
-        .single();
-    final orderId = order['id'] as String;
-    await _client.from('order_items').insert([
-      for (final item in items) {...item, 'order_id': orderId},
-    ]);
-    return orderId;
-  }
 }

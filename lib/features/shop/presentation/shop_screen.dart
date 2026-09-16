@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
+import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/skeleton.dart';
@@ -26,12 +27,7 @@ class ShopScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset(
-              'assets/images/logo.png',
-              height: 26,
-              errorBuilder: (_, _, _) =>
-                  const Icon(Icons.water, size: 22, color: AppColors.red),
-            ),
+            const BrandLogo(size: 26),
             const SizedBox(width: 8),
             const Text('MARUGEN KOI FARM'),
           ],

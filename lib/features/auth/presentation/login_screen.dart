@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/brand_logo.dart';
 import 'auth_providers.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -40,7 +41,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .signInWithEmail(_emailCtrl.text.trim(), _passwordCtrl.text);
       // Router redirect handles navigation once auth state updates.
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = _friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -56,7 +57,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      setState(() => _error = 'Sign-in is not available yet: $e');
+      setState(() => _error = _friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -65,34 +66,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.black,
+      backgroundColor: AppColors.white,
       body: SafeArea(
-        bottom: false,
         child: Column(
           children: [
-            // Brand hero — black panel with the hanko-seal logo, echoing
-            // the shop's physical signage instead of a generic splash.
+            // Brand hero — white panel so the black seal logo stays visible.
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpacing.xl,
                 AppSpacing.xl,
                 AppSpacing.xl,
-                AppSpacing.xl,
+                AppSpacing.lg,
               ),
               child: Column(
                 children: [
-                  Image.asset(
-                    'assets/images/logo.png',
-                    height: 88,
-                    errorBuilder: (_, _, _) =>
-                        const Icon(Icons.water, size: 76, color: AppColors.red),
-                  ),
+                  const BrandLogo(size: 96),
                   const SizedBox(height: AppSpacing.md),
                   const Text(
                     'MARUGEN KOI FARM',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: AppColors.white,
+                      color: AppColors.black,
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 3,
@@ -103,7 +97,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     'Premium Koi & Arowana — Singapore',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: AppColors.white.withValues(alpha: 0.55),
+                      color: AppColors.grey,
                       fontSize: 12.5,
                       letterSpacing: 0.4,
                     ),
@@ -116,7 +110,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               child: Container(
                 width: double.infinity,
                 decoration: const BoxDecoration(
-                  color: AppColors.white,
+                  color: AppColors.offWhite,
                   borderRadius: BorderRadius.vertical(
                     top: Radius.circular(AppRadius.lg),
                   ),
@@ -308,4 +302,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
     );
   }
+}
+
+String _friendlyAuthError(Object e) {
+  final raw = e.toString().toLowerCase();
+  if (raw.contains('invalid login credentials') ||
+      raw.contains('invalid_credentials')) {
+    return 'Email or password is incorrect. Try again, use Forgot password, or Sign up for a new account.';
+  }
+  if (raw.contains('email not confirmed')) {
+    return 'Please confirm your email from the link we sent, then try again.';
+  }
+  if (raw.contains('google sign-in is not configured') ||
+      raw.contains('google_web_client_id')) {
+    return 'Google Sign-In is not set up yet. Add Google client IDs to .env (see README).';
+  }
+  if (raw.contains('cancelled') || raw.contains('canceled')) {
+    return 'Sign-in was cancelled.';
+  }
+  if (raw.contains('network') || raw.contains('socket')) {
+    return 'Network error — check your connection and try again.';
+  }
+  // Prefer short Exception messages we throw from AuthRepository.
+  if (e is Exception) {
+    final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
+    if (msg.isNotEmpty && msg.length < 180) return msg;
+  }
+  return 'Could not log in. Please try again.';
 }

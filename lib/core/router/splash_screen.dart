@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../../shared/widgets/brand_logo.dart';
 
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
@@ -8,18 +9,22 @@ class SplashScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: AppColors.black,
+      backgroundColor: AppColors.white,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.water, color: AppColors.red, size: 56),
-            SizedBox(height: 16),
+            BrandLogo(size: 120),
+            SizedBox(height: 20),
             Text(
               'MARUGEN KOI FARM',
-              style: TextStyle(color: AppColors.white, letterSpacing: 1.5, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: AppColors.black,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            SizedBox(height: 24),
+            SizedBox(height: 28),
             CircularProgressIndicator(color: AppColors.red),
           ],
         ),

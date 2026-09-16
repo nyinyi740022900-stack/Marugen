@@ -2,12 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import 'dashboard/admin_dashboard_screen.dart';
-import 'delivery/admin_delivery_screen.dart';
 import 'knowledge/admin_knowledge_screen.dart';
 import 'orders/admin_orders_screen.dart';
-import 'payments/admin_payments_screen.dart';
 import 'products/admin_products_screen.dart';
 import 'promo/admin_promo_screen.dart';
+import 'reviews/admin_reviews_screen.dart';
 import 'settings/admin_settings_screen.dart';
 
 class _MoreItem {
@@ -17,14 +16,10 @@ class _MoreItem {
   const _MoreItem({required this.icon, required this.label, required this.index});
 }
 
-/// Bottom-nav shell for staff/owner. Reached automatically after login when
-/// the signed-in user's `profiles.role` is `staff` or `owner` (see router).
+/// Bottom-nav shell for staff/owner.
 ///
-/// Only the 4 most-used sections sit directly on the bar; the rest live
-/// behind a "More" tab that opens a sheet. 7 flat destinations on a
-/// phone-width bar forced labels like "Knowledge" onto two lines while
-/// everything else stayed on one — this keeps every label single-line and
-/// the row visually even, regardless of how many admin sections exist.
+/// Primary: Home / Products / Orders. Delivery + Payments live under Orders
+/// tabs. More sheet: Knowledge, Promo, Reviews, Settings.
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
 
@@ -39,10 +34,9 @@ class _AdminShellState extends State<AdminShell> {
     AdminDashboardScreen(),
     AdminProductsScreen(),
     AdminOrdersScreen(),
-    AdminDeliveryScreen(),
-    AdminPaymentsScreen(),
     AdminKnowledgeScreen(),
     AdminPromoScreen(),
+    AdminReviewsScreen(),
     AdminSettingsScreen(),
   ];
 
@@ -50,17 +44,16 @@ class _AdminShellState extends State<AdminShell> {
     NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Home'),
     NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Products'),
     NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Orders'),
-    NavigationDestination(icon: Icon(Icons.local_shipping_outlined), label: 'Delivery'),
   ];
 
   static const _moreItems = [
-    _MoreItem(icon: Icons.payments_outlined, label: 'Payments', index: 4),
-    _MoreItem(icon: Icons.menu_book_outlined, label: 'Knowledge', index: 5),
-    _MoreItem(icon: Icons.local_offer_outlined, label: 'Promo Codes', index: 6),
-    _MoreItem(icon: Icons.settings_outlined, label: 'Settings', index: 7),
+    _MoreItem(icon: Icons.menu_book_outlined, label: 'Knowledge', index: 3),
+    _MoreItem(icon: Icons.local_offer_outlined, label: 'Promo Codes', index: 4),
+    _MoreItem(icon: Icons.rate_review_outlined, label: 'Reviews', index: 5),
+    _MoreItem(icon: Icons.settings_outlined, label: 'Settings', index: 6),
   ];
 
-  bool get _isMoreSelected => _index >= 4;
+  bool get _isMoreSelected => _index >= 3;
 
   IconData get _moreTabIcon {
     if (!_isMoreSelected) return Icons.more_horiz;
@@ -86,8 +79,11 @@ class _AdminShellState extends State<AdminShell> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text('More',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8, color: AppColors.grey)),
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: AppColors.grey)),
               ),
             ),
             for (final item in _moreItems)
@@ -97,12 +93,14 @@ class _AdminShellState extends State<AdminShell> {
                 title: Text(
                   item.label,
                   style: TextStyle(
-                    fontWeight: _index == item.index ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight:
+                        _index == item.index ? FontWeight.w700 : FontWeight.w500,
                     color: _index == item.index ? AppColors.red : AppColors.black,
                   ),
                 ),
-                trailing:
-                    _index == item.index ? const Icon(Icons.check, color: AppColors.red) : null,
+                trailing: _index == item.index
+                    ? const Icon(Icons.check, color: AppColors.red)
+                    : null,
                 onTap: () => Navigator.of(sheetContext).pop(item.index),
               ),
             const SizedBox(height: AppSpacing.sm),
@@ -118,9 +116,9 @@ class _AdminShellState extends State<AdminShell> {
     return Scaffold(
       body: IndexedStack(index: _index, children: _tabs),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _isMoreSelected ? 4 : _index,
+        selectedIndex: _isMoreSelected ? 3 : _index,
         onDestinationSelected: (i) {
-          if (i == 4) {
+          if (i == 3) {
             _openMoreSheet();
           } else {
             setState(() => _index = i);

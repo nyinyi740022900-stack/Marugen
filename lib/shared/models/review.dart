@@ -10,6 +10,7 @@ class ProductReview {
   final String? comment;
   final DateTime createdAt;
   final String? authorName;
+  final bool isHidden;
 
   const ProductReview({
     required this.id,
@@ -19,6 +20,7 @@ class ProductReview {
     this.comment,
     required this.createdAt,
     this.authorName,
+    this.isHidden = false,
   });
 
   factory ProductReview.fromMap(Map<String, dynamic> map) {
@@ -31,6 +33,7 @@ class ProductReview {
       comment: map['comment'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
       authorName: profile?['full_name'] as String?,
+      isHidden: map['is_hidden'] as bool? ?? false,
     );
   }
 }

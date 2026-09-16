@@ -1,14 +1,11 @@
 // Supabase Edge Function: stripe-webhook
 //
-// Source of truth for payment confirmation — Stripe calls this directly
-// (not the app), so a flaky connection on the customer's phone can't leave
-// an order stuck as "pending" after money has actually moved.
+// Source of truth for payment confirmation. Orders are created as `pending`
+// by create-payment-intent; this webhook flips them to `paid` (or
+// `cancelled` on failure) and is idempotent via stripe_payment_intent_id.
 //
 // Deploy:  supabase functions deploy stripe-webhook --no-verify-jwt
 // Secrets: supabase secrets set STRIPE_SECRET_KEY=sk_test_xxx STRIPE_WEBHOOK_SECRET=whsec_xxx
-// Then in the Stripe Dashboard → Developers → Webhooks, add an endpoint
-// pointing at this function's URL, subscribed to:
-//   payment_intent.succeeded, payment_intent.payment_failed
 
 import Stripe from 'https://esm.sh/stripe@17?target=deno';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -37,22 +34,43 @@ Deno.serve(async (req) => {
   switch (event.type) {
     case 'payment_intent.succeeded': {
       const intent = event.data.object as Stripe.PaymentIntent;
-      await supabaseAdmin
-        .from('orders')
-        .update({ status: 'paid' })
-        .eq('stripe_payment_intent_id', intent.id);
+      const orderId = intent.metadata?.order_id;
+
+      // Prefer metadata order_id; fall back to PI id lookup.
+      let query = supabaseAdmin.from('orders').update({ status: 'paid' });
+      if (orderId) {
+        query = query.eq('id', orderId).eq('status', 'pending');
+      } else {
+        query = query.eq('stripe_payment_intent_id', intent.id).eq('status', 'pending');
+      }
+      const { error } = await query;
+      if (error) {
+        console.error('Failed to mark order paid', intent.id, error);
+        return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+      }
       break;
     }
-    case 'payment_intent.payment_failed': {
+    case 'payment_intent.payment_failed':
+    case 'payment_intent.canceled': {
       const intent = event.data.object as Stripe.PaymentIntent;
-      await supabaseAdmin
-        .from('orders')
-        .update({ status: 'cancelled' })
-        .eq('stripe_payment_intent_id', intent.id);
+      const orderId = intent.metadata?.order_id;
+
+      let query = supabaseAdmin.from('orders').update({ status: 'cancelled' });
+      if (orderId) {
+        query = query.eq('id', orderId).in('status', ['pending', 'paid']);
+      } else {
+        query = query
+          .eq('stripe_payment_intent_id', intent.id)
+          .in('status', ['pending', 'paid']);
+      }
+      const { error } = await query;
+      if (error) {
+        console.error('Failed to cancel order', intent.id, error);
+        return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+      }
       break;
     }
     default:
-      // Ignore other event types.
       break;
   }
 

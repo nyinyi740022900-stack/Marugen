@@ -169,6 +169,87 @@ class CartNotifier extends Notifier<List<CartItem>> {
     state = [];
     _persist();
   }
+
+  /// Re-fetch every line from Supabase and drop/adjust sold-out or
+  /// over-qty items. Call before payment so the client matches server
+  /// stock/price (server still recalculates the charged total).
+  Future<CartRefreshResult> refreshFromServer() async {
+    if (state.isEmpty) {
+      return const CartRefreshResult(removed: 0, adjusted: 0, isEmpty: true);
+    }
+    final repo = ref.read(productRepositoryProvider);
+    final kept = <CartItem>[];
+    var removed = 0;
+    var adjusted = 0;
+
+    for (final item in state) {
+      final product = await repo.fetchProductById(item.product.id);
+      if (product == null ||
+          product.isSold ||
+          !product.isPurchasable ||
+          product.isOutOfStock) {
+        removed++;
+        continue;
+      }
+
+      ProductVariant? variant = item.selectedVariant;
+      if (variant != null) {
+        final match = product.variants.where((v) => v.id == variant!.id);
+        if (match.isEmpty || match.first.stockQuantity < 1) {
+          removed++;
+          continue;
+        }
+        variant = match.first;
+      } else if (product.hasVariants) {
+        // Line was saved without a size but the product now requires one.
+        removed++;
+        continue;
+      }
+
+      final available = availableFor(product, variant);
+      if (available < 1) {
+        removed++;
+        continue;
+      }
+
+      var qty = product.isLiveFish ? 1 : item.quantity;
+      if (qty > available) {
+        qty = available;
+        adjusted++;
+      }
+
+      final refreshed = CartItem(
+        product: product,
+        quantity: qty,
+        selectedVariant: variant,
+      );
+      if (refreshed.unitPrice != item.unitPrice) adjusted++;
+      kept.add(refreshed);
+    }
+
+    state = kept;
+    await _persist();
+    return CartRefreshResult(
+      removed: removed,
+      adjusted: adjusted,
+      isEmpty: kept.isEmpty,
+    );
+  }
+}
+
+/// Outcome of [CartNotifier.refreshFromServer].
+class CartRefreshResult {
+  final int removed;
+  final int adjusted;
+  final bool isEmpty;
+
+  const CartRefreshResult({
+    required this.removed,
+    required this.adjusted,
+    required this.isEmpty,
+  });
+
+  bool get changed => removed > 0 || adjusted > 0;
 }
 
 final cartProvider = NotifierProvider<CartNotifier, List<CartItem>>(CartNotifier.new);

@@ -19,10 +19,19 @@ class CartScreen extends ConsumerWidget {
       backgroundColor: AppColors.offWhite,
       appBar: AppBar(title: const Text('MY CART')),
       body: items.isEmpty
-          ? const EmptyState(
+          ? EmptyState(
               icon: Icons.shopping_bag_outlined,
               title: 'Your cart is empty',
               subtitle: 'Browse the shop to add koi, fish & supplies.',
+              actionLabel: 'Browse shop',
+              onAction: () {
+                // Pop back to the customer shell shop tab when possible.
+                if (context.canPop()) {
+                  context.pop();
+                } else {
+                  context.go('/');
+                }
+              },
             )
           : ListView.separated(
               padding: const EdgeInsets.all(AppSpacing.lg),

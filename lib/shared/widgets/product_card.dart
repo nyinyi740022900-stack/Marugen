@@ -8,6 +8,8 @@ import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/cart/presentation/cart_providers.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import '../models/product.dart';
+import '../providers/settings_providers.dart';
+import '../utils/contact_launcher.dart';
 import '../utils/price_format.dart';
 
 /// At or below this many units a card shows an "Only N left" tag. Kept
@@ -153,12 +155,7 @@ class ProductCard extends ConsumerWidget {
                             ),
                           ),
                         ),
-                        // Quick-add (Lazada pattern): only for restockable,
-                        // priced, in-stock items. Variant products open the
-                        // detail page so a size gets picked; live fish and
-                        // contact-for-price items get nothing here.
-                        if (!product.isLiveFish && product.isPurchasable && !product.isOutOfStock)
-                          _QuickAddButton(product: product, onOpenDetail: onTap),
+                        _CardActionButtons(product: product, onOpenDetail: onTap),
                       ],
                     ),
                   ],
@@ -181,6 +178,94 @@ String _priceLabel(Product product) {
     return low == high ? formatPrice(low) : 'From ${formatPrice(low)}';
   }
   return formatPrice(product.price!);
+}
+
+/// CTA row on the card price line:
+/// - restockable + priced → quick-add cart (variant products open PDP)
+/// - live fish + priced + in stock → Buy Now (cart + checkout)
+/// - contact-for-price → Chat with shop
+class _CardActionButtons extends ConsumerWidget {
+  final Product product;
+  final VoidCallback? onOpenDetail;
+  const _CardActionButtons({required this.product, this.onOpenDetail});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!product.isPurchasable) {
+      return _RoundIconButton(
+        icon: Icons.chat_bubble_outline,
+        tooltip: 'Chat with seller',
+        onTap: () => _chatAbout(ref, product),
+      );
+    }
+
+    if (product.isOutOfStock) {
+      return const SizedBox.shrink();
+    }
+
+    if (product.isLiveFish) {
+      return _RoundIconButton(
+        icon: Icons.flash_on,
+        tooltip: 'Buy Now',
+        color: AppColors.red,
+        onTap: () {
+          final result = ref.read(cartProvider.notifier).add(product);
+          if (result == CartAddResult.outOfStock) {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(SnackBar(content: Text(cartAddMessage(result))));
+            return;
+          }
+          // alreadyInCart or added → go checkout with that fish in cart
+          context.push('/checkout');
+        },
+      );
+    }
+
+    return _QuickAddButton(product: product, onOpenDetail: onOpenDetail);
+  }
+
+  Future<void> _chatAbout(WidgetRef ref, Product product) async {
+    final settings = await ref.read(shopSettingsProvider.future);
+    final phone = settings['shop_phone'] as String? ?? '';
+    await launchShopContact(
+      phone,
+      message: "Hi, I'm interested in ${product.name}",
+    );
+  }
+}
+
+class _RoundIconButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final Color color;
+
+  const _RoundIconButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.color = AppColors.black,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(icon, size: 15, color: AppColors.white),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Compact cart icon in the card's price row. Plain products go straight

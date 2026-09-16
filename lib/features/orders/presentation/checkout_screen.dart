@@ -15,6 +15,8 @@ import '../../shop/presentation/shell_tab_provider.dart';
 import '../data/order_repository.dart';
 import '../data/payment_repository.dart';
 
+enum _Fulfillment { delivery, pickup }
+
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
 
@@ -26,6 +28,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   bool _processing = false;
   String? _error;
   String? _selectedAddressId;
+  _Fulfillment _fulfillment = _Fulfillment.delivery;
   final _promoCtrl = TextEditingController();
   PromoCode? _appliedPromo;
   String? _promoError;
@@ -89,7 +92,31 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     return defaultAddress.isNotEmpty ? defaultAddress.first.id : addresses.first.id;
   }
 
-  Future<void> _pay(Address shippingAddress, double payableTotal, double discountAmount) async {
+  Future<bool> _revalidateCart() async {
+    final result = await ref.read(cartProvider.notifier).refreshFromServer();
+    if (!mounted) return false;
+    if (result.isEmpty) {
+      setState(() => _error = 'Your cart is empty or items are no longer available.');
+      return false;
+    }
+    if (result.changed) {
+      final parts = <String>[];
+      if (result.removed > 0) {
+        parts.add('${result.removed} item(s) removed (sold out)');
+      }
+      if (result.adjusted > 0) {
+        parts.add('stock or price updated');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Cart updated: ${parts.join(', ')}.')),
+      );
+      setState(() => _error = 'Cart changed — review totals, then pay again.');
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _pay({Address? shippingAddress}) async {
     final items = ref.read(cartProvider);
     if (items.isEmpty) return;
 
@@ -98,25 +125,30 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       _error = null;
     });
 
+    String? pendingOrderId;
     try {
-      // 1. Ask our Edge Function (server-side Stripe secret key) for a
-      //    PaymentIntent client secret.
+      if (!await _revalidateCart()) return;
+      final freshItems = ref.read(cartProvider);
+      if (freshItems.isEmpty) return;
+
       final intent = await PaymentRepository().createPaymentIntent(
-        amount: payableTotal,
         currency: 'sgd',
+        fulfillment: _fulfillment == _Fulfillment.pickup ? 'pickup' : 'delivery',
+        shippingAddress: _fulfillment == _Fulfillment.delivery
+            ? shippingAddress?.toShippingJson()
+            : null,
+        promoCode: _appliedPromo?.code,
         items: [
-          for (final item in items)
+          for (final item in freshItems)
             {
               'product_id': item.product.id,
-              'product_name': item.product.name,
               'quantity': item.quantity,
-              'unit_price': item.unitPrice,
+              if (item.selectedVariant != null) 'variant_id': item.selectedVariant!.id,
             },
         ],
       );
+      pendingOrderId = intent['orderId'] as String?;
 
-      // 2. Present Stripe's PaymentSheet (card / Apple Pay / Google Pay /
-      //    PayNow, depending on what's enabled on the Stripe SG account).
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: intent['clientSecret'] as String,
@@ -125,30 +157,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       );
       await Stripe.instance.presentPaymentSheet();
 
-      // 3. Record the order. (The Stripe webhook Edge Function is the
-      //    source of truth for payment confirmation; this call lets the
-      //    customer see the order immediately.)
-      await OrderRepository().createOrder(
-        items: [
-          for (final item in items)
-            {
-              'product_id': item.product.id,
-              'product_name': item.product.name,
-              'quantity': item.quantity,
-              'unit_price': item.unitPrice,
-              if (item.selectedVariant != null) 'variant_id': item.selectedVariant!.id,
-              if (item.selectedVariant != null) 'variant_label': item.selectedVariant!.label,
-            },
-        ],
-        total: payableTotal,
-        stripePaymentIntentId: intent['paymentIntentId'] as String? ?? '',
-        shippingAddress: shippingAddress.toShippingJson(),
-        promoCode: _appliedPromo?.code,
-        discountAmount: discountAmount > 0 ? discountAmount : null,
-      );
-
       ref.read(cartProvider.notifier).clear();
-      ref.read(customerTabIndexProvider.notifier).state = 2; // Orders tab
+      ref.read(customerTabIndexProvider.notifier).state = 2;
       if (mounted) {
         context.go('/');
         ScaffoldMessenger.of(context).showSnackBar(
@@ -156,8 +166,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         );
       }
     } on StripeException catch (e) {
+      if (pendingOrderId != null) {
+        try {
+          await OrderRepository().cancelMyOrder(pendingOrderId);
+        } catch (_) {}
+      }
       setState(() => _error = e.error.localizedMessage ?? 'Payment cancelled.');
     } catch (e) {
+      if (pendingOrderId != null) {
+        try {
+          await OrderRepository().cancelMyOrder(pendingOrderId);
+        } catch (_) {}
+      }
       setState(() => _error = e.toString());
     } finally {
       if (mounted) setState(() => _processing = false);
@@ -191,81 +211,158 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             Expanded(
               child: ListView(
                 children: [
-                  const Text('DELIVERY ADDRESS',
+                  const Text('FULFILLMENT',
                       style: TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 12,
                           letterSpacing: 0.8,
                           color: AppColors.grey)),
                   const SizedBox(height: AppSpacing.sm),
-                  addressesAsync.when(
-                    data: (addresses) {
-                      final selectedId = _resolveSelectedId(addresses);
-                      return Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.white,
-                          borderRadius: BorderRadius.circular(AppRadius.md),
-                          boxShadow: AppShadows.card,
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: Column(
-                          children: [
-                            if (addresses.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.all(AppSpacing.lg),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'You need a delivery address to check out.',
-                                      style: TextStyle(fontSize: 13.5, color: AppColors.grey),
-                                    ),
-                                    const SizedBox(height: AppSpacing.md),
-                                    OutlinedButton.icon(
-                                      onPressed: _addAddress,
-                                      icon: const Icon(Icons.add, size: 18),
-                                      label: const Text('Add Address'),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            else ...[
-                              for (final address in addresses)
-                                ListTile(
-                                  onTap: () => setState(() => _selectedAddressId = address.id),
-                                  leading: Icon(
-                                    address.id == selectedId
-                                        ? Icons.radio_button_checked
-                                        : Icons.radio_button_unchecked,
-                                    color: address.id == selectedId
-                                        ? AppColors.red
-                                        : AppColors.greySoft,
-                                  ),
-                                  title: Text(
-                                    '${address.label} — ${address.recipientName}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
-                                  ),
-                                  subtitle: Text(address.oneLine, style: const TextStyle(fontSize: 12.5)),
-                                ),
-                              const Divider(height: 1, indent: 16, endIndent: 16),
-                              TextButton.icon(
-                                onPressed: _addAddress,
-                                icon: const Icon(Icons.add, size: 16),
-                                label: const Text('Add new address'),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.all(AppSpacing.lg),
-                      child: Center(child: CircularProgressIndicator()),
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      boxShadow: AppShadows.card,
                     ),
-                    error: (e, _) => Text('Error loading addresses: $e'),
+                    child: SegmentedButton<_Fulfillment>(
+                      segments: const [
+                        ButtonSegment(
+                          value: _Fulfillment.delivery,
+                          label: Text('Delivery'),
+                          icon: Icon(Icons.local_shipping_outlined, size: 18),
+                        ),
+                        ButtonSegment(
+                          value: _Fulfillment.pickup,
+                          label: Text('Pickup'),
+                          icon: Icon(Icons.storefront_outlined, size: 18),
+                        ),
+                      ],
+                      selected: {_fulfillment},
+                      onSelectionChanged: (s) =>
+                          setState(() => _fulfillment = s.first),
+                    ),
                   ),
+                  const SizedBox(height: AppSpacing.lg),
+                  if (_fulfillment == _Fulfillment.delivery) ...[
+                    const Text('DELIVERY ADDRESS',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            letterSpacing: 0.8,
+                            color: AppColors.grey)),
+                    const SizedBox(height: AppSpacing.sm),
+                    addressesAsync.when(
+                      data: (addresses) {
+                        final selectedId = _resolveSelectedId(addresses);
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.white,
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            boxShadow: AppShadows.card,
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Column(
+                            children: [
+                              if (addresses.isEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.all(AppSpacing.lg),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'You need a delivery address to check out.',
+                                        style: TextStyle(fontSize: 13.5, color: AppColors.grey),
+                                      ),
+                                      const SizedBox(height: AppSpacing.md),
+                                      OutlinedButton.icon(
+                                        onPressed: _addAddress,
+                                        icon: const Icon(Icons.add, size: 18),
+                                        label: const Text('Add Address'),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else ...[
+                                for (final address in addresses)
+                                  ListTile(
+                                    onTap: () =>
+                                        setState(() => _selectedAddressId = address.id),
+                                    leading: Icon(
+                                      address.id == selectedId
+                                          ? Icons.radio_button_checked
+                                          : Icons.radio_button_unchecked,
+                                      color: address.id == selectedId
+                                          ? AppColors.red
+                                          : AppColors.greySoft,
+                                    ),
+                                    title: Text(
+                                      '${address.label} — ${address.recipientName}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w600, fontSize: 13.5),
+                                    ),
+                                    subtitle: Text(address.oneLine,
+                                        style: const TextStyle(fontSize: 12.5)),
+                                  ),
+                                const Divider(height: 1, indent: 16, endIndent: 16),
+                                TextButton.icon(
+                                  onPressed: _addAddress,
+                                  icon: const Icon(Icons.add, size: 16),
+                                  label: const Text('Add new address'),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                      loading: () => const Padding(
+                        padding: EdgeInsets.all(AppSpacing.lg),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                      error: (e, _) => Text('Error loading addresses: $e'),
+                    ),
+                  ] else
+                    settingsAsync.when(
+                      data: (settings) {
+                        final farm = (settings['shop_address'] as String?)?.trim();
+                        final phone = (settings['shop_phone'] as String?)?.trim();
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          decoration: BoxDecoration(
+                            color: AppColors.white,
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            boxShadow: AppShadows.card,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('PICKUP LOCATION',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 12,
+                                      letterSpacing: 0.8,
+                                      color: AppColors.grey)),
+                              const SizedBox(height: AppSpacing.sm),
+                              Text(
+                                farm?.isNotEmpty == true ? farm! : 'Farm address TBD — contact shop.',
+                                style: const TextStyle(fontSize: 13.5, height: 1.4),
+                              ),
+                              if (phone != null && phone.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(phone,
+                                    style: const TextStyle(
+                                        fontSize: 12.5, color: AppColors.grey)),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                      loading: () => const SizedBox.shrink(),
+                      error: (e, _) => Text('Error: $e'),
+                    ),
                   const SizedBox(height: AppSpacing.lg),
                   const Text('ORDER SUMMARY',
                       style: TextStyle(
@@ -288,14 +385,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                             title: Text(item.product.name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600, fontSize: 14)),
                             subtitle: Text(
                                 item.selectedVariant != null
                                     ? '${item.selectedVariant!.label} · Qty ${item.quantity}'
                                     : 'Qty ${item.quantity}',
-                                style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
+                                style: const TextStyle(
+                                    fontSize: 12.5, color: AppColors.grey)),
                             trailing: Text('S\$${item.subtotal.toStringAsFixed(2)}',
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700, fontSize: 14)),
                           ),
                       ],
                     ),
@@ -318,15 +418,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     child: _appliedPromo != null
                         ? Row(
                             children: [
-                              const Icon(Icons.local_offer_outlined, size: 18, color: AppColors.red),
+                              const Icon(Icons.local_offer_outlined,
+                                  size: 18, color: AppColors.red),
                               const SizedBox(width: AppSpacing.sm),
                               Expanded(
                                 child: Text(
                                   '"${_appliedPromo!.code}" applied',
-                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600, fontSize: 13.5),
                                 ),
                               ),
-                              TextButton(onPressed: _removePromo, child: const Text('Remove')),
+                              TextButton(
+                                  onPressed: _removePromo, child: const Text('Remove')),
                             ],
                           )
                         : Row(
@@ -364,15 +467,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   const SizedBox(height: AppSpacing.lg),
                   settingsAsync.when(
                     data: (settings) {
-                      final gstPercent = (settings['gst_percent'] as num?)?.toDouble() ?? 0;
-                      final gstIncluded = settings['gst_included_in_price'] as bool? ?? true;
-                      final discountAmount =
-                          _appliedPromo?.discountFor(subtotal) ?? 0;
+                      final gstPercent =
+                          (settings['gst_percent'] as num?)?.toDouble() ?? 0;
+                      final gstIncluded =
+                          settings['gst_included_in_price'] as bool? ?? true;
+                      final discountAmount = _appliedPromo?.discountFor(subtotal) ?? 0;
                       final netSubtotal = subtotal - discountAmount;
                       final double gstAmount;
                       final double payableTotal;
                       if (gstIncluded) {
-                        gstAmount = netSubtotal - (netSubtotal / (1 + gstPercent / 100));
+                        gstAmount =
+                            netSubtotal - (netSubtotal / (1 + gstPercent / 100));
                         payableTotal = netSubtotal;
                       } else {
                         gstAmount = netSubtotal * gstPercent / 100;
@@ -404,47 +509,80 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   color: AppColors.redSoft,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                child: Text(_error!, style: const TextStyle(color: AppColors.redDark, fontSize: 13)),
+                child: Text(_error!,
+                    style: const TextStyle(color: AppColors.redDark, fontSize: 13)),
               ),
             ],
             const SizedBox(height: AppSpacing.lg),
-            addressesAsync.maybeWhen(
-              data: (addresses) => settingsAsync.maybeWhen(
-                data: (settings) {
-                  final selectedId = _resolveSelectedId(addresses);
-                  final matching = addresses.where((a) => a.id == selectedId);
-                  final selectedAddress = matching.isNotEmpty ? matching.first : null;
-                  final gstPercent = (settings['gst_percent'] as num?)?.toDouble() ?? 0;
-                  final gstIncluded = settings['gst_included_in_price'] as bool? ?? true;
-                  final discountAmount = _appliedPromo?.discountFor(subtotal) ?? 0;
-                  final netSubtotal = subtotal - discountAmount;
-                  final payableTotal = gstIncluded
-                      ? netSubtotal
-                      : netSubtotal + (netSubtotal * gstPercent / 100);
-                  final canPay = selectedAddress != null && !_processing;
-
-                  return ElevatedButton(
-                    onPressed: canPay
-                        ? () => _pay(selectedAddress, payableTotal, discountAmount)
-                        : null,
-                    child: _processing
-                        ? const SizedBox(
-                            height: 18,
-                            width: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
-                          )
-                        : Text(selectedAddress == null
-                            ? 'Add an address to continue'
-                            : 'Pay with Stripe'),
-                  );
-                },
-                orElse: () => const SizedBox.shrink(),
-              ),
-              orElse: () => const SizedBox.shrink(),
+            _PayButton(
+              fulfillment: _fulfillment,
+              processing: _processing,
+              addressesAsync: addressesAsync,
+              resolveSelectedId: _resolveSelectedId,
+              onPayDelivery: (address) => _pay(shippingAddress: address),
+              onPayPickup: () => _pay(),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _PayButton extends StatelessWidget {
+  final _Fulfillment fulfillment;
+  final bool processing;
+  final AsyncValue<List<Address>> addressesAsync;
+  final String? Function(List<Address>) resolveSelectedId;
+  final void Function(Address) onPayDelivery;
+  final VoidCallback onPayPickup;
+
+  const _PayButton({
+    required this.fulfillment,
+    required this.processing,
+    required this.addressesAsync,
+    required this.resolveSelectedId,
+    required this.onPayDelivery,
+    required this.onPayPickup,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (fulfillment == _Fulfillment.pickup) {
+      return ElevatedButton(
+        onPressed: processing ? null : onPayPickup,
+        child: processing
+            ? const SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.white),
+              )
+            : const Text('Pay with Stripe'),
+      );
+    }
+
+    return addressesAsync.maybeWhen(
+      data: (addresses) {
+        final selectedId = resolveSelectedId(addresses);
+        final matching = addresses.where((a) => a.id == selectedId);
+        final selectedAddress = matching.isNotEmpty ? matching.first : null;
+        final canPay = selectedAddress != null && !processing;
+        return ElevatedButton(
+          onPressed: canPay ? () => onPayDelivery(selectedAddress) : null,
+          child: processing
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.white),
+                )
+              : Text(selectedAddress == null
+                  ? 'Add an address to continue'
+                  : 'Pay with Stripe'),
+        );
+      },
+      orElse: () => const SizedBox.shrink(),
     );
   }
 }
@@ -482,7 +620,8 @@ class _TotalsCard extends StatelessWidget {
             children: [
               const Text('Subtotal',
                   style: TextStyle(fontSize: 13.5, color: AppColors.grey)),
-              Text('S\$${subtotal.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13.5)),
+              Text('S\$${subtotal.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 13.5)),
             ],
           ),
           if (discountAmount > 0) ...[
@@ -503,7 +642,8 @@ class _TotalsCard extends StatelessWidget {
             children: [
               Text('GST (${gstPercent.toStringAsFixed(0)}%)',
                   style: const TextStyle(fontSize: 13.5, color: AppColors.grey)),
-              Text('S\$${gstAmount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 13.5)),
+              Text('S\$${gstAmount.toStringAsFixed(2)}',
+                  style: const TextStyle(fontSize: 13.5)),
             ],
           ),
           const Divider(height: AppSpacing.lg),
@@ -513,7 +653,10 @@ class _TotalsCard extends StatelessWidget {
               Row(
                 children: [
                   const Text('Total',
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.grey)),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: AppColors.grey)),
                   if (gstIncluded) ...[
                     const SizedBox(width: 4),
                     const Text('(incl. GST)',
@@ -523,7 +666,9 @@ class _TotalsCard extends StatelessWidget {
               ),
               Text('S\$${payableTotal.toStringAsFixed(2)}',
                   style: const TextStyle(
-                      fontWeight: FontWeight.w700, color: AppColors.black, fontSize: 20)),
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.black,
+                      fontSize: 20)),
             ],
           ),
         ],

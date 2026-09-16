@@ -183,6 +183,17 @@ class AppTheme {
         ),
         iconTheme: const IconThemeData(color: AppColors.white),
       ),
+      // TabBars sit in the black AppBar — force light labels so "Varieties /
+      // Care Guides" (and admin tabs) are readable; default onSurface is black.
+      tabBarTheme: const TabBarThemeData(
+        labelColor: AppColors.white,
+        unselectedLabelColor: AppColors.greySoft,
+        indicatorColor: AppColors.red,
+        dividerColor: Colors.transparent,
+        labelStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        unselectedLabelStyle:
+            TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.red,

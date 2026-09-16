@@ -5,24 +5,43 @@ class ReviewRepository {
   final _client = SupabaseService.client;
 
   Future<List<ProductReview>> fetchReviewsForProduct(String productId) async {
+    // RLS hides moderated reviews from the public; authors/admins still see theirs.
     final data = await _client
         .from('product_reviews')
-        .select()
+        .select('*, profiles(full_name)')
         .eq('product_id', productId)
+        .eq('is_hidden', false)
         .order('created_at', ascending: false);
     return (data as List)
         .map((e) => ProductReview.fromMap(e as Map<String, dynamic>))
         .toList();
   }
 
+  /// Admin: all reviews, including hidden.
+  Future<List<ProductReview>> fetchAllReviewsForAdmin() async {
+    final data = await _client
+        .from('product_reviews')
+        .select('*, profiles(full_name)')
+        .order('created_at', ascending: false);
+    return (data as List)
+        .map((e) => ProductReview.fromMap(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> setHidden(String reviewId, bool hidden) async {
+    await _client
+        .from('product_reviews')
+        .update({'is_hidden': hidden}).eq('id', reviewId);
+  }
+
   /// The current user's own review on [productId], if any — RLS lets
-  /// anyone read all reviews, so this just filters client-side by user id.
+  /// the author read their own even when hidden.
   Future<ProductReview?> fetchMyReview(String productId) async {
     final user = SupabaseService.currentUser;
     if (user == null) return null;
     final data = await _client
         .from('product_reviews')
-        .select()
+        .select('*, profiles(full_name)')
         .eq('product_id', productId)
         .eq('user_id', user.id)
         .maybeSingle();
@@ -36,9 +55,6 @@ class ReviewRepository {
   /// gate; this only decides what the UI shows.
   static const purchasedStatuses = ['paid', 'packing', 'shipped', 'delivered'];
 
-  /// Whether the current user has a qualifying order containing
-  /// [productId]. Uses an inner join so orders in other statuses filter
-  /// the order_items rows out entirely.
   Future<bool> hasPurchasedProduct(String productId) async {
     final user = SupabaseService.currentUser;
     if (user == null) return false;

@@ -1,0 +1,102 @@
+enum OrderStatus { pending, paid, packing, shipped, delivered, cancelled, refunded }
+
+OrderStatus orderStatusFromString(String value) {
+  return OrderStatus.values.firstWhere(
+    (e) => e.name == value,
+    orElse: () => OrderStatus.pending,
+  );
+}
+
+String orderStatusLabel(OrderStatus s) {
+  switch (s) {
+    case OrderStatus.pending:
+      return 'Pending';
+    case OrderStatus.paid:
+      return 'Paid';
+    case OrderStatus.packing:
+      return 'Packing';
+    case OrderStatus.shipped:
+      return 'Shipped';
+    case OrderStatus.delivered:
+      return 'Delivered';
+    case OrderStatus.cancelled:
+      return 'Cancelled';
+    case OrderStatus.refunded:
+      return 'Refunded';
+  }
+}
+
+class OrderItem {
+  final String productId;
+  final String productName;
+  final int quantity;
+  final double unitPrice;
+  final String? variantLabel;
+
+  const OrderItem({
+    required this.productId,
+    required this.productName,
+    required this.quantity,
+    required this.unitPrice,
+    this.variantLabel,
+  });
+
+  double get subtotal => quantity * unitPrice;
+
+  factory OrderItem.fromMap(Map<String, dynamic> map) {
+    return OrderItem(
+      productId: map['product_id'] as String,
+      productName: map['product_name'] as String? ?? '',
+      quantity: map['quantity'] as int? ?? 1,
+      unitPrice: (map['unit_price'] as num?)?.toDouble() ?? 0,
+      variantLabel: map['variant_label'] as String?,
+    );
+  }
+}
+
+class Order {
+  final String id;
+  final String userId;
+  final OrderStatus status;
+  final double total;
+  final DateTime createdAt;
+  final List<OrderItem> items;
+  final String? qxpressTrackingNo;
+  final String? stripePaymentIntentId;
+  final Map<String, dynamic>? shippingAddress;
+  final String? promoCode;
+  final double? discountAmount;
+
+  const Order({
+    required this.id,
+    required this.userId,
+    required this.status,
+    required this.total,
+    required this.createdAt,
+    this.items = const [],
+    this.qxpressTrackingNo,
+    this.stripePaymentIntentId,
+    this.shippingAddress,
+    this.promoCode,
+    this.discountAmount,
+  });
+
+  factory Order.fromMap(Map<String, dynamic> map) {
+    return Order(
+      id: map['id'] as String,
+      userId: map['user_id'] as String,
+      status: orderStatusFromString(map['status'] as String? ?? 'pending'),
+      total: (map['total'] as num?)?.toDouble() ?? 0,
+      createdAt: DateTime.parse(map['created_at'] as String),
+      items: (map['items'] as List?)
+              ?.map((e) => OrderItem.fromMap(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      qxpressTrackingNo: map['qxpress_tracking_no'] as String?,
+      stripePaymentIntentId: map['stripe_payment_intent_id'] as String?,
+      shippingAddress: (map['shipping_address'] as Map?)?.cast<String, dynamic>(),
+      promoCode: map['promo_code'] as String?,
+      discountAmount: (map['discount_amount'] as num?)?.toDouble(),
+    );
+  }
+}

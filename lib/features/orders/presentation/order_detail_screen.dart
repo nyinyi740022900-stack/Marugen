@@ -9,7 +9,9 @@ import '../../../shared/models/order.dart';
 import '../../../shared/models/product.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../admin/delivery/delivery_repository.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../../shop/presentation/shell_tab_provider.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../utils/receipt_generator.dart';
 import 'order_status_timeline.dart';
@@ -24,12 +26,23 @@ class OrderDetailScreen extends ConsumerWidget {
   final String orderId;
   final Order? order;
 
-  const OrderDetailScreen({super.key, required this.orderId, this.order});
+  /// True when arriving straight from a successful checkout — shows a
+  /// one-time "order placed" banner instead of a separate confirmation
+  /// screen, so there's a clear acknowledgment without duplicating this
+  /// screen's content elsewhere.
+  final bool justPlaced;
+
+  const OrderDetailScreen({
+    super.key,
+    required this.orderId,
+    this.order,
+    this.justPlaced = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (order != null) {
-      return _OrderDetailScaffold(order: order!);
+      return _OrderDetailScaffold(order: order!, justPlaced: justPlaced);
     }
 
     final orderAsync = ref.watch(orderByIdProvider(orderId));
@@ -49,7 +62,7 @@ class OrderDetailScreen extends ConsumerWidget {
           if (o == null) {
             return const Center(child: Text('Order not found.'));
           }
-          return _OrderDetailBody(order: o);
+          return _OrderDetailBody(order: o, justPlaced: justPlaced);
         },
         loading: () => ListView(
           padding: const EdgeInsets.all(AppSpacing.lg),
@@ -67,24 +80,27 @@ class OrderDetailScreen extends ConsumerWidget {
 
 class _OrderDetailScaffold extends StatelessWidget {
   final Order order;
-  const _OrderDetailScaffold({required this.order});
+  final bool justPlaced;
+  const _OrderDetailScaffold({required this.order, this.justPlaced = false});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.offWhite,
       appBar: AppBar(
-        title: Text('Order #${order.id.substring(0, 8)}'),
+        title: Text(justPlaced ? 'Order Placed' : 'Order #${order.id.substring(0, 8)}'),
+        automaticallyImplyLeading: !justPlaced,
         actions: [_ShareReceiptButton(order: order)],
       ),
-      body: _OrderDetailBody(order: order),
+      body: _OrderDetailBody(order: order, justPlaced: justPlaced),
     );
   }
 }
 
 class _OrderDetailBody extends ConsumerWidget {
   final Order order;
-  const _OrderDetailBody({required this.order});
+  final bool justPlaced;
+  const _OrderDetailBody({required this.order, this.justPlaced = false});
 
   String _shortId(String id) => id.length > 18 ? '${id.substring(0, 18)}…' : id;
 
@@ -94,6 +110,38 @@ class _OrderDetailBody extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
+        if (justPlaced) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.check_circle, color: AppColors.success, size: 28),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Thank you — order placed!',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      const SizedBox(height: 2),
+                      Text(
+                        "We'll notify you as your order is packed and shipped.",
+                        style: TextStyle(fontSize: 12.5, color: AppColors.grey.withValues(alpha: 0.9)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
         Container(
           padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
@@ -137,6 +185,10 @@ class _OrderDetailBody extends ConsumerWidget {
             ],
           ),
         ),
+        if (order.qxpressTrackingNo != null) ...[
+          const SizedBox(height: AppSpacing.lg),
+          _TrackingStatusCard(order: order),
+        ],
         const SizedBox(height: AppSpacing.lg),
         OrderStatusTimeline(status: order.status),
         const SizedBox(height: AppSpacing.lg),
@@ -256,12 +308,38 @@ class _OrderDetailBody extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        if (order.status == OrderStatus.pending || order.status == OrderStatus.paid) ...[
-          _CancelOrderButton(order: order),
-          const SizedBox(height: AppSpacing.lg),
+        if (justPlaced)
+          const _ContinueShoppingButton()
+        else ...[
+          if (order.status == OrderStatus.pending || order.status == OrderStatus.paid) ...[
+            _CancelOrderButton(order: order),
+            const SizedBox(height: AppSpacing.lg),
+          ],
+          _ReorderButton(order: order),
         ],
-        _ReorderButton(order: order),
       ],
+    );
+  }
+}
+
+/// Shown instead of Cancel/Reorder right after checkout — Reorder makes no
+/// sense for an order the customer just placed, and this is the clearest
+/// path back into the shop (no dead-end on the confirmation state).
+class _ContinueShoppingButton extends ConsumerWidget {
+  const _ContinueShoppingButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: () {
+          ref.read(customerTabIndexProvider.notifier).state = 0;
+          context.go('/');
+        },
+        icon: const Icon(Icons.storefront_outlined, size: 18),
+        label: const Text('Continue Shopping'),
+      ),
     );
   }
 }
@@ -448,6 +526,99 @@ class _ShareReceiptButton extends ConsumerWidget {
           }
         }
       },
+    );
+  }
+}
+
+/// Live carrier status pulled from 17TRACK (via `track-register` when the
+/// admin ships the order, kept fresh by `track-webhook` pushes, and
+/// refreshable on demand here with `track-status`).
+class _TrackingStatusCard extends ConsumerStatefulWidget {
+  final Order order;
+  const _TrackingStatusCard({required this.order});
+
+  @override
+  ConsumerState<_TrackingStatusCard> createState() => _TrackingStatusCardState();
+}
+
+class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
+  bool _refreshing = false;
+
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    try {
+      await DeliveryRepository().refreshTrackingStatus(widget.order.id);
+      ref.invalidate(orderByIdProvider(widget.order.id));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not refresh: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final order = widget.order;
+    final hasStatus = order.trackingStatus != null && order.trackingStatus!.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        boxShadow: AppShadows.card,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.redSoft,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            alignment: Alignment.center,
+            child: const Icon(Icons.track_changes, size: 18, color: AppColors.red),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(hasStatus ? order.trackingStatus! : 'Awaiting carrier update',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                if (order.trackingStatusDetail != null) ...[
+                  const SizedBox(height: 2),
+                  Text(order.trackingStatusDetail!,
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
+                ],
+                if (order.trackingUpdatedAt != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Updated ${DateFormat.yMMMd().add_jm().format(order.trackingUpdatedAt!)}',
+                    style: const TextStyle(fontSize: 11, color: AppColors.greySoft),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh tracking',
+            onPressed: _refreshing ? null : _refresh,
+            icon: _refreshing
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.red),
+                  )
+                : const Icon(Icons.refresh, size: 20, color: AppColors.grey),
+          ),
+        ],
+      ),
     );
   }
 }

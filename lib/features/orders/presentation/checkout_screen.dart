@@ -158,12 +158,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       await Stripe.instance.presentPaymentSheet();
 
       ref.read(cartProvider.notifier).clear();
-      ref.read(customerTabIndexProvider.notifier).state = 2;
-      if (mounted) {
+      // Land on the order itself (with a success banner) instead of
+      // dumping the customer back to the shop grid with only a toast —
+      // the order confirmation *is* the order detail screen, not a
+      // separate page, so there's nothing else to keep in sync.
+      if (mounted && pendingOrderId != null) {
+        context.go('/orders/$pendingOrderId?justPlaced=true');
+      } else if (mounted) {
+        ref.read(customerTabIndexProvider.notifier).state = 2;
         context.go('/');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment successful — order placed!')),
-        );
       }
     } on StripeException catch (e) {
       if (pendingOrderId != null) {

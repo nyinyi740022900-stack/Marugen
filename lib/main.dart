@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,9 +38,14 @@ Future<void> main() async {
     await Stripe.instance.applySettings();
   }
 
-  // Push notifications: no-op (logs and continues) until Firebase config
-  // files are added — see the doc comment on PushNotificationService.
-  await PushNotificationService.initialize();
+  // Push notifications: fire-and-forget, NOT awaited. Without a
+  // GoogleService-Info.plist / google-services.json in place, native FCM
+  // calls (getToken() in particular) can hang waiting on an APNs callback
+  // that never arrives instead of throwing — if this were awaited here, it
+  // would block main() from ever reaching runApp(), freezing the app on
+  // the launch screen forever. See the doc comment on
+  // PushNotificationService for the setup steps that make this fully live.
+  unawaited(PushNotificationService.initialize());
 
   runApp(const ProviderScope(child: MarugenApp()));
 }

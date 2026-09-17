@@ -50,15 +50,18 @@ class PushNotificationService {
   /// startup never crashes because push notifications aren't set up yet.
   static Future<void> initialize() async {
     try {
-      await Firebase.initializeApp();
+      // Hard timeouts on every native call below: without a real Firebase
+      // project configured, these have been observed to hang waiting on a
+      // native callback (e.g. APNs device-token registration) that never
+      // arrives, rather than throwing — a timeout turns that into the same
+      // "not available yet" outcome as a normal failure.
+      await Firebase.initializeApp().timeout(const Duration(seconds: 8));
       _initialized = true;
 
       final messaging = FirebaseMessaging.instance;
-      final settings = await messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
+      final settings = await messaging
+          .requestPermission(alert: true, badge: true, sound: true)
+          .timeout(const Duration(seconds: 8));
       developer.log(
         'Push permission status: ${settings.authorizationStatus}',
         name: 'PushNotificationService',
@@ -110,7 +113,8 @@ class PushNotificationService {
   static Future<void> registerTokenForCurrentUser() async {
     if (!_initialized) return;
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token =
+          await FirebaseMessaging.instance.getToken().timeout(const Duration(seconds: 8));
       if (token != null) await _saveTokenIfLoggedIn(token);
     } catch (e) {
       developer.log('Could not fetch FCM token: $e', name: 'PushNotificationService');

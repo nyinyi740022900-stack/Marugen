@@ -17,9 +17,34 @@ class ProductRepository {
       query = query.eq('category', category.name == 'fishFood' ? 'fish_food' : category.name);
     }
     final data = await query.order('created_at', ascending: false);
-    return (data as List)
+    final products = (data as List)
         .map((e) => Product.fromMap(e as Map<String, dynamic>))
         .toList();
+    return _withStats(products);
+  }
+
+  /// Attaches sold-count and review-aggregate stats (via the
+  /// `get_product_stats()` RPC — see migration 0013) to each product for
+  /// the shop grid's "N sold" / star-rating badges. Best-effort: if the
+  /// function isn't deployed yet, products just show with zero stats
+  /// instead of failing the whole list.
+  Future<List<Product>> _withStats(List<Product> products) async {
+    if (products.isEmpty) return products;
+    try {
+      final stats = await _client.rpc('get_product_stats') as List;
+      final byId = {for (final s in stats) s['product_id'] as String: s};
+      return products.map((p) {
+        final s = byId[p.id];
+        if (s == null) return p;
+        return p.withStats(
+          soldCount: s['sold_count'] as int? ?? 0,
+          avgRating: (s['avg_rating'] as num?)?.toDouble(),
+          reviewCount: s['review_count'] as int? ?? 0,
+        );
+      }).toList();
+    } catch (_) {
+      return products;
+    }
   }
 
   Future<Product?> fetchProductById(String id) async {

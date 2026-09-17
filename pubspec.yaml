@@ -28,6 +28,7 @@ dependencies:
   image_picker: ^1.1.2
   video_player: ^2.9.5
   chewie: ^1.11.1
+  youtube_player_iframe: ^5.2.1
 
   # Push notifications
   firebase_core: ^3.10.1

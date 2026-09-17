@@ -35,6 +35,12 @@ Future<void> main() async {
   await SupabaseService.init();
   if (Env.stripePublishableKey.isNotEmpty) {
     Stripe.publishableKey = Env.stripePublishableKey;
+    // Only takes effect once a real Apple Pay merchant ID is registered in
+    // the Apple Developer account (paid membership) and the Apple Pay
+    // capability + this same identifier are added in Xcode — until then
+    // Apple Pay just doesn't appear in the payment sheet, no crash either
+    // way.
+    Stripe.merchantIdentifier = 'merchant.com.marugen.marugenApp';
     await Stripe.instance.applySettings();
   }
 

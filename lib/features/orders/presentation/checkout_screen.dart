@@ -153,6 +153,22 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: intent['clientSecret'] as String,
           merchantDisplayName: 'Marugen Koi Farm',
+          // Required for PayNow (and any other redirect/voucher-based
+          // method) to bring the customer back into the app instead of
+          // stranding them in Safari — matches the `marugen` URL scheme
+          // registered in ios/Runner/Info.plist.
+          returnURL: 'marugen://stripe-redirect',
+          // Apple Pay only actually appears once a merchant ID is
+          // registered in the Apple Developer account and the matching
+          // capability + merchantIdentifier are added in Xcode (needs a
+          // paid Apple Developer Program membership) — safe to configure
+          // ahead of that, it simply won't show until then.
+          applePay: const PaymentSheetApplePay(merchantCountryCode: 'SG'),
+          googlePay: const PaymentSheetGooglePay(
+            merchantCountryCode: 'SG',
+            currencyCode: 'SGD',
+            testEnv: true,
+          ),
         ),
       );
       await Stripe.instance.presentPaymentSheet();

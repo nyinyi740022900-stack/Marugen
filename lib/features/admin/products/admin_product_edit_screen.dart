@@ -370,7 +370,7 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
               controller: _videoUrlCtrl,
               decoration: const InputDecoration(
                 labelText: 'Video URL (optional)',
-                hintText: 'https://example.com/video.mp4',
+                hintText: 'YouTube link, or a direct .mp4 URL',
               ),
               keyboardType: TextInputType.url,
             ),

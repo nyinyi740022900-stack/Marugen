@@ -10,6 +10,7 @@ import '../../features/wishlist/presentation/wishlist_providers.dart';
 import '../models/product.dart';
 import '../providers/settings_providers.dart';
 import '../utils/contact_launcher.dart';
+import '../utils/delivery_estimate.dart';
 import '../utils/price_format.dart';
 
 /// At or below this many units a card shows an "Only N left" tag. Kept
@@ -140,6 +141,12 @@ class ProductCard extends ConsumerWidget {
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, fontSize: 14, height: 1.2),
                     ),
+                    if (product.reviewCount > 0 ||
+                        product.soldCount > 0 ||
+                        product.hasVariants) ...[
+                      const SizedBox(height: 3),
+                      _StatsRow(product: product),
+                    ],
                     const SizedBox(height: 4),
                     Row(
                       children: [
@@ -158,6 +165,10 @@ class ProductCard extends ConsumerWidget {
                         _CardActionButtons(product: product, onOpenDetail: onTap),
                       ],
                     ),
+                    if (product.isPurchasable && !product.isOutOfStock) ...[
+                      const SizedBox(height: 3),
+                      const _DeliveryEstimateLabel(),
+                    ],
                   ],
                 ),
               ),
@@ -350,6 +361,84 @@ class _FavoriteButton extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// "★4.8 (191) · 500 sold" line, matching the marketplace-style social
+/// proof shoppers expect (Lazada/Shopee) — only shown when there's
+/// something real to say (see the call site's guard).
+class _StatsRow extends StatelessWidget {
+  final Product product;
+  const _StatsRow({required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = <String>[];
+    if (product.reviewCount > 0) {
+      parts.add('(${product.reviewCount})');
+    }
+    if (product.soldCount > 0) {
+      parts.add('${product.soldCount} sold');
+    }
+    if (product.hasVariants) {
+      parts.add('${product.variantCount} option${product.variantCount == 1 ? '' : 's'}');
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (product.avgRating != null) ...[
+          const Icon(Icons.star_rounded, size: 13, color: Color(0xFFFFA726)),
+          const SizedBox(width: 2),
+          Text(
+            product.avgRating!.toStringAsFixed(1),
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.grey),
+          ),
+        ],
+        if (parts.isNotEmpty) ...[
+          if (product.avgRating != null) const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              parts.join(' · '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: AppColors.grey),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Estimated delivery window computed from the shop's configured lead
+/// time (`settings.delivery_lead_days_min/max`, migration 0013).
+class _DeliveryEstimateLabel extends ConsumerWidget {
+  const _DeliveryEstimateLabel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settingsAsync = ref.watch(shopSettingsProvider);
+    final settings = settingsAsync.valueOrNull;
+    if (settings == null) return const SizedBox.shrink();
+    final label = formatDeliveryEstimate(
+      minDays: settings['delivery_lead_days_min'] as int? ?? 2,
+      maxDays: settings['delivery_lead_days_max'] as int? ?? 5,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.local_shipping_outlined, size: 12, color: AppColors.greySoft),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10.5, color: AppColors.greySoft),
+          ),
+        ),
+      ],
     );
   }
 }

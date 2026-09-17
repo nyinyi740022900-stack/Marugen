@@ -21,7 +21,7 @@ class PaymentRepository {
         'currency': currency,
         'fulfillment': fulfillment,
         'items': items,
-        if (shippingAddress != null) 'shipping_address': shippingAddress,
+        'shipping_address': ?shippingAddress,
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
       },
     );

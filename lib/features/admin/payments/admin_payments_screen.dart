@@ -88,15 +88,3 @@ class AdminPaymentsPane extends ConsumerWidget {
     );
   }
 }
-
-class AdminPaymentsScreen extends StatelessWidget {
-  const AdminPaymentsScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Payments')),
-      body: const AdminPaymentsPane(),
-    );
-  }
-}

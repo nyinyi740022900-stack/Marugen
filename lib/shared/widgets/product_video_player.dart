@@ -1,21 +1,78 @@
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../utils/youtube_utils.dart';
 
-/// Renders a video from a direct URL (`product.videoUrl`) with loading and
-/// error states that never crash the screen — a broken/unreachable link
-/// just falls back to a friendly placeholder.
-class ProductVideoPlayer extends StatefulWidget {
+/// Renders a video from `product.videoUrl` — a YouTube link (watch/
+/// youtu.be/shorts) gets the YouTube embed player; anything else is
+/// treated as a direct video file URL and played via video_player/chewie.
+/// Loading and error states never crash the screen — a broken/unreachable
+/// link just falls back to a friendly placeholder.
+class ProductVideoPlayer extends StatelessWidget {
   final String videoUrl;
   const ProductVideoPlayer({super.key, required this.videoUrl});
 
   @override
-  State<ProductVideoPlayer> createState() => _ProductVideoPlayerState();
+  Widget build(BuildContext context) {
+    final youtubeId = extractYoutubeId(videoUrl);
+    if (youtubeId != null) {
+      return _YoutubeVideoPlayer(videoId: youtubeId);
+    }
+    return _DirectFileVideoPlayer(videoUrl: videoUrl);
+  }
 }
 
-class _ProductVideoPlayerState extends State<ProductVideoPlayer> {
+class _YoutubeVideoPlayer extends StatefulWidget {
+  final String videoId;
+  const _YoutubeVideoPlayer({required this.videoId});
+
+  @override
+  State<_YoutubeVideoPlayer> createState() => _YoutubeVideoPlayerState();
+}
+
+class _YoutubeVideoPlayerState extends State<_YoutubeVideoPlayer> {
+  late final YoutubePlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = YoutubePlayerController.fromVideoId(
+      videoId: widget.videoId,
+      autoPlay: false,
+      params: const YoutubePlayerParams(showFullscreenButton: true),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: YoutubePlayer(controller: _controller),
+      ),
+    );
+  }
+}
+
+class _DirectFileVideoPlayer extends StatefulWidget {
+  final String videoUrl;
+  const _DirectFileVideoPlayer({required this.videoUrl});
+
+  @override
+  State<_DirectFileVideoPlayer> createState() => _DirectFileVideoPlayerState();
+}
+
+class _DirectFileVideoPlayerState extends State<_DirectFileVideoPlayer> {
   VideoPlayerController? _videoController;
   ChewieController? _chewieController;
   bool _error = false;

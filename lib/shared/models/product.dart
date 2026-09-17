@@ -113,6 +113,16 @@ class Product {
   final bool isSold;
   final List<ProductVariant> variants;
 
+  /// Units sold across all paid+ orders. Populated from
+  /// `get_product_stats()` when the repository requests stats; 0 otherwise
+  /// (e.g. the product-detail fetch, which doesn't need it).
+  final int soldCount;
+
+  /// Average of visible (non-hidden) review ratings, or null if there are
+  /// none yet. Same stats-request caveat as [soldCount].
+  final double? avgRating;
+  final int reviewCount;
+
   const Product({
     required this.id,
     required this.name,
@@ -126,6 +136,9 @@ class Product {
     this.fishDetails,
     this.isSold = false,
     this.variants = const [],
+    this.soldCount = 0,
+    this.avgRating,
+    this.reviewCount = 0,
   });
 
   bool get isLiveFish =>
@@ -165,6 +178,30 @@ class Product {
   bool get supportsQuickAdd =>
       !isLiveFish && isPurchasable && !hasVariants && !isOutOfStock;
 
+  /// Options a shopper picks from, for the "N options" grid label —
+  /// only meaningful when [hasVariants] is true.
+  int get variantCount => variants.length;
+
+  Product withStats({required int soldCount, double? avgRating, required int reviewCount}) {
+    return Product(
+      id: id,
+      name: name,
+      description: description,
+      category: category,
+      price: price,
+      showPrice: showPrice,
+      stockQuantity: stockQuantity,
+      imageUrls: imageUrls,
+      videoUrl: videoUrl,
+      fishDetails: fishDetails,
+      isSold: isSold,
+      variants: variants,
+      soldCount: soldCount,
+      avgRating: avgRating,
+      reviewCount: reviewCount,
+    );
+  }
+
   factory Product.fromMap(Map<String, dynamic> map) {
     final variants = (map['variants'] as List?)
             ?.map((e) => ProductVariant.fromMap(e as Map<String, dynamic>))
@@ -203,6 +240,9 @@ class Product {
       fishDetails: fishDetails,
       isSold: isSold,
       variants: variants,
+      soldCount: soldCount,
+      avgRating: avgRating,
+      reviewCount: reviewCount,
     );
   }
 }

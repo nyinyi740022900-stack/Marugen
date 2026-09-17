@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/contact_launcher.dart';
 import '../../../shared/utils/price_format.dart';
+import '../../../shared/widgets/fullscreen_image_gallery.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/product_video_player.dart';
 import '../../../shared/widgets/skeleton.dart';
@@ -29,6 +30,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
   ProductVariant? _selectedVariant;
   String? _selectedVariantForProductId;
   int _quantity = 1;
+  int _imagePage = 0;
 
   Future<void> _contactShop(Product product) async {
     final settings = await ref.read(shopSettingsProvider.future);
@@ -91,6 +93,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
             _selectedVariantForProductId = product.id;
             _selectedVariant = null;
             _quantity = 1;
+            _imagePage = 0;
           }
           final fish = product.fishDetails;
           final hasFishDetails = fish != null && fish.hasAnyDetail;
@@ -111,9 +114,17 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen> {
                           fit: StackFit.expand,
                           children: [
                             PageView(
+                              onPageChanged: (i) => setState(() => _imagePage = i),
                               children: [
                                 for (final url in product.imageUrls)
-                                  CachedNetworkImage(imageUrl: url, fit: BoxFit.cover),
+                                  GestureDetector(
+                                    onTap: () => FullscreenImageGallery.open(
+                                      context,
+                                      imageUrls: product.imageUrls,
+                                      initialIndex: _imagePage,
+                                    ),
+                                    child: CachedNetworkImage(imageUrl: url, fit: BoxFit.cover),
+                                  ),
                               ],
                             ),
                             // Scrim so the back/heart/chat icons stay legible
@@ -647,7 +658,7 @@ class _RelatedProductsRow extends ConsumerWidget {
                     color: AppColors.grey)),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
-              height: 220,
+              height: 260,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: related.length,

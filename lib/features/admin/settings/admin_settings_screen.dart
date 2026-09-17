@@ -18,6 +18,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
   final _gstCtrl = TextEditingController();
+  final _deliveryMinCtrl = TextEditingController();
+  final _deliveryMaxCtrl = TextEditingController();
   bool _gstIncluded = true;
   bool _showPriceDefault = true;
   bool _loading = true;
@@ -37,6 +39,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _gstCtrl.text = s['gst_percent']?.toString() ?? '9';
     _gstIncluded = s['gst_included_in_price'] as bool? ?? true;
     _showPriceDefault = s['show_price_default'] as bool? ?? true;
+    _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
+    _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
     if (mounted) setState(() => _loading = false);
   }
 
@@ -50,6 +54,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         'gst_percent': int.tryParse(_gstCtrl.text.trim()) ?? 9,
         'gst_included_in_price': _gstIncluded,
         'show_price_default': _showPriceDefault,
+        'delivery_lead_days_min': int.tryParse(_deliveryMinCtrl.text.trim()) ?? 2,
+        'delivery_lead_days_max': int.tryParse(_deliveryMaxCtrl.text.trim()) ?? 5,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
@@ -101,6 +107,33 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             subtitle: const Text('Can still be overridden per product'),
             value: _showPriceDefault,
             onChanged: (v) => setState(() => _showPriceDefault = v),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('DELIVERY'),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _deliveryMinCtrl,
+                  decoration: const InputDecoration(labelText: 'Min days'),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  controller: _deliveryMaxCtrl,
+                  decoration: const InputDecoration(labelText: 'Max days'),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            'Shown on shop cards as an estimated delivery date range',
+            style: TextStyle(fontSize: 12, color: AppColors.grey),
           ),
           const SizedBox(height: AppSpacing.xl),
           ElevatedButton(

@@ -88,6 +88,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => OrderDetailScreen(
           orderId: state.pathParameters['id']!,
           order: state.extra as Order?,
+          justPlaced: state.uri.queryParameters['justPlaced'] == 'true',
         ),
       ),
       GoRoute(path: '/admin', builder: (_, _) => const AdminShell()),

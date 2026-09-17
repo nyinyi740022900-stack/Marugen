@@ -67,6 +67,15 @@ class Order {
   final String? promoCode;
   final double? discountAmount;
 
+  /// Coarse status from 17TRACK (e.g. InTransit/OutForDelivery/Delivered),
+  /// null until [qxpressTrackingNo] has been registered with `track-register`.
+  final String? trackingStatus;
+
+  /// Latest human-readable tracking event text from the carrier.
+  final String? trackingStatusDetail;
+  final DateTime? trackingUpdatedAt;
+  final bool trackingRegistered;
+
   const Order({
     required this.id,
     required this.userId,
@@ -79,6 +88,10 @@ class Order {
     this.shippingAddress,
     this.promoCode,
     this.discountAmount,
+    this.trackingStatus,
+    this.trackingStatusDetail,
+    this.trackingUpdatedAt,
+    this.trackingRegistered = false,
   });
 
   factory Order.fromMap(Map<String, dynamic> map) {
@@ -97,6 +110,12 @@ class Order {
       shippingAddress: (map['shipping_address'] as Map?)?.cast<String, dynamic>(),
       promoCode: map['promo_code'] as String?,
       discountAmount: (map['discount_amount'] as num?)?.toDouble(),
+      trackingStatus: map['tracking_status'] as String?,
+      trackingStatusDetail: map['tracking_status_detail'] as String?,
+      trackingUpdatedAt: map['tracking_updated_at'] != null
+          ? DateTime.tryParse(map['tracking_updated_at'] as String)
+          : null,
+      trackingRegistered: map['tracking_registered'] as bool? ?? false,
     );
   }
 }

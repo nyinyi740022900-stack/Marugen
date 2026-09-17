@@ -158,12 +158,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           // stranding them in Safari — matches the `marugen` URL scheme
           // registered in ios/Runner/Info.plist.
           returnURL: 'marugen://stripe-redirect',
-          // Apple Pay only actually appears once a merchant ID is
-          // registered in the Apple Developer account and the matching
-          // capability + merchantIdentifier are added in Xcode (needs a
-          // paid Apple Developer Program membership) — safe to configure
-          // ahead of that, it simply won't show until then.
-          applePay: const PaymentSheetApplePay(merchantCountryCode: 'SG'),
+          // Apple Pay is deliberately left out: without a real merchant ID
+          // (needs a paid Apple Developer Program membership) and the
+          // matching Xcode entitlement, configuring `applePay:` here was
+          // observed to crash the app when the sheet opens rather than
+          // just hiding the button. Re-add once that account/entitlement
+          // exists. Google Pay is Android-only — harmless to leave on here,
+          // it's simply ignored on iOS.
           googlePay: const PaymentSheetGooglePay(
             merchantCountryCode: 'SG',
             currencyCode: 'SGD',

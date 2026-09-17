@@ -35,12 +35,13 @@ Future<void> main() async {
   await SupabaseService.init();
   if (Env.stripePublishableKey.isNotEmpty) {
     Stripe.publishableKey = Env.stripePublishableKey;
-    // Only takes effect once a real Apple Pay merchant ID is registered in
-    // the Apple Developer account (paid membership) and the Apple Pay
-    // capability + this same identifier are added in Xcode — until then
-    // Apple Pay just doesn't appear in the payment sheet, no crash either
-    // way.
-    Stripe.merchantIdentifier = 'merchant.com.marugen.marugenApp';
+    // Apple Pay is intentionally NOT configured here: it needs a real
+    // merchant ID registered on a paid Apple Developer Program membership
+    // plus the Apple Pay capability + entitlement added in Xcode. Without
+    // that entitlement present in the app bundle, configuring Apple Pay in
+    // the payment sheet (`applePay:` param, checkout_screen.dart) was
+    // observed to crash the app on launch of the sheet rather than just
+    // hiding the button — so leave both out until a paid account exists.
     await Stripe.instance.applySettings();
   }
 

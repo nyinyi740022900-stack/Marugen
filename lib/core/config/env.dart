@@ -20,6 +20,16 @@ class Env {
   static String get googleIosClientId =>
       dotenv.env['GOOGLE_IOS_CLIENT_ID'] ?? '';
 
+  /// Apple Pay merchant identifier (Apple Developer → Identifiers → Merchant
+  /// IDs), e.g. `merchant.com.marugen.marugenApp`. Must also be set as
+  /// `APPLE_MERCHANT_ID` in `ios/Flutter/Secrets.xcconfig` so it reaches
+  /// `Runner.entitlements`. Leave blank to disable Apple Pay.
+  static String get appleMerchantId =>
+      dotenv.env['APPLE_MERCHANT_ID'] ?? '';
+
+  static bool get isStripeTestMode =>
+      stripePublishableKey.startsWith('pk_test_');
+
   static bool get isConfigured =>
       supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 }

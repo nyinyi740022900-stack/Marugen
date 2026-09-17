@@ -33,6 +33,14 @@ Future<void> main() async {
   await SupabaseService.init();
   if (Env.stripePublishableKey.isNotEmpty) {
     Stripe.publishableKey = Env.stripePublishableKey;
+    if (Env.appleMerchantId.isNotEmpty) {
+      Stripe.merchantIdentifier = Env.appleMerchantId;
+    }
+    // Reuses the `marugen://` scheme already registered for Supabase auth
+    // deep links, so redirect-based payment methods (e.g. PayNow, GrabPay)
+    // can bring the user back into the app instead of stranding them in
+    // the browser they were redirected to.
+    Stripe.urlScheme = 'marugen';
     await Stripe.instance.applySettings();
   }
 

@@ -1,8 +1,11 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Address;
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/env.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
 import '../../../shared/models/promo_code.dart';
@@ -153,6 +156,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: intent['clientSecret'] as String,
           merchantDisplayName: 'Marugen Koi Farm',
+          applePay: Platform.isIOS && Env.appleMerchantId.isNotEmpty
+              ? const PaymentSheetApplePay(merchantCountryCode: 'SG')
+              : null,
+          googlePay: Platform.isAndroid
+              ? PaymentSheetGooglePay(
+                  merchantCountryCode: 'SG',
+                  testEnv: Env.isStripeTestMode,
+                )
+              : null,
         ),
       );
       await Stripe.instance.presentPaymentSheet();

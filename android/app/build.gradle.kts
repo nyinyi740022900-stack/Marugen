@@ -58,6 +58,19 @@ android {
             }
         }
     }
+
+    // flutter_stripe's Android SDK transitively depends on
+    // stripe-android-issuing-push-provisioning (physical card issuing,
+    // unused by this app), which pulls in
+    // com.google.android.gms:play-services-tapandpay — an artifact not
+    // published on public Maven. Gradle's release lint pass fails trying to
+    // resolve it. Lint is a code-quality check, not required to build a
+    // working APK, so skip it on release rather than depending on a
+    // private/restricted Google artifact.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 kotlin {

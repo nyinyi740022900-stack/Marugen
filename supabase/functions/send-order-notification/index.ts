@@ -84,6 +84,11 @@ const EVENT_COPY: Record<string, { title: string; body: (orderShort: string) => 
   },
 };
 
+const ADMIN_NEW_ORDER_COPY = {
+  title: 'New order',
+  body: (id: string) => `New order #${id} just came in — payment received.`,
+};
+
 /// Gets an OAuth access token for the FCM HTTP v1 API from a Firebase
 /// service account, then sends one notification to one device token.
 /// Returns the FCM response status so callers can log/aggregate failures
@@ -188,29 +193,62 @@ Deno.serve(async (req) => {
     }
     const orderShort = (order.id as string).slice(0, 8);
 
-    // Resolve the recipient user id(s) for this request's audience —
-    // independent of whether they have an fcm_token, since the in-app
-    // inbox row below doesn't need one.
-    let recipientIds: string[];
+    // Resolve the audience "targets" for this request — each with its own
+    // recipient ids, title and body, and its own inbox `type`. Independent
+    // of whether recipients have an fcm_token, since the in-app inbox row
+    // below doesn't need one.
+    //
+    // A `paid` order gets two targets: the customer ("Order confirmed")
+    // and, separately, every admin ("New order" — so staff/owner see a new
+    // paid order land without watching the dashboard). Every other
+    // status/event has exactly one target, as before.
+    type Target = { recipientIds: string[]; title: string; body: string; type: string };
+    const targets: Target[] = [];
+
     if (eventCopy) {
       // Admin alert — every staff/owner.
       const { data: admins } = await admin.from('profiles').select('id').in('role', [
         'staff',
         'owner',
       ]);
-      recipientIds = (admins ?? []).map((p) => p.id as string);
+      targets.push({
+        recipientIds: (admins ?? []).map((p) => p.id as string),
+        title: eventCopy.title,
+        body: eventCopy.body(orderShort),
+        type: 'admin_alert',
+      });
     } else {
       // Customer notification — the order's own owner.
-      recipientIds = [order.user_id as string];
+      targets.push({
+        recipientIds: [order.user_id as string],
+        title: statusCopy!.title,
+        body: statusCopy!.body(orderShort),
+        type: 'order_status',
+      });
+
+      if (status === 'paid') {
+        const { data: admins } = await admin.from('profiles').select('id').in('role', [
+          'staff',
+          'owner',
+        ]);
+        const adminIds = (admins ?? []).map((p) => p.id as string);
+        if (adminIds.length > 0) {
+          targets.push({
+            recipientIds: adminIds,
+            title: ADMIN_NEW_ORDER_COPY.title,
+            body: ADMIN_NEW_ORDER_COPY.body(orderShort),
+            type: 'admin_alert',
+          });
+        }
+      }
     }
 
-    if (recipientIds.length === 0) {
+    const nonEmptyTargets = targets.filter((t) => t.recipientIds.length > 0);
+    if (nonEmptyTargets.length === 0) {
       return jsonResponse({ skipped: true, reason: 'No recipients for this audience' });
     }
 
-    const copy = (statusCopy ?? eventCopy)!;
-    const title = copy.title;
-    const body = copy.body(orderShort);
+    const notificationKey = status ?? event!;
 
     // Always write the in-app inbox row — this is what makes the
     // Notifications screen work with zero Firebase setup. Best-effort:
@@ -223,18 +261,21 @@ Deno.serve(async (req) => {
     // second push — see 0029_notification_idempotency.sql. PostgREST's
     // ON CONFLICT DO NOTHING only returns rows that were actually
     // inserted, so `inserted` below is exactly "genuinely new this call".
-    const notificationKey = status ?? event!;
+    // Customer and admin rows share the same key but never the same
+    // user_id, so the two targets never collide on the conflict target.
     const { data: inserted, error: insertError } = await admin
       .from('notifications')
       .upsert(
-        recipientIds.map((userId) => ({
-          user_id: userId,
-          title,
-          body,
-          order_id: order.id,
-          type: eventCopy ? 'admin_alert' : 'order_status',
-          key: notificationKey,
-        })),
+        nonEmptyTargets.flatMap((t) =>
+          t.recipientIds.map((userId) => ({
+            user_id: userId,
+            title: t.title,
+            body: t.body,
+            order_id: order.id,
+            type: t.type,
+            key: notificationKey,
+          })),
+        ),
         { onConflict: 'order_id,user_id,key', ignoreDuplicates: true },
       )
       .select('user_id');
@@ -266,9 +307,22 @@ Deno.serve(async (req) => {
       .in('id', [...newlyNotifiedIds])
       .not('fcm_token', 'is', null)
       .eq('notifications_enabled', true);
+    // Map each newly-notified recipient back to the title/body of the
+    // target that included them, so admins get "New order" and the
+    // customer gets "Order confirmed" even within the same request.
+    const copyByUserId = new Map<string, { title: string; body: string }>();
+    for (const t of nonEmptyTargets) {
+      for (const userId of t.recipientIds) {
+        if (!copyByUserId.has(userId)) copyByUserId.set(userId, { title: t.title, body: t.body });
+      }
+    }
     const tokenOwners = (recipients ?? [])
       .filter((p) => p.fcm_token)
-      .map((p) => ({ userId: p.id as string, token: p.fcm_token as string }));
+      .map((p) => ({
+        userId: p.id as string,
+        token: p.fcm_token as string,
+        copy: copyByUserId.get(p.id as string)!,
+      }));
     const tokens = tokenOwners.map((t) => t.token);
 
     if (tokens.length === 0) {
@@ -297,10 +351,9 @@ Deno.serve(async (req) => {
     const data = { order_id: order.id, ...(status ? { status } : {}), ...(event ? { event } : {}) };
     const results = await Promise.all(
       tokenOwners.map((t) =>
-        sendPush(serviceAccount, accessToken.token!, t.token, title, body, data).then((r) => ({
-          ...r,
-          userId: t.userId,
-        })),
+        sendPush(serviceAccount, accessToken.token!, t.token, t.copy.title, t.copy.body, data).then(
+          (r) => ({ ...r, userId: t.userId }),
+        ),
       ),
     );
     const sentCount = results.filter((r) => r.ok).length;

@@ -256,9 +256,7 @@ class _CardActionButtons extends ConsumerWidget {
         onTap: () {
           final result = ref.read(cartProvider.notifier).add(product);
           if (result == CartAddResult.outOfStock) {
-            ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(SnackBar(content: Text(cartAddMessage(result))));
+            showCartSnackBar(context, result);
             return;
           }
           // alreadyInCart or added → go checkout with that fish in cart
@@ -332,19 +330,7 @@ class _QuickAddButton extends ConsumerWidget {
             return;
           }
           final result = ref.read(cartProvider.notifier).add(product);
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(SnackBar(
-              content: Text(cartAddMessage(result)),
-              duration: const Duration(seconds: 2),
-              action: result == CartAddResult.added
-                  ? SnackBarAction(
-                      label: 'View Cart',
-                      textColor: AppColors.white,
-                      onPressed: () => context.push('/cart'),
-                    )
-                  : null,
-            ));
+          showCartSnackBar(context, result);
         },
         child: const Padding(
           padding: EdgeInsets.all(6),

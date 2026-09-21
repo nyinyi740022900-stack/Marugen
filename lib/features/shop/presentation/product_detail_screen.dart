@@ -140,21 +140,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   }
 
   void _showCartMessage(CartAddResult result) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(cartAddMessage(result)),
-          duration: const Duration(seconds: 2),
-          action: result == CartAddResult.added
-              ? SnackBarAction(
-                  label: 'View Cart',
-                  textColor: AppColors.white,
-                  onPressed: () => context.push('/cart'),
-                )
-              : null,
-        ),
-      );
+    showCartSnackBar(context, result);
   }
 
   /// Buy Now — an isolated single-item purchase, same as Amazon/Shopee/

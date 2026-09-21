@@ -265,7 +265,7 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
     await Clipboard.setData(ClipboardData(text: widget.order.displayNumber));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
+      ..clearSnackBars()
       ..showSnackBar(const SnackBar(content: Text('Order number copied')));
   }
 

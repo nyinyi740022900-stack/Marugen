@@ -353,7 +353,7 @@ class _AvailabilityToggle extends StatelessWidget {
     refreshAdminProducts(ref);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
+      ..clearSnackBars()
       ..showSnackBar(
         SnackBar(
           content: Text(

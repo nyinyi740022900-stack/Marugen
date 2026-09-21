@@ -172,9 +172,18 @@ class _VarietiesTab extends ConsumerWidget {
                                     context,
                                     imageUrls: galleryUrls,
                                   ),
+                                  // BoxFit.contain (not .cover) so the whole
+                                  // photo is visible up-front — previously
+                                  // .cover cropped it, and seeing the full
+                                  // image meant tapping into the fullscreen
+                                  // gallery. Background fills the letterbox
+                                  // when the photo isn't exactly 4:3.
                                   child: AspectRatio(
                                     aspectRatio: 4 / 3,
-                                    child: _networkImage(v.imageUrl!, fit: BoxFit.cover),
+                                    child: ColoredBox(
+                                      color: AppColors.offWhite,
+                                      child: _networkImage(v.imageUrl!, fit: BoxFit.contain),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -357,10 +366,23 @@ class _ArticlesTab extends ConsumerWidget {
                             if (a.coverImageUrl != null) ...[
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(AppRadius.md),
-                                child: SizedBox(
-                                  height: 160,
-                                  width: double.infinity,
-                                  child: _networkImage(a.coverImageUrl!, fit: BoxFit.cover),
+                                // BoxFit.contain (not .cover) so the whole
+                                // cover photo is visible up-front, plus a
+                                // tap-to-fullscreen gesture (matching the
+                                // variety image above) for a closer look.
+                                child: GestureDetector(
+                                  onTap: () => FullscreenImageGallery.open(
+                                    context,
+                                    imageUrls: [a.coverImageUrl!],
+                                  ),
+                                  child: SizedBox(
+                                    height: 160,
+                                    width: double.infinity,
+                                    child: ColoredBox(
+                                      color: AppColors.offWhite,
+                                      child: _networkImage(a.coverImageUrl!, fit: BoxFit.contain),
+                                    ),
+                                  ),
                                 ),
                               ),
                               const SizedBox(height: AppSpacing.md),

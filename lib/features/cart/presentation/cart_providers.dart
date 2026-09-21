@@ -1,8 +1,11 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../shop/presentation/shop_providers.dart';
@@ -34,6 +37,43 @@ String cartAddMessage(CartAddResult result) {
     case CartAddResult.outOfStock:
       return 'Sorry, this item is out of stock';
   }
+}
+
+/// Shows the standard "Added to cart" (or stock-limit/already-in-cart/
+/// out-of-stock) snackbar — shared by the product card quick-add, the
+/// live-fish round button, and the detail screen's Add to Cart, so all
+/// three dismiss the same way.
+///
+/// Belt-and-suspenders auto-dismiss: `SnackBar.duration` alone should be
+/// enough, but a customer reported one staying on screen until manually
+/// swiped away. Rather than leave that unresolved, this also grabs the
+/// controller `showSnackBar` returns and explicitly `.close()`s it after
+/// the same duration — a no-op if the bar already dismissed itself, a
+/// real fix if something (a rebuild, another snackbar queued mid-flight)
+/// was ever eating the automatic timer.
+void showCartSnackBar(BuildContext context, CartAddResult result) {
+  const duration = Duration(seconds: 2);
+  final messenger = ScaffoldMessenger.of(context)..clearSnackBars();
+  final controller = messenger.showSnackBar(
+    SnackBar(
+      content: Text(cartAddMessage(result)),
+      duration: duration,
+      action: result == CartAddResult.added
+          ? SnackBarAction(
+              label: 'View Cart',
+              textColor: AppColors.white,
+              onPressed: () => context.push('/cart'),
+            )
+          : null,
+    ),
+  );
+  Future.delayed(duration, () {
+    try {
+      controller.close();
+    } catch (_) {
+      // Already closed/disposed — nothing to do.
+    }
+  });
 }
 
 class CartNotifier extends Notifier<List<CartItem>> {

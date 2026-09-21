@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
@@ -22,11 +26,23 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _deliveryMinCtrl = TextEditingController();
   final _deliveryMaxCtrl = TextEditingController();
   final _lowStockThresholdCtrl = TextEditingController();
+  final _bannerLinkCtrl = TextEditingController();
   bool _gstIncluded = true;
   bool _showPriceDefault = true;
   bool _loading = true;
   bool _saving = false;
   bool _signingOut = false;
+  XFile? _pickedBannerImage;
+  String? _existingBannerImageUrl;
+  bool _bannerActive = false;
+
+  Future<void> _pickBannerImage() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
+    if (picked != null) setState(() => _pickedBannerImage = picked);
+  }
 
   Future<void> _confirmSignOut() async {
     final confirmed = await confirmLogout(context);
@@ -61,12 +77,29 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
     _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
     _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
+    _existingBannerImageUrl = s['promo_banner_image_url']?.toString();
+    _bannerLinkCtrl.text = s['promo_banner_link_url']?.toString() ?? '';
+    _bannerActive = s['promo_banner_active'] as bool? ?? false;
     if (mounted) setState(() => _loading = false);
   }
 
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
+      var bannerImageUrl = _existingBannerImageUrl;
+      final picked = _pickedBannerImage;
+      if (picked != null) {
+        final bytes = await picked.readAsBytes();
+        final ext = picked.name.split('.').last;
+        bannerImageUrl = await _repo.uploadBannerImage(bytes, ext);
+        // Record the upload immediately, before the settings write below
+        // can fail — otherwise a network error on updateSettings() would
+        // leave _pickedBannerImage still set, and retrying Save would
+        // upload the same picked file a second time under a new path,
+        // orphaning the first upload in storage.
+        _existingBannerImageUrl = bannerImageUrl;
+        _pickedBannerImage = null;
+      }
       await _repo.updateSettings({
         'shop_name': _shopNameCtrl.text.trim(),
         'shop_phone': _phoneCtrl.text.trim(),
@@ -78,9 +111,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         'delivery_lead_days_max': int.tryParse(_deliveryMaxCtrl.text.trim()) ?? 5,
         'low_stock_threshold':
             int.tryParse(_lowStockThresholdCtrl.text.trim()) ?? 5,
+        'promo_banner_image_url': bannerImageUrl,
+        'promo_banner_link_url': _bannerLinkCtrl.text.trim().isEmpty
+            ? null
+            : _bannerLinkCtrl.text.trim(),
+        'promo_banner_active': _bannerActive,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(content: Text('Settings saved')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -170,6 +210,62 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             'Products at or below this quantity appear in the dashboard\'s '
             'Low Stock list',
             style: TextStyle(fontSize: 12, color: AppColors.grey),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('PROMOTION BANNER'),
+          const SizedBox(height: AppSpacing.sm),
+          const Text(
+            'Shown as a popup once per device per day when a customer '
+            'opens the app.',
+            style: TextStyle(fontSize: 12, color: AppColors.grey),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          GestureDetector(
+            onTap: _pickBannerImage,
+            child: Container(
+              height: 140,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: AppColors.offWhite,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: AppColors.lightGrey),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: _pickedBannerImage != null
+                  ? Image.file(File(_pickedBannerImage!.path), fit: BoxFit.cover)
+                  : (_existingBannerImageUrl != null &&
+                          _existingBannerImageUrl!.isNotEmpty)
+                      ? CachedNetworkImage(
+                          imageUrl: _existingBannerImageUrl!,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, _, _) => const Icon(
+                            Icons.image_not_supported_outlined,
+                            color: AppColors.greySoft,
+                          ),
+                        )
+                      : const Center(
+                          child: Icon(
+                            Icons.add_photo_alternate_outlined,
+                            color: AppColors.grey,
+                            size: 32,
+                          ),
+                        ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _bannerLinkCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Link URL (optional)',
+              hintText: 'Opened when a customer taps the banner',
+            ),
+            keyboardType: TextInputType.url,
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Show banner when app opens'),
+            value: _bannerActive,
+            onChanged: (v) => setState(() => _bannerActive = v),
           ),
           const SizedBox(height: AppSpacing.xl),
           ElevatedButton(

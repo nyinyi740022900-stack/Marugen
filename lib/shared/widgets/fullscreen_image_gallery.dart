@@ -84,7 +84,7 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _CircleIconButton(
+                  CircleIconButton(
                     icon: Icons.close,
                     tooltip: 'Close',
                     onTap: () => Navigator.of(context).pop(),
@@ -114,18 +114,29 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery> {
   }
 }
 
-class _CircleIconButton extends StatelessWidget {
+/// Small circular icon button (translucent black, white icon) used for
+/// "close" affordances floating over photo content — the fullscreen
+/// gallery's close button and the promo banner popup's dismiss button
+/// (see promo_banner_dialog.dart) both use this.
+class CircleIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String tooltip;
-  const _CircleIconButton({required this.icon, required this.onTap, required this.tooltip});
+  final Color? backgroundColor;
+  const CircleIconButton({
+    super.key,
+    required this.icon,
+    required this.onTap,
+    required this.tooltip,
+    this.backgroundColor,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: AppColors.black.withValues(alpha: 0.55),
+        color: backgroundColor ?? AppColors.black.withValues(alpha: 0.55),
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(

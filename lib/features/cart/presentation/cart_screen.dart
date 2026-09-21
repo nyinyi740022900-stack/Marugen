@@ -33,7 +33,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
               ? '${result.removed} item(s) removed — no longer available'
               : '${result.adjusted} item(s) adjusted for stock/price changes';
       ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
+        ..clearSnackBars()
         ..showSnackBar(SnackBar(content: Text(message)));
     });
   }

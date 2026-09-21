@@ -30,3 +30,13 @@ final currentAppUserProvider = FutureProvider<AppUser?>((ref) async {
 final isLoggedInProvider = Provider<bool>((ref) {
   return ref.watch(authStateProvider).valueOrNull?.session != null;
 });
+
+/// The signed-in user's id, or null when signed out — a plain [Provider]
+/// (not the raw [authStateProvider] stream) so dependents only rebuild
+/// when the *actual user* changes, not on every token refresh. Used by
+/// [cartProvider] to scope the persisted cart per account so a device
+/// shared by two customers can't leak one person's cart into the other's
+/// session (see cart_providers.dart).
+final currentUserIdProvider = Provider<String?>((ref) {
+  return ref.watch(authStateProvider).valueOrNull?.session?.user.id;
+});

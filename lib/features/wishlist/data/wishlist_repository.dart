@@ -6,12 +6,22 @@ import '../../../shared/models/wishlist_item.dart';
 class WishlistRepository {
   final _client = SupabaseService.client;
 
+  /// Same variant/size-stock embed as `ProductRepository._withVariants` —
+  /// without it, a variant-based product (e.g. weight/size koi food) came
+  /// back with `variants: []`, which made `Product.hasVariants` false and
+  /// `isOutOfStock` fall back to the unused base `stock_quantity` column
+  /// (0 for these products), showing a real in-stock item as sold out on
+  /// the Wishlist screen specifically (the shop grid never had this bug
+  /// since `fetchProducts()` already embeds this).
+  static const _productWithVariants =
+      'product:products(*, variants:product_variants(*, size_stocks:product_variant_size_stocks(*)))';
+
   Future<List<WishlistItem>> fetchMyWishlist() async {
     final user = SupabaseService.currentUser;
     if (user == null) return [];
     final data = await _client
         .from('wishlist_items')
-        .select('*, product:products(*)')
+        .select('*, $_productWithVariants')
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
     return (data as List)

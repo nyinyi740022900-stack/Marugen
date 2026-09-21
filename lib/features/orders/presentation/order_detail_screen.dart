@@ -1,19 +1,25 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/models/app_user.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/models/product.dart';
-import '../../../shared/providers/settings_providers.dart';
+import '../../../shared/utils/price_format.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../admin/delivery/delivery_repository.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
+import '../../reviews/presentation/review_providers.dart';
+import '../../reviews/presentation/reviews_section.dart' show openReviewForm;
 import '../../shop/presentation/shell_tab_provider.dart';
 import '../../shop/presentation/shop_providers.dart';
-import '../utils/receipt_generator.dart';
+import '../utils/invoice_pdf.dart';
 import 'order_status_timeline.dart';
 import 'orders_providers.dart';
 
@@ -60,7 +66,13 @@ class OrderDetailScreen extends ConsumerWidget {
       body: orderAsync.when(
         data: (o) {
           if (o == null) {
-            return const Center(child: Text('Order not found.'));
+            return EmptyState(
+              icon: Icons.receipt_long_outlined,
+              title: 'Order not found',
+              subtitle: "It may have been removed, or you don't have access to it.",
+              actionLabel: 'Back to Orders',
+              onAction: () => context.canPop() ? context.pop() : context.go('/'),
+            );
           }
           return _OrderDetailBody(order: o, justPlaced: justPlaced);
         },
@@ -72,7 +84,7 @@ class OrderDetailScreen extends ConsumerWidget {
             ListRowSkeleton(),
           ],
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(orderByIdProvider(orderId))),
       ),
     );
   }
@@ -88,7 +100,7 @@ class _OrderDetailScaffold extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.offWhite,
       appBar: AppBar(
-        title: Text(justPlaced ? 'Order Placed' : 'Order #${order.id.substring(0, 8)}'),
+        title: Text(justPlaced ? 'Order Placed' : 'Order #${order.displayNumber}'),
         automaticallyImplyLeading: !justPlaced,
         actions: [_ShareReceiptButton(order: order)],
       ),
@@ -103,6 +115,21 @@ class _OrderDetailBody extends ConsumerWidget {
   const _OrderDetailBody({required this.order, this.justPlaced = false});
 
   String _shortId(String id) => id.length > 18 ? '${id.substring(0, 18)}…' : id;
+
+  void _copyAddress(BuildContext context, Map<String, dynamic> shipping) {
+    final text = [
+      shipping['recipient_name'],
+      shipping['phone'],
+      shipping['line1'],
+      shipping['line2'],
+      shipping['city'],
+      shipping['postal_code'],
+    ].whereType<String>().where((s) => s.isNotEmpty).join('\n');
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Address copied')),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -155,7 +182,7 @@ class _OrderDetailBody extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Order #${order.id.substring(0, 8)}',
+                  Text('Order #${order.displayNumber}',
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                   _StatusBadge(status: order.status),
                 ],
@@ -185,6 +212,24 @@ class _OrderDetailBody extends ConsumerWidget {
             ],
           ),
         ),
+        const SizedBox(height: AppSpacing.sm),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              try {
+                await shareReceipt(ref, order);
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text('Could not open invoice: $e')));
+                }
+              }
+            },
+            icon: const Icon(Icons.description_outlined, size: 17),
+            label: const Text('View / Download Invoice'),
+          ),
+        ),
         if (order.qxpressTrackingNo != null) ...[
           const SizedBox(height: AppSpacing.lg),
           _TrackingStatusCard(order: order),
@@ -193,9 +238,37 @@ class _OrderDetailBody extends ConsumerWidget {
         OrderStatusTimeline(status: order.status),
         const SizedBox(height: AppSpacing.lg),
         if (shipping != null) ...[
-          const Text('SHIPPING ADDRESS',
-              style: TextStyle(
-                  fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: 0.8, color: AppColors.grey)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('SHIPPING ADDRESS',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 0.8,
+                      color: AppColors.grey)),
+              // Admin-only: staff copying an address to paste into a
+              // courier's own app/label almost always needs it as one
+              // block of text, not retyped field-by-field from the screen.
+              if (ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ?? false)
+                InkWell(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  onTap: () => _copyAddress(context, shipping),
+                  child: const Padding(
+                    padding: EdgeInsets.all(4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.copy_rounded, size: 13, color: AppColors.greySoft),
+                        SizedBox(width: 4),
+                        Text('Copy',
+                            style: TextStyle(fontSize: 11.5, color: AppColors.greySoft)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.sm),
           Container(
             width: double.infinity,
@@ -242,35 +315,20 @@ class _OrderDetailBody extends ConsumerWidget {
           child: Column(
             children: [
               for (final item in order.items)
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg, vertical: AppSpacing.md),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(item.productName,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                            if (item.variantLabel != null && item.variantLabel!.isNotEmpty) ...[
-                              const SizedBox(height: 2),
-                              Text(item.variantLabel!,
-                                  style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
-                            ],
-                            const SizedBox(height: 2),
-                            Text('Qty ${item.quantity} × S\$${item.unitPrice.toStringAsFixed(2)}',
-                                style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text('S\$${item.subtotal.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    ],
-                  ),
+                _OrderItemTile(
+                  item: item,
+                  // Gated on the *order's own owner*, not just "delivered"
+                  // — this same screen is also how an admin opens a
+                  // customer's order from admin_orders_screen.dart, and
+                  // without this check they'd see (and could tap) a
+                  // "Write a review" prompt on somebody else's purchase,
+                  // which is confusing and not what it's for. A review
+                  // still only ever posts as whoever is logged in
+                  // (upsertMyReview / RLS both key off auth.uid()), but
+                  // the prompt itself shouldn't even appear unless this
+                  // is genuinely the viewer's own order.
+                  canReview: order.status == OrderStatus.delivered &&
+                      order.userId == ref.watch(currentAppUserProvider).valueOrNull?.id,
                 ),
               const Divider(height: 1, indent: 16, endIndent: 16),
               if (order.discountAmount != null && order.discountAmount! > 0)
@@ -286,7 +344,7 @@ class _OrderDetailBody extends ConsumerWidget {
                             : 'Promo discount',
                         style: const TextStyle(fontSize: 12.5, color: AppColors.grey),
                       ),
-                      Text('-S\$${order.discountAmount!.toStringAsFixed(2)}',
+                      Text('-${formatPrice(order.discountAmount!)}',
                           style: const TextStyle(fontSize: 12.5, color: AppColors.red)),
                     ],
                   ),
@@ -298,7 +356,7 @@ class _OrderDetailBody extends ConsumerWidget {
                   children: [
                     const Text('Total',
                         style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.grey)),
-                    Text('S\$${order.total.toStringAsFixed(2)}',
+                    Text(formatPrice(order.total),
                         style: const TextStyle(
                             fontWeight: FontWeight.w700, color: AppColors.black, fontSize: 18)),
                   ],
@@ -308,16 +366,156 @@ class _OrderDetailBody extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        if (justPlaced)
-          const _ContinueShoppingButton()
-        else ...[
-          if (order.status == OrderStatus.pending || order.status == OrderStatus.paid) ...[
-            _CancelOrderButton(order: order),
-            const SizedBox(height: AppSpacing.lg),
-          ],
-          _ReorderButton(order: order),
-        ],
+        // Cancel/Reorder are shopper actions on their own order — an admin
+        // viewing any customer's order manages its lifecycle from the
+        // Orders status dropdown instead, not from these buttons.
+        Builder(builder: (context) {
+          final isAdmin =
+              ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ?? false;
+          if (isAdmin) return const SizedBox.shrink();
+          if (justPlaced) return const _ContinueShoppingButton();
+          return Column(
+            children: [
+              if (order.status == OrderStatus.pending || order.status == OrderStatus.paid) ...[
+                _CancelOrderButton(order: order),
+                const SizedBox(height: AppSpacing.lg),
+              ],
+              _ReorderButton(order: order),
+            ],
+          );
+        }),
       ],
+    );
+  }
+}
+
+/// One order line — bigger thumbnail and clearer name/option/qty layout
+/// than the previous compact row, plus (only once [canReview] — i.e. the
+/// order is `delivered`) a "Write a review"/"Edit your review" affordance
+/// so a customer doesn't have to navigate back to the product page to
+/// leave one. Reviews are per product+user (not per order — see
+/// review_repository.dart), so this reads the same
+/// `myReviewForProductProvider` the product page uses.
+class _OrderItemTile extends ConsumerWidget {
+  final OrderItem item;
+  final bool canReview;
+  const _OrderItemTile({required this.item, required this.canReview});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: SizedBox(
+                  width: 60,
+                  height: 60,
+                  child: item.imageUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: item.imageUrl!,
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) => Container(color: AppColors.offWhite),
+                          errorWidget: (_, _, _) => const ColoredBox(
+                            color: AppColors.offWhite,
+                            child: Icon(Icons.image_not_supported_outlined,
+                                size: 20, color: AppColors.greySoft),
+                          ),
+                        )
+                      : const ColoredBox(
+                          color: AppColors.offWhite,
+                          child: Icon(Icons.inventory_2_outlined,
+                              size: 20, color: AppColors.greySoft),
+                        ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.productName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                    if (item.optionLabel != null) ...[
+                      const SizedBox(height: 3),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.offWhite,
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                        ),
+                        child: Text(item.optionLabel!,
+                            style: const TextStyle(fontSize: 11.5, color: AppColors.grey)),
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    Text('Qty ${item.quantity} × ${formatPrice(item.unitPrice)}',
+                        style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(formatPrice(item.subtotal),
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            ],
+          ),
+          if (canReview) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Padding(
+              padding: const EdgeInsets.only(left: 72),
+              child: _ReviewAffordance(productId: item.productId),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewAffordance extends ConsumerWidget {
+  final String productId;
+  const _ReviewAffordance({required this.productId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final myReviewAsync = ref.watch(myReviewForProductProvider(productId));
+    return myReviewAsync.when(
+      data: (myReview) {
+        if (myReview == null) {
+          return OutlinedButton.icon(
+            onPressed: () => openReviewForm(context, ref, productId),
+            style: OutlinedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            ),
+            icon: const Icon(Icons.star_border, size: 15),
+            label: const Text('Write a review', style: TextStyle(fontSize: 12.5)),
+          );
+        }
+        return InkWell(
+          onTap: () => openReviewForm(context, ref, productId, existing: myReview),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 1; i <= 5; i++)
+                Icon(i <= myReview.rating ? Icons.star : Icons.star_border,
+                    size: 14, color: AppColors.warning),
+              const SizedBox(width: 6),
+              const Text('Edit your review',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.grey)),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
     );
   }
 }
@@ -373,8 +571,12 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
         skipped++;
         continue;
       }
-      if (product.isLiveFish && (product.isSold || product.stockQuantity <= 0)) {
-        // This exact fish is gone — can't reorder a unique animal.
+      if (product.isLiveFish &&
+          !product.hasVariants &&
+          (product.isSold || product.stockQuantity <= 0)) {
+        // This exact fish is gone — can't reorder a unique animal. A batch
+        // listing with fish options falls through to the per-variant stock
+        // check below instead (the base stock field doesn't apply to it).
         skipped++;
         continue;
       }
@@ -386,8 +588,22 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
           ? const <ProductVariant>[]
           : product.variants.where((v) => v.label == item.variantLabel);
       final variant = matchingVariants.isNotEmpty ? matchingVariants.first : null;
-      final result = cart.add(product,
-          quantity: product.isLiveFish ? 1 : item.quantity, variant: variant);
+      final size = item.sizeLabel != null &&
+              product.hasSizeOptions &&
+              product.sizeOptions.contains(item.sizeLabel)
+          ? item.sizeLabel
+          : null;
+      // Size-required products can't reorder without a valid size pick.
+      if (product.hasSizeOptions && size == null) {
+        skipped++;
+        continue;
+      }
+      final result = cart.add(
+        product,
+        quantity: product.isLiveFish ? 1 : item.quantity,
+        variant: variant,
+        size: size,
+      );
       if (result == CartAddResult.outOfStock) {
         skipped++;
       } else {
@@ -513,12 +729,7 @@ class _ShareReceiptButton extends ConsumerWidget {
       icon: const Icon(Icons.ios_share),
       onPressed: () async {
         try {
-          final settings = await ref.read(shopSettingsProvider.future);
-          final text = buildReceiptText(order: order, settings: settings);
-          await SharePlus.instance.share(ShareParams(
-            text: text,
-            subject: 'Receipt — Order #${order.id.substring(0, 8)}',
-          ));
+          await shareReceipt(ref, order);
         } catch (e) {
           if (context.mounted) {
             ScaffoldMessenger.of(context)

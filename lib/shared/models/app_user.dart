@@ -21,14 +21,18 @@ class AppUser {
   final String? email;
   final String? phone;
   final String? fullName;
+  final String? avatarUrl;
   final UserRole role;
+  final bool notificationsEnabled;
 
   const AppUser({
     required this.id,
     this.email,
     this.phone,
     this.fullName,
+    this.avatarUrl,
     this.role = UserRole.customer,
+    this.notificationsEnabled = true,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
@@ -37,7 +41,9 @@ class AppUser {
       email: map['email'] as String?,
       phone: map['phone'] as String?,
       fullName: map['full_name'] as String?,
+      avatarUrl: map['avatar_url'] as String?,
       role: userRoleFromString(map['role'] as String?),
+      notificationsEnabled: map['notifications_enabled'] as bool? ?? true,
     );
   }
 }

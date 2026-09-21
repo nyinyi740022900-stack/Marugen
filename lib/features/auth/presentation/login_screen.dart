@@ -41,7 +41,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .signInWithEmail(_emailCtrl.text.trim(), _passwordCtrl.text);
       // Router redirect handles navigation once auth state updates.
     } catch (e) {
-      setState(() => _error = _friendlyAuthError(e));
+      setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -57,7 +57,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      setState(() => _error = _friendlyAuthError(e));
+      setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -168,6 +168,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               size: 20,
                             ),
                             suffixIcon: IconButton(
+                              tooltip: _obscure ? 'Show password' : 'Hide password',
                               icon: Icon(
                                 _obscure
                                     ? Icons.visibility_outlined
@@ -186,13 +187,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const SizedBox(height: AppSpacing.xs),
                         Align(
                           alignment: Alignment.centerRight,
+                          // Was shrunk to text-bounds via
+                          // tapTargetSize.shrinkWrap/minimumSize.zero — well
+                          // under the ~44px tap-target guideline. A normal
+                          // TextButton already has a sane default hit area;
+                          // removing that override is the whole fix.
                           child: TextButton(
                             onPressed: () => context.push('/forgot-password'),
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
                             child: const Text(
                               'Forgot password?',
                               style: TextStyle(color: AppColors.grey, fontSize: 12.5),
@@ -278,8 +279,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 fontSize: 13.5,
                               ),
                             ),
-                            GestureDetector(
-                              onTap: () => context.push('/signup'),
+                            // TextButton (not a bare GestureDetector) so
+                            // this gets a real ~44px tap target and a
+                            // splash/highlight, not just the glyph bounds.
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                              ),
+                              onPressed: () => context.push('/signup'),
                               child: const Text(
                                 'Sign up',
                                 style: TextStyle(
@@ -304,7 +311,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 }
 
-String _friendlyAuthError(Object e) {
+/// Maps a raw auth exception to short, user-safe copy — shared by
+/// LoginScreen and SignupScreen so signup failures (e.g. "duplicate key
+/// value violates unique constraint") never leak raw Postgres/Supabase
+/// error text to the UI.
+String friendlyAuthError(Object e) {
   final raw = e.toString().toLowerCase();
   if (raw.contains('invalid login credentials') ||
       raw.contains('invalid_credentials')) {
@@ -312,6 +323,12 @@ String _friendlyAuthError(Object e) {
   }
   if (raw.contains('email not confirmed')) {
     return 'Please confirm your email from the link we sent, then try again.';
+  }
+  if (raw.contains('already registered') || raw.contains('already exists')) {
+    return 'An account with this email already exists. Try logging in instead.';
+  }
+  if (raw.contains('password') && (raw.contains('weak') || raw.contains('short'))) {
+    return 'Please choose a stronger password (at least 6 characters).';
   }
   if (raw.contains('google sign-in is not configured') ||
       raw.contains('google_web_client_id')) {

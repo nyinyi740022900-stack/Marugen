@@ -16,7 +16,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const track17ApiKey = Deno.env.get('TRACK17_API_KEY') ?? '';
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+// Prefer the new publishable/secret key pair (set explicitly via
+// `supabase secrets set`) over the legacy JWT anon/service_role names the
+// platform auto-injects, so this keeps working whether or not legacy
+// JWT-based API keys are later disabled project-wide.
+const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const serviceRoleKey =
+  Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,7 +39,7 @@ Deno.serve(async (req) => {
     if (!authHeader) return jsonError('Missing Authorization header', 401);
 
     // Verify the caller is a signed-in admin (staff/owner), not just any user.
-    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+    const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: { user }, error: userError } = await userClient.auth.getUser();
@@ -80,6 +86,24 @@ Deno.serve(async (req) => {
       }
     }
 
+    // A tracking number being registered means the parcel has physically
+    // left the shop — advance the order's own lifecycle status to
+    // `shipped` to match (unless it's already past that point, or is
+    // cancelled/refunded). This is what the timeline UI reads, and it's
+    // also the gate track-webhook checks before auto-advancing to
+    // `delivered` / notifying admin of "out for delivery" — without it,
+    // those never fire because the order looks like it's still `paid`.
+    const { data: currentOrder } = await admin
+      .from('orders')
+      .select('status')
+      .eq('id', order_id)
+      .maybeSingle();
+    const statusUpdate =
+      currentOrder &&
+      (currentOrder.status === 'paid' || currentOrder.status === 'packing')
+        ? { status: 'shipped' }
+        : {};
+
     await admin
       .from('orders')
       .update({
@@ -88,6 +112,7 @@ Deno.serve(async (req) => {
         tracking_registered: true,
         tracking_status: 'Registered',
         tracking_updated_at: new Date().toISOString(),
+        ...statusUpdate,
       })
       .eq('id', order_id);
 

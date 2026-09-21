@@ -85,3 +85,26 @@ class EmptyState extends StatelessWidget {
     );
   }
 }
+
+/// Standard "something went wrong" state for an `AsyncValue.error` branch —
+/// a friendly, non-technical message plus a Retry button that re-runs
+/// [onRetry] (typically `() => ref.invalidate(someProvider)`), instead of
+/// each screen showing the raw exception text (`'Error: $e'`) with no way
+/// to recover short of leaving the screen.
+class ErrorState extends StatelessWidget {
+  final VoidCallback onRetry;
+  final String? subtitle;
+
+  const ErrorState({super.key, required this.onRetry, this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return EmptyState(
+      icon: Icons.wifi_off_outlined,
+      title: 'Something went wrong',
+      subtitle: subtitle ?? "We couldn't load this right now. Check your connection and try again.",
+      actionLabel: 'Retry',
+      onAction: onRetry,
+    );
+  }
+}

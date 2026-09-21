@@ -7,6 +7,7 @@ import '../../../shared/models/product.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/notification_bell_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../cart/presentation/cart_providers.dart';
 import 'shop_providers.dart';
@@ -18,7 +19,6 @@ class ShopScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final productsAsync = ref.watch(visibleProductListProvider);
     final selectedCategory = ref.watch(selectedCategoryProvider);
-    final cartCount = ref.watch(cartCountProvider);
     final sort = ref.watch(productSortProvider);
 
     return Scaffold(
@@ -33,33 +33,9 @@ class ShopScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.shopping_bag_outlined),
-                onPressed: () => context.push('/cart'),
-              ),
-              if (cartCount > 0)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(3),
-                    decoration: const BoxDecoration(
-                      color: AppColors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                    child: Text(
-                      '$cartCount',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 10, color: AppColors.white, fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          const NotificationBellButton(),
+          const SizedBox(width: 6),
+          const _CartBadgeButton(),
           const SizedBox(width: 4),
         ],
       ),
@@ -68,14 +44,19 @@ class ShopScreen extends ConsumerWidget {
           Container(
             color: AppColors.white,
             padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              0,
+            ),
             child: Row(
               children: [
                 const Expanded(child: _SearchField()),
                 const SizedBox(width: AppSpacing.sm),
                 _SortButton(
                   sort: sort,
-                  onChanged: (s) => ref.read(productSortProvider.notifier).state = s,
+                  onChanged: (s) =>
+                      ref.read(productSortProvider.notifier).state = s,
                 ),
               ],
             ),
@@ -87,20 +68,24 @@ class ShopScreen extends ConsumerWidget {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.sm,
+                ),
                 children: [
                   _CategoryChip(
                     label: 'All',
                     selected: selectedCategory == null,
                     onSelected: () =>
-                        ref.read(selectedCategoryProvider.notifier).state = null,
+                        ref.read(selectedCategoryProvider.notifier).state =
+                            null,
                   ),
                   for (final category in ProductCategory.values)
                     _CategoryChip(
                       label: categoryLabel(category),
                       selected: selectedCategory == category,
                       onSelected: () =>
-                          ref.read(selectedCategoryProvider.notifier).state = category,
+                          ref.read(selectedCategoryProvider.notifier).state =
+                              category,
                     ),
                 ],
               ),
@@ -128,11 +113,61 @@ class ShopScreen extends ConsumerWidget {
                 );
               },
               loading: () => const ProductGridSkeleton(),
-              error: (e, _) => _EmptyState(error: e.toString()),
+              error: (e, _) => ErrorState(
+                onRetry: () => ref.invalidate(productListProvider),
+              ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Isolated so only this small badge rebuilds when [cartCountProvider]
+/// changes — previously watched at the top of [ShopScreen.build], which
+/// rebuilt the search bar, category chips, and the whole product grid on
+/// every cart mutation. Mirrors the pattern already used correctly by
+/// [ProductCard]'s `_FavoriteButton`.
+class _CartBadgeButton extends ConsumerWidget {
+  const _CartBadgeButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cartCount = ref.watch(cartCountProvider);
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.shopping_bag_outlined),
+          onPressed: () => context.push('/cart'),
+        ),
+        if (cartCount > 0)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: const BoxDecoration(
+                color: AppColors.red,
+                shape: BoxShape.circle,
+              ),
+              constraints: const BoxConstraints(
+                minWidth: 16,
+                minHeight: 16,
+              ),
+              child: Text(
+                '$cartCount',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppColors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -142,7 +177,11 @@ class _CategoryChip extends StatelessWidget {
   final bool selected;
   final VoidCallback onSelected;
 
-  const _CategoryChip({required this.label, required this.selected, required this.onSelected});
+  const _CategoryChip({
+    required this.label,
+    required this.selected,
+    required this.onSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -204,7 +243,8 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
             ? null
             : IconButton(
                 icon: const Icon(Icons.close, size: 18),
-                onPressed: () => ref.read(searchQueryProvider.notifier).state = '',
+                onPressed: () =>
+                    ref.read(searchQueryProvider.notifier).state = '',
               ),
         contentPadding: const EdgeInsets.symmetric(vertical: 10),
         filled: true,
@@ -260,17 +300,14 @@ class _SortButton extends StatelessWidget {
 }
 
 class _EmptyState extends StatelessWidget {
-  final String? error;
-  const _EmptyState({this.error});
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
-    return EmptyState(
-      icon: error == null ? Icons.water_outlined : Icons.wifi_off_outlined,
-      title: error == null ? 'No products yet' : 'Could not load products',
-      subtitle: error == null
-          ? 'Check back soon — new koi and supplies are added regularly.'
-          : 'Configure Supabase in .env and try again.',
+    return const EmptyState(
+      icon: Icons.water_outlined,
+      title: 'No products yet',
+      subtitle: 'Check back soon — new koi and supplies are added regularly.',
     );
   }
 }

@@ -40,7 +40,7 @@ class AddressBookScreen extends ConsumerWidget {
           separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
           itemBuilder: (context, i) => const ListRowSkeleton(),
         ),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(myAddressesProvider)),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openForm(context),
@@ -152,8 +152,16 @@ class _AddressCard extends ConsumerWidget {
           TextButton(
             onPressed: () async {
               Navigator.pop(dialogContext);
-              await ref.read(addressRepositoryProvider).deleteAddress(address.id);
-              ref.invalidate(myAddressesProvider);
+              try {
+                await ref.read(addressRepositoryProvider).deleteAddress(address.id);
+                ref.invalidate(myAddressesProvider);
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Couldn't delete this address. Please try again.")),
+                  );
+                }
+              }
             },
             child: const Text('Delete', style: TextStyle(color: AppColors.error)),
           ),
@@ -237,8 +245,10 @@ class _AddressFormState extends ConsumerState<AddressForm> {
       }
       ref.invalidate(myAddressesProvider);
       if (mounted) Navigator.pop(context);
-    } catch (e) {
-      setState(() => _error = e.toString());
+    } catch (_) {
+      // Raw Postgres/network errors aren't meaningful to a customer here —
+      // same reasoning as auth's friendlyAuthError.
+      setState(() => _error = "Couldn't save this address. Please try again.");
     } finally {
       if (mounted) setState(() => _saving = false);
     }

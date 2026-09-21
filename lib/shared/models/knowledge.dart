@@ -1,3 +1,28 @@
+/// One growth/size stage of a variety (e.g. "Tosai — under 1yr", "Nisai —
+/// 2yr") with its own photo, shown as a gallery so customers can see how
+/// the pattern/colour develops as the fish matures.
+class VarietyStage {
+  final String label;
+  final String? imageUrl;
+  final String? description;
+
+  const VarietyStage({required this.label, this.imageUrl, this.description});
+
+  factory VarietyStage.fromMap(Map<String, dynamic> map) {
+    return VarietyStage(
+      label: map['label'] as String? ?? '',
+      imageUrl: map['image_url'] as String?,
+      description: map['description'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+        'label': label,
+        'image_url': imageUrl,
+        'description': description,
+      };
+}
+
 /// A koi/arowana variety catalog entry (e.g. "Kohaku", "Showa", "Super Red
 /// Arowana") — educational content, separate from sellable [Product]s,
 /// though the shop screen can link "available in store" products by variety.
@@ -9,6 +34,10 @@ class Variety {
   final String? imageUrl;
   final List<String> traits;
 
+  /// Growth-stage photo gallery (e.g. Tosai → Nisai → Sansai), ordered
+  /// young to mature.
+  final List<VarietyStage> stages;
+
   const Variety({
     required this.id,
     required this.name,
@@ -16,6 +45,7 @@ class Variety {
     this.description,
     this.imageUrl,
     this.traits = const [],
+    this.stages = const [],
   });
 
   factory Variety.fromMap(Map<String, dynamic> map) {
@@ -26,6 +56,10 @@ class Variety {
       description: map['description'] as String?,
       imageUrl: map['image_url'] as String?,
       traits: (map['traits'] as List?)?.cast<String>() ?? const [],
+      stages: (map['stages'] as List?)
+              ?.map((e) => VarietyStage.fromMap(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
   }
 }

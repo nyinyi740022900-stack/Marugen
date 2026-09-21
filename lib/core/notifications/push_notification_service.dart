@@ -132,4 +132,22 @@ class PushNotificationService {
       developer.log('Could not save FCM token: $e', name: 'PushNotificationService');
     }
   }
+
+  /// Clears this device's FCM token from the current user's `profiles` row
+  /// so a shared/handed-down device stops receiving pushes meant for the
+  /// account that just signed out (or just opted out of notifications).
+  /// Must be called with the user still authenticated (RLS scopes the
+  /// update to `auth.uid()`), so callers should invoke this *before*
+  /// `auth.signOut()`.
+  static Future<void> clearTokenForCurrentUser() async {
+    final user = SupabaseService.currentUser;
+    if (user == null) return;
+    try {
+      await SupabaseService.client
+          .from('profiles')
+          .update({'fcm_token': null}).eq('id', user.id);
+    } catch (e) {
+      developer.log('Could not clear FCM token: $e', name: 'PushNotificationService');
+    }
+  }
 }

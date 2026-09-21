@@ -1,19 +1,94 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 import '../../wishlist/presentation/wishlist_screen.dart';
 import 'auth_providers.dart';
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  // Optimistic override for the notification switch — null means "trust
+  // the server value from currentAppUserProvider". Toggling used to call
+  // ref.invalidate(currentAppUserProvider), which is also what GoRouter's
+  // refreshListenable watches (see _GoRouterRefreshStream in
+  // app_router.dart) — invalidating it re-ran the router's redirect logic
+  // and rebuilt the whole CustomerShell (bottom nav included) on every
+  // toggle, which is what showed up as the screen visibly jittering.
+  // Nothing else on screen needs a fresh fetch for a boolean flip, so this
+  // just flips local state instantly and fires the write in the
+  // background instead.
+  bool? _notificationsOverride;
+  bool _signingOut = false;
+  bool _uploadingAvatar = false;
+  // Optimistic override, same reasoning as _notificationsOverride: avoid
+  // ref.invalidate(currentAppUserProvider) (router-rebuild jank) for a
+  // change that only needs this screen's own avatar to update instantly.
+  String? _avatarUrlOverride;
+
+  Future<void> _pickAvatar() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (picked == null || !mounted) return;
+    setState(() => _uploadingAvatar = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final ext = picked.name.contains('.') ? picked.name.split('.').last : 'jpg';
+      final url = await ref.read(authRepositoryProvider).uploadAvatar(bytes, ext);
+      if (mounted) setState(() => _avatarUrlOverride = url);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update photo: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
+  Future<void> _confirmSignOut() async {
+    final confirmed = await confirmLogout(context);
+    if (!confirmed) return;
+
+    setState(() => _signingOut = true);
+    try {
+      await ref.read(authRepositoryProvider).signOut();
+      // Router redirect handles navigation once auth state updates.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _signingOut = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not log out: $e')),
+      );
+    }
+  }
+
+  Future<void> _toggleNotifications(bool value) async {
+    setState(() => _notificationsOverride = value);
+    try {
+      await ref.read(authRepositoryProvider).updateNotificationsEnabled(value);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _notificationsOverride = !value);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update notification setting: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final userAsync = ref.watch(currentAppUserProvider);
     final isLoggedIn = ref.watch(isLoggedInProvider);
 
@@ -25,10 +100,50 @@ class ProfileScreen extends ConsumerWidget {
               data: (user) => ListView(
                 padding: const EdgeInsets.all(20),
                 children: [
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: AppColors.offWhite,
-                    child: const Icon(Icons.person, size: 36, color: AppColors.grey),
+                  Center(
+                    child: GestureDetector(
+                      onTap: _uploadingAvatar ? null : _pickAvatar,
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Builder(builder: (context) {
+                            final avatarUrl = _avatarUrlOverride ?? user?.avatarUrl;
+                            return CircleAvatar(
+                              radius: 36,
+                              backgroundColor: AppColors.offWhite,
+                              backgroundImage:
+                                  avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                              child: avatarUrl == null
+                                  ? const Icon(Icons.person, size: 36, color: AppColors.grey)
+                                  : null,
+                            );
+                          }),
+                          Positioned(
+                            right: -2,
+                            bottom: -2,
+                            child: Container(
+                              padding: const EdgeInsets.all(5),
+                              decoration: const BoxDecoration(
+                                color: AppColors.red,
+                                shape: BoxShape.circle,
+                                border: Border.fromBorderSide(
+                                  BorderSide(color: AppColors.white, width: 2),
+                                ),
+                              ),
+                              child: _uploadingAvatar
+                                  ? const SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 1.5, color: AppColors.white),
+                                    )
+                                  : const Icon(Icons.camera_alt,
+                                      size: 12, color: AppColors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   Center(
@@ -72,18 +187,22 @@ class ProfileScreen extends ConsumerWidget {
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => ref.read(customerTabIndexProvider.notifier).state = 2,
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.notifications_outlined),
-                    title: const Text('Notifications'),
-                    subtitle: const Text('Order updates are sent automatically',
-                        style: TextStyle(fontSize: 12, color: AppColors.grey)),
-                    onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                            'You\'ll be notified automatically about your order status.'),
+                  Builder(builder: (context) {
+                    final notificationsEnabled =
+                        _notificationsOverride ?? user?.notificationsEnabled ?? true;
+                    return SwitchListTile(
+                      secondary: const Icon(Icons.notifications_outlined),
+                      title: const Text('Notifications'),
+                      subtitle: Text(
+                        notificationsEnabled
+                            ? 'Push alerts for order updates are on'
+                            : 'Push alerts are off — order status still shows in-app',
+                        style: const TextStyle(fontSize: 12, color: AppColors.grey),
                       ),
-                    ),
-                  ),
+                      value: notificationsEnabled,
+                      onChanged: _toggleNotifications,
+                    );
+                  }),
                   const Divider(),
                   ListTile(
                     leading: const Icon(Icons.help_outline),
@@ -105,9 +224,16 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const Divider(),
                   ListTile(
-                    leading: const Icon(Icons.logout, color: AppColors.error),
+                    leading: _signingOut
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                          )
+                        : const Icon(Icons.logout, color: AppColors.error),
                     title: const Text('Log Out', style: TextStyle(color: AppColors.error)),
-                    onTap: () => ref.read(authRepositoryProvider).signOut(),
+                    enabled: !_signingOut,
+                    onTap: _confirmSignOut,
                   ),
                 ],
               ),

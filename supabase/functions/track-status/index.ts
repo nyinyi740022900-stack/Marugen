@@ -11,7 +11,13 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const track17ApiKey = Deno.env.get('TRACK17_API_KEY') ?? '';
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+// Prefer the new publishable/secret key pair (set explicitly via
+// `supabase secrets set`) over the legacy JWT anon/service_role names the
+// platform auto-injects, so this keeps working whether or not legacy
+// JWT-based API keys are later disabled project-wide.
+const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+const serviceRoleKey =
+  Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,7 +33,7 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return jsonError('Missing Authorization header', 401);
 
-    const userClient = createClient(supabaseUrl, Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+    const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: { user }, error: userError } = await userClient.auth.getUser();

@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/review.dart';
+import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../shared/widgets/reviewer_identity.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'review_providers.dart';
 
@@ -174,7 +176,7 @@ class _MyReviewCard extends ConsumerWidget {
           return SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: () => _openReviewForm(context, ref, productId, existing: null),
+              onPressed: () => openReviewForm(context, ref, productId, existing: null),
               icon: const Icon(Icons.star_border, size: 18),
               label: const Text('Write a Review'),
             ),
@@ -200,29 +202,18 @@ class _MyReviewCard extends ConsumerWidget {
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     onPressed: () =>
-                        _openReviewForm(context, ref, productId, existing: myReview),
+                        openReviewForm(context, ref, productId, existing: myReview),
                   ),
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.error),
                     onPressed: () async {
-                      final confirmed = await showDialog<bool>(
-                        context: context,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Delete review?'),
-                          content: const Text('This cannot be undone.'),
-                          actions: [
-                            TextButton(
-                                onPressed: () => Navigator.pop(ctx, false),
-                                child: const Text('Cancel')),
-                            TextButton(
-                                onPressed: () => Navigator.pop(ctx, true),
-                                child: const Text('Delete',
-                                    style: TextStyle(color: AppColors.error))),
-                          ],
-                        ),
+                      final confirmed = await confirmDestructiveAction(
+                        context,
+                        title: 'Delete review?',
+                        message: 'This cannot be undone.',
                       );
-                      if (confirmed == true) {
+                      if (confirmed) {
                         await ref
                             .read(reviewControllerProvider)
                             .delete(productId, myReview.id);
@@ -248,15 +239,24 @@ class _MyReviewCard extends ConsumerWidget {
     );
   }
 
-  void _openReviewForm(BuildContext context, WidgetRef ref, String productId,
-      {ProductReview? existing}) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => _ReviewForm(productId: productId, existing: existing),
-    );
-  }
+}
+
+/// Opens the write/edit-review bottom sheet for [productId] — the only
+/// context it needs is the product id itself (rating/comment are entered
+/// fresh, or pre-filled from [existing]), so this is reusable from
+/// anywhere a "write a review" affordance makes sense: the product detail
+/// page (via [_MyReviewCard] above) and, per delivered order items, the
+/// order detail screen (order_detail_screen.dart) — a customer can leave
+/// a review right from their order history without navigating back to
+/// find the product page again.
+void openReviewForm(BuildContext context, WidgetRef ref, String productId,
+    {ProductReview? existing}) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (ctx) => _ReviewForm(productId: productId, existing: existing),
+  );
 }
 
 class _ReviewForm extends ConsumerStatefulWidget {
@@ -375,17 +375,53 @@ class _ReviewTile extends StatelessWidget {
         children: [
           Row(
             children: [
-              _StarRow(rating: review.rating),
+              ReviewerAvatar(fullName: review.authorName, avatarUrl: review.authorAvatarUrl),
               const SizedBox(width: AppSpacing.sm),
-              const _VerifiedBadge(),
-              const Spacer(),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(maskedReviewerName(review.authorName),
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        _StarRow(rating: review.rating),
+                        const SizedBox(width: AppSpacing.sm),
+                        const _VerifiedBadge(),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
               Text(DateFormat.yMMMd().format(review.createdAt),
                   style: const TextStyle(fontSize: 11.5, color: AppColors.greySoft)),
             ],
           ),
           if (review.comment != null && review.comment!.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(review.comment!, style: const TextStyle(fontSize: 13.5, height: 1.4)),
+          ],
+          if (review.shopReply != null && review.shopReply!.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.offWhite,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border(left: BorderSide(color: AppColors.red.withValues(alpha: 0.4), width: 3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Reply from Marugen Koi Farm',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                  const SizedBox(height: 4),
+                  Text(review.shopReply!, style: const TextStyle(fontSize: 13, height: 1.35)),
+                ],
+              ),
+            ),
           ],
         ],
       ),

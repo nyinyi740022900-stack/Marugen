@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import 'auth_providers.dart';
+import 'login_screen.dart' show friendlyAuthError;
 
 /// Simple "forgot password" screen: asks for an email, fires Supabase's
 /// password-reset email flow, then shows a confirmation. Matches the
@@ -39,7 +40,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
           .sendPasswordResetEmail(_emailCtrl.text.trim());
       if (mounted) setState(() => _sent = true);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

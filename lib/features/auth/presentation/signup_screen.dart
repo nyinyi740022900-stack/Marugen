@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import 'auth_providers.dart';
+import 'login_screen.dart' show friendlyAuthError;
 
 class SignupScreen extends ConsumerStatefulWidget {
   const SignupScreen({super.key});
@@ -47,7 +48,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           );
       setState(() => _info = 'Check your email to confirm your account.');
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -63,7 +64,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), ''));
+      setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -123,6 +124,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     labelText: 'Password',
                     prefixIcon: const Icon(Icons.lock_outline, size: 20),
                     suffixIcon: IconButton(
+                      tooltip: _obscure ? 'Show password' : 'Hide password',
                       icon: Icon(
                         _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
                         size: 20,

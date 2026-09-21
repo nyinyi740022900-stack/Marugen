@@ -16,6 +16,7 @@ class SettingsRepository {
           'gst_percent': 9,
           'gst_included_in_price': true,
           'show_price_default': true,
+          'low_stock_threshold': 5,
         };
   }
 

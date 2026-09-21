@@ -16,14 +16,17 @@ class AdminProductEditScreen extends ConsumerStatefulWidget {
   const AdminProductEditScreen({super.key, this.productId});
 
   @override
-  ConsumerState<AdminProductEditScreen> createState() => _AdminProductEditScreenState();
+  ConsumerState<AdminProductEditScreen> createState() =>
+      _AdminProductEditScreenState();
 }
 
-class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen> {
+class _AdminProductEditScreenState
+    extends ConsumerState<AdminProductEditScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
+  final _salePriceCtrl = TextEditingController();
   final _videoUrlCtrl = TextEditingController();
   final _stockCtrl = TextEditingController(text: '1');
   final _varietyCtrl = TextEditingController();
@@ -38,20 +41,37 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
   bool _loading = false;
   bool _initialLoad = true;
 
-  // Variants (size/weight options) — only shown for restockable goods
+  // Variants (weight options) — only shown for restockable goods
   // (fish_food/accessories). Existing rows carry their variant id so
   // _save() knows to update rather than insert; ids removed from this
   // list between load and save get deleted.
   final List<_VariantRow> _variants = [];
   final Set<String> _deletedVariantIds = {};
 
+  // Product-level size labels (e.g. pellet Small/Medium/Large) — independent
+  // of weight price; stock is entered in the weight×size matrix below.
+  final List<TextEditingController> _sizeOptionCtrls = [];
+
+  /// Matrix cells keyed by "$variantIndex::$sizeLabel".
+  final Map<String, TextEditingController> _sizeStockCtrls = {};
+  final _fillAllStockCtrl = TextEditingController();
+
   bool get isLiveFish =>
       _category == ProductCategory.koi || _category == ProductCategory.arowana;
 
-  /// Restockable goods (fish_food/accessories) — the only categories that
-  /// ever get a variant picker. Never koi/arowana: each fish is one
-  /// specific animal, not a set of size/weight options.
-  bool get supportsVariants => !isLiveFish;
+  /// Every category can list options now — weight options for food, or
+  /// individual fish/varieties for a batch listing (e.g. "Japan Imported
+  /// Koi Selection" photographed as one group shot, sold as separate
+  /// Kohaku/Showa/etc. picks underneath).
+  bool get supportsVariants => true;
+
+  /// The pellet-size × weight stock matrix only makes sense for
+  /// restockable goods — a live fish option is one specific animal, not a
+  /// bag with a size choice.
+  bool get supportsSizeMatrix => !isLiveFish;
+
+  bool get _usesSizeStockMatrix =>
+      supportsSizeMatrix && _collectedSizeOptions().isNotEmpty;
 
   @override
   void initState() {
@@ -64,11 +84,14 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
       setState(() => _initialLoad = false);
       return;
     }
-    final product = await ProductRepository().fetchProductById(widget.productId!);
+    final product = await ProductRepository().fetchProductById(
+      widget.productId!,
+    );
     if (product != null) {
       _nameCtrl.text = product.name;
       _descCtrl.text = product.description ?? '';
       _priceCtrl.text = product.price?.toString() ?? '';
+      _salePriceCtrl.text = product.salePrice?.toString() ?? '';
       _videoUrlCtrl.text = product.videoUrl ?? '';
       _stockCtrl.text = '${product.stockQuantity}';
       _category = product.category;
@@ -80,8 +103,17 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
         _breederCtrl.text = product.fishDetails!.breeder ?? '';
         _hasCertificate = product.fishDetails!.hasCertificate;
       }
-      for (final v in product.variants) {
+      for (var i = 0; i < product.variants.length; i++) {
+        final v = product.variants[i];
         _variants.add(_VariantRow.existing(v));
+        for (final size in product.sizeOptions) {
+          _sizeStockCtrls['$i::$size'] = TextEditingController(
+            text: '${v.sizeStocks[size] ?? 0}',
+          );
+        }
+      }
+      for (final size in product.sizeOptions) {
+        _sizeOptionCtrls.add(TextEditingController(text: size));
       }
     }
     if (mounted) setState(() => _initialLoad = false);
@@ -94,13 +126,85 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
   void _removeVariantRow(int index) {
     final row = _variants[index];
     if (row.id != null) _deletedVariantIds.add(row.id!);
+    final sizes = _collectedSizeOptions();
+    for (final size in sizes) {
+      _sizeStockCtrls.remove('$index::$size')?.dispose();
+    }
+    // Re-key controllers after the hole so indices stay aligned with rows.
+    final rekeyed = <String, TextEditingController>{};
+    for (final entry in _sizeStockCtrls.entries) {
+      final parts = entry.key.split('::');
+      if (parts.length != 2) continue;
+      final i = int.tryParse(parts[0]);
+      if (i == null) continue;
+      if (i < index) {
+        rekeyed[entry.key] = entry.value;
+      } else if (i > index) {
+        rekeyed['${i - 1}::${parts[1]}'] = entry.value;
+      }
+    }
+    _sizeStockCtrls
+      ..clear()
+      ..addAll(rekeyed);
     setState(() => _variants.removeAt(index));
+  }
+
+  void _addSizeOptionRow() {
+    setState(() => _sizeOptionCtrls.add(TextEditingController()));
+  }
+
+  void _removeSizeOptionRow(int index) {
+    final removedLabel = _sizeOptionCtrls[index].text.trim();
+    final ctrl = _sizeOptionCtrls.removeAt(index);
+    ctrl.dispose();
+    if (removedLabel.isNotEmpty) {
+      for (var i = 0; i < _variants.length; i++) {
+        _sizeStockCtrls.remove('$i::$removedLabel')?.dispose();
+      }
+    }
+    setState(() {});
+  }
+
+  List<String> _collectedSizeOptions() {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final ctrl in _sizeOptionCtrls) {
+      final label = ctrl.text.trim();
+      if (label.isEmpty || seen.contains(label)) continue;
+      seen.add(label);
+      out.add(label);
+    }
+    return out;
+  }
+
+  TextEditingController _sizeStockCtrl(int variantIndex, String size) {
+    return _sizeStockCtrls.putIfAbsent(
+      '$variantIndex::$size',
+      () => TextEditingController(text: '0'),
+    );
+  }
+
+  /// Sets every weight×size cell to the Fill all value (empty → 0).
+  void _fillAllSizeStocks() {
+    final qty = int.tryParse(_fillAllStockCtrl.text.trim()) ?? 0;
+    final clamped = qty < 0 ? 0 : qty;
+    final sizes = _collectedSizeOptions();
+    for (var i = 0; i < _variants.length; i++) {
+      if (_variants[i].labelCtrl.text.trim().isEmpty) continue;
+      for (final size in sizes) {
+        _sizeStockCtrl(i, size).text = '$clamped';
+      }
+    }
+    setState(() {});
   }
 
   Future<void> _saveVariants(String productId, ProductRepository repo) async {
     for (final id in _deletedVariantIds) {
       await repo.deleteVariant(id);
     }
+    final sizes = _collectedSizeOptions();
+    final useMatrix = sizes.isNotEmpty;
+
     for (var i = 0; i < _variants.length; i++) {
       final row = _variants[i];
       final label = row.labelCtrl.text.trim();
@@ -109,15 +213,35 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
         'product_id': productId,
         'label': label,
         'price': double.tryParse(row.priceCtrl.text.trim()) ?? 0,
-        'stock_quantity': int.tryParse(row.stockCtrl.text.trim()) ?? 0,
+        // Weight-level stock is unused when the size matrix owns inventory.
+        'stock_quantity': useMatrix
+            ? 0
+            : int.tryParse(row.stockCtrl.text.trim()) ?? 0,
         'sort_order': i,
       };
+      final String variantId;
       if (row.id == null) {
-        await repo.createVariant(payload);
+        variantId = (await repo.createVariant(payload)).id;
       } else {
         await repo.updateVariant(row.id!, payload);
+        variantId = row.id!;
+      }
+      if (useMatrix) {
+        for (final size in sizes) {
+          final qty =
+              int.tryParse(_sizeStockCtrl(i, size).text.trim()) ?? 0;
+          await repo.upsertVariantSizeStock(
+            variantId: variantId,
+            sizeLabel: size,
+            stockQuantity: qty,
+          );
+        }
       }
     }
+    await repo.deleteOrphanSizeStocks(
+      productId: productId,
+      keepSizes: sizes,
+    );
   }
 
   Future<void> _pickImages() async {
@@ -130,22 +254,39 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
     setState(() => _loading = true);
     try {
       final repo = ProductRepository();
-      final categoryValue =
-          _category == ProductCategory.fishFood ? 'fish_food' : _category.name;
+      final categoryValue = _category == ProductCategory.fishFood
+          ? 'fish_food'
+          : _category.name;
 
       final payload = <String, dynamic>{
         'name': _nameCtrl.text.trim(),
-        'description': _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
+        'description': _descCtrl.text.trim().isEmpty
+            ? null
+            : _descCtrl.text.trim(),
         'category': categoryValue,
-        'price': _priceCtrl.text.trim().isEmpty ? null : double.tryParse(_priceCtrl.text.trim()),
-        'video_url': _videoUrlCtrl.text.trim().isEmpty ? null : _videoUrlCtrl.text.trim(),
+        'price': _priceCtrl.text.trim().isEmpty
+            ? null
+            : double.tryParse(_priceCtrl.text.trim()),
+        'sale_price': _salePriceCtrl.text.trim().isEmpty
+            ? null
+            : double.tryParse(_salePriceCtrl.text.trim()),
+        'video_url': _videoUrlCtrl.text.trim().isEmpty
+            ? null
+            : _videoUrlCtrl.text.trim(),
         'show_price': _showPrice,
         'stock_quantity': int.tryParse(_stockCtrl.text.trim()) ?? 0,
+        // Clear size list when switching a restockable product to live fish.
+        'size_options':
+            supportsSizeMatrix ? _collectedSizeOptions() : <String>[],
         if (isLiveFish)
           'fish_details': {
-            'variety': _varietyCtrl.text.trim().isEmpty ? null : _varietyCtrl.text.trim(),
+            'variety': _varietyCtrl.text.trim().isEmpty
+                ? null
+                : _varietyCtrl.text.trim(),
             'size_cm': double.tryParse(_sizeCtrl.text.trim()),
-            'breeder': _breederCtrl.text.trim().isEmpty ? null : _breederCtrl.text.trim(),
+            'breeder': _breederCtrl.text.trim().isEmpty
+                ? null
+                : _breederCtrl.text.trim(),
             'has_certificate': _hasCertificate,
           }
         else
@@ -181,20 +322,38 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
       // Variants only ever apply to restockable goods; skip entirely for
       // live fish even if stale rows somehow exist. Failures here (e.g.
       // migration 0008 not applied yet) shouldn't block the product save
-      // that already succeeded above.
+      // that already succeeded above — but the admin still needs to know,
+      // otherwise a product can silently end up with no weight/size
+      // variants and no signal that anything went wrong.
+      var variantSaveFailed = false;
       if (supportsVariants) {
         try {
           await _saveVariants(productId, repo);
         } catch (_) {
-          // Non-fatal — product itself saved fine.
+          variantSaveFailed = true;
         }
       }
 
-      ref.invalidate(productListProvider);
-      if (mounted) context.pop();
+      refreshAdminProducts(ref);
+      if (mounted) {
+        if (variantSaveFailed) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Product saved, but weight/size variants failed to save — please edit and try again.',
+              ),
+              backgroundColor: AppColors.error,
+              duration: Duration(seconds: 4),
+            ),
+          );
+          await Future.delayed(const Duration(milliseconds: 1200));
+        }
+        if (mounted) context.pop();
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -208,7 +367,8 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
       builder: (dialogContext) => AlertDialog(
         title: const Text('Delete product?'),
         content: Text(
-            'This permanently removes "${_nameCtrl.text.trim().isEmpty ? 'this product' : _nameCtrl.text.trim()}". This cannot be undone.'),
+          'This permanently removes "${_nameCtrl.text.trim().isEmpty ? 'this product' : _nameCtrl.text.trim()}". This cannot be undone.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -216,14 +376,17 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete', style: TextStyle(color: AppColors.error)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.error),
+            ),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
     await ProductRepository().deleteProduct(widget.productId!);
-    ref.invalidate(productListProvider);
+    refreshAdminProducts(ref);
     if (mounted) context.pop();
   }
 
@@ -245,7 +408,10 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
         title: Text(widget.productId == null ? 'New Product' : 'Edit Product'),
         actions: [
           if (widget.productId != null)
-            IconButton(icon: const Icon(Icons.delete_outline), onPressed: _delete),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _delete,
+            ),
         ],
       ),
       body: Form(
@@ -262,14 +428,22 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                 for (var i = 0; i < _existingImageUrls.length; i++)
                   _EditableThumbnail(
                     onRemove: () => _removeExistingImage(i),
-                    child: Image.network(_existingImageUrls[i],
-                        width: 80, height: 80, fit: BoxFit.cover),
+                    child: Image.network(
+                      _existingImageUrls[i],
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 for (var i = 0; i < _newImages.length; i++)
                   _EditableThumbnail(
                     onRemove: () => _removeNewImage(i),
-                    child: Image.file(File(_newImages[i].path),
-                        width: 80, height: 80, fit: BoxFit.cover),
+                    child: Image.file(
+                      File(_newImages[i].path),
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 InkWell(
                   onTap: _pickImages,
@@ -282,21 +456,27 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                       border: Border.all(color: AppColors.lightGrey),
                     ),
-                    child: const Icon(Icons.add_a_photo_outlined, color: AppColors.grey),
+                    child: const Icon(
+                      Icons.add_a_photo_outlined,
+                      color: AppColors.grey,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            const Text('Tap a photo\'s × to remove it. First photo is the cover image.',
-                style: TextStyle(fontSize: 11.5, color: AppColors.greySoft)),
+            const Text(
+              'Tap a photo\'s × to remove it. First photo is the cover image.',
+              style: TextStyle(fontSize: 11.5, color: AppColors.grey),
+            ),
             const SizedBox(height: AppSpacing.xl),
             const _SectionLabel('BASIC INFO'),
             const SizedBox(height: AppSpacing.sm),
             TextFormField(
               controller: _nameCtrl,
               decoration: const InputDecoration(labelText: 'Name'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
             const SizedBox(height: AppSpacing.md),
             DropdownButtonFormField<ProductCategory>(
@@ -306,7 +486,8 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                 for (final c in ProductCategory.values)
                   DropdownMenuItem(value: c, child: Text(categoryLabel(c))),
               ],
-              onChanged: (v) => setState(() => _category = v ?? ProductCategory.koi),
+              onChanged: (v) =>
+                  setState(() => _category = v ?? ProductCategory.koi),
             ),
             const SizedBox(height: AppSpacing.md),
             TextFormField(
@@ -328,7 +509,11 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                   'This product has variants below — their price & stock are used '
                   'instead of the fields here. The price/stock below are ignored '
                   'once at least one variant exists.',
-                  style: TextStyle(fontSize: 12, color: AppColors.grey, height: 1.4),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.grey,
+                    height: 1.4,
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
@@ -341,8 +526,23 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                   children: [
                     TextFormField(
                       controller: _priceCtrl,
-                      decoration: const InputDecoration(labelText: 'Price (SGD)'),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Price (SGD)',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextFormField(
+                      controller: _salePriceCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Sale price (SGD, optional)',
+                        hintText: 'Leave blank for no discount',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     SwitchListTile(
@@ -353,14 +553,35 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                       onChanged: (v) => setState(() => _showPrice = v),
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    TextFormField(
-                      controller: _stockCtrl,
-                      decoration: InputDecoration(
-                        labelText:
-                            isLiveFish ? 'Stock (0 or 1 — unique fish)' : 'Stock quantity',
+                    if (isLiveFish)
+                      // A live fish is one animal, not a countable
+                      // quantity — a plain 0/1 switch is the one-tap
+                      // action a farm admin needs at a show or after an
+                      // in-person sale, instead of typing a number into a
+                      // generic stock field. Bound to the same
+                      // `stock_quantity` column the checkout/DB triggers
+                      // already read (see 0010_payment_integrity.sql) —
+                      // no schema change needed.
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Available for sale in app'),
+                        subtitle: Text(
+                          _stockCtrl.text.trim() == '0'
+                              ? 'Off — shows as "Sold" to customers'
+                              : 'On — customers can buy this fish',
+                        ),
+                        value: _stockCtrl.text.trim() != '0',
+                        onChanged: (v) =>
+                            setState(() => _stockCtrl.text = v ? '1' : '0'),
+                      )
+                    else
+                      TextFormField(
+                        controller: _stockCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Stock quantity',
+                        ),
+                        keyboardType: TextInputType.number,
                       ),
-                      keyboardType: TextInputType.number,
-                    ),
                   ],
                 ),
               ),
@@ -376,11 +597,17 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
             ),
             if (supportsVariants) ...[
               const SizedBox(height: AppSpacing.xl),
-              const _SectionLabel('VARIANTS'),
+              _SectionLabel(isLiveFish ? 'FISH OPTIONS' : 'WEIGHT VARIANTS'),
               const SizedBox(height: AppSpacing.sm),
-              const Text(
-                'Add size/weight options (e.g. 500g, 1kg) each with their own price & stock.',
-                style: TextStyle(fontSize: 11.5, color: AppColors.greySoft),
+              Text(
+                isLiveFish
+                    ? 'For a batch photo (e.g. "Japan Imported Koi Selection") — list each '
+                        'fish/variety separately so shoppers can pick which one. Leave empty '
+                        'for a single fish with no picks.'
+                    : (_usesSizeStockMatrix
+                        ? 'Add weight options (e.g. 2kg, 5kg) with price. Stock is set in the size matrix below.'
+                        : 'Add weight options (e.g. 2kg, 5kg) each with their own price & stock.'),
+                style: const TextStyle(fontSize: 11.5, color: AppColors.grey),
               ),
               const SizedBox(height: AppSpacing.sm),
               for (var i = 0; i < _variants.length; i++)
@@ -388,14 +615,87 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: _VariantEditRow(
                     row: _variants[i],
+                    hideStock: _usesSizeStockMatrix,
+                    labelHint: isLiveFish ? 'e.g. Kohaku' : 'e.g. 1kg',
+                    onLabelChanged: (_) => setState(() {}),
                     onRemove: () => _removeVariantRow(i),
                   ),
                 ),
               OutlinedButton.icon(
                 onPressed: _addVariantRow,
                 icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Variant'),
+                label: Text(isLiveFish ? 'Add Fish Option' : 'Add Weight'),
               ),
+            ],
+            if (supportsSizeMatrix) ...[
+              const SizedBox(height: AppSpacing.xl),
+              const _SectionLabel('SIZE OPTIONS'),
+              const SizedBox(height: AppSpacing.sm),
+              const Text(
+                'Pellet/size labels (e.g. Small, Medium, Large). Price stays on weight; '
+                'each weight×size cell has its own stock.',
+                style: TextStyle(fontSize: 11.5, color: AppColors.grey),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              for (var i = 0; i < _sizeOptionCtrls.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: _SizeOptionEditRow(
+                    controller: _sizeOptionCtrls[i],
+                    onRemove: () => _removeSizeOptionRow(i),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+              OutlinedButton.icon(
+                onPressed: _addSizeOptionRow,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add Size'),
+              ),
+              if (_usesSizeStockMatrix &&
+                  _variants.any((v) => v.labelCtrl.text.trim().isNotEmpty)) ...[
+                const SizedBox(height: AppSpacing.xl),
+                const _SectionLabel('STOCK BY WEIGHT × SIZE'),
+                const SizedBox(height: AppSpacing.sm),
+                const Text(
+                  'Enter how many bags you have for each combination, or fill all at once.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.grey),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _fillAllStockCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Fill all',
+                          hintText: 'e.g. 10',
+                          isDense: true,
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    ElevatedButton(
+                      onPressed: _fillAllSizeStocks,
+                      child: const Text('Apply'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                _SizeStockMatrix(
+                  variantLabels: [
+                    for (final v in _variants)
+                      if (v.labelCtrl.text.trim().isNotEmpty)
+                        v.labelCtrl.text.trim(),
+                  ],
+                  variantIndexes: [
+                    for (var i = 0; i < _variants.length; i++)
+                      if (_variants[i].labelCtrl.text.trim().isNotEmpty) i,
+                  ],
+                  sizes: _collectedSizeOptions(),
+                  controllerFor: _sizeStockCtrl,
+                ),
+              ],
             ],
             if (isLiveFish) ...[
               const SizedBox(height: AppSpacing.xl),
@@ -403,13 +703,17 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
               const SizedBox(height: AppSpacing.sm),
               TextFormField(
                 controller: _varietyCtrl,
-                decoration: const InputDecoration(labelText: 'Variety (e.g. Kohaku)'),
+                decoration: const InputDecoration(
+                  labelText: 'Variety (e.g. Kohaku)',
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _sizeCtrl,
                 decoration: const InputDecoration(labelText: 'Size (cm)'),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
@@ -431,7 +735,11 @@ class _AdminProductEditScreenState extends ConsumerState<AdminProductEditScreen>
                   ? const SizedBox(
                       height: 18,
                       width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
                   : const Text('Save'),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -451,12 +759,15 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 0.8,
-            color: AppColors.grey));
+    return Text(
+      text,
+      style: const TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 12,
+        letterSpacing: 0.8,
+        color: AppColors.grey,
+      ),
+    );
   }
 }
 
@@ -506,20 +817,25 @@ class _VariantRow {
   final TextEditingController priceCtrl;
   final TextEditingController stockCtrl;
 
-  _VariantRow._({this.id, required this.labelCtrl, required this.priceCtrl, required this.stockCtrl});
+  _VariantRow._({
+    this.id,
+    required this.labelCtrl,
+    required this.priceCtrl,
+    required this.stockCtrl,
+  });
 
   factory _VariantRow.blank() => _VariantRow._(
-        labelCtrl: TextEditingController(),
-        priceCtrl: TextEditingController(),
-        stockCtrl: TextEditingController(text: '0'),
-      );
+    labelCtrl: TextEditingController(),
+    priceCtrl: TextEditingController(),
+    stockCtrl: TextEditingController(text: '0'),
+  );
 
   factory _VariantRow.existing(ProductVariant v) => _VariantRow._(
-        id: v.id,
-        labelCtrl: TextEditingController(text: v.label),
-        priceCtrl: TextEditingController(text: v.price.toString()),
-        stockCtrl: TextEditingController(text: '${v.stockQuantity}'),
-      );
+    id: v.id,
+    labelCtrl: TextEditingController(text: v.label),
+    priceCtrl: TextEditingController(text: v.price.toString()),
+    stockCtrl: TextEditingController(text: '${v.stockQuantity}'),
+  );
 }
 
 /// One row in the VARIANTS section — label / price / stock fields plus a
@@ -528,7 +844,16 @@ class _VariantRow {
 class _VariantEditRow extends StatelessWidget {
   final _VariantRow row;
   final VoidCallback onRemove;
-  const _VariantEditRow({required this.row, required this.onRemove});
+  final bool hideStock;
+  final String labelHint;
+  final ValueChanged<String>? onLabelChanged;
+  const _VariantEditRow({
+    required this.row,
+    required this.onRemove,
+    this.hideStock = false,
+    this.labelHint = 'e.g. 1kg',
+    this.onLabelChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -546,7 +871,12 @@ class _VariantEditRow extends StatelessWidget {
             flex: 3,
             child: TextFormField(
               controller: row.labelCtrl,
-              decoration: const InputDecoration(labelText: 'Label', hintText: 'e.g. 1kg', isDense: true),
+              onChanged: onLabelChanged,
+              decoration: InputDecoration(
+                labelText: 'Label',
+                hintText: labelHint,
+                isDense: true,
+              ),
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
@@ -554,17 +884,72 @@ class _VariantEditRow extends StatelessWidget {
             flex: 2,
             child: TextFormField(
               controller: row.priceCtrl,
-              decoration: const InputDecoration(labelText: 'Price', isDense: true),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Price',
+                isDense: true,
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
           ),
-          const SizedBox(width: AppSpacing.sm),
+          if (!hideStock) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              flex: 2,
+              child: TextFormField(
+                controller: row.stockCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Stock',
+                  isDense: true,
+                ),
+                keyboardType: TextInputType.number,
+              ),
+            ),
+          ],
+          IconButton(
+            icon: const Icon(Icons.close, size: 18, color: AppColors.grey),
+            onPressed: onRemove,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Single label row for the SIZE OPTIONS section.
+class _SizeOptionEditRow extends StatelessWidget {
+  final TextEditingController controller;
+  final VoidCallback onRemove;
+  final ValueChanged<String>? onChanged;
+  const _SizeOptionEditRow({
+    required this.controller,
+    required this.onRemove,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        boxShadow: AppShadows.card,
+      ),
+      child: Row(
+        children: [
           Expanded(
-            flex: 2,
             child: TextFormField(
-              controller: row.stockCtrl,
-              decoration: const InputDecoration(labelText: 'Stock', isDense: true),
-              keyboardType: TextInputType.number,
+              controller: controller,
+              onChanged: onChanged,
+              decoration: const InputDecoration(
+                labelText: 'Size',
+                hintText: 'e.g. Small',
+                isDense: true,
+              ),
             ),
           ),
           IconButton(
@@ -574,6 +959,108 @@ class _VariantEditRow extends StatelessWidget {
             constraints: const BoxConstraints(),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Compact editable grid: one row per weight, one column per size.
+class _SizeStockMatrix extends StatelessWidget {
+  final List<String> variantLabels;
+  final List<int> variantIndexes;
+  final List<String> sizes;
+  final TextEditingController Function(int variantIndex, String size)
+      controllerFor;
+
+  const _SizeStockMatrix({
+    required this.variantLabels,
+    required this.variantIndexes,
+    required this.sizes,
+    required this.controllerFor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        boxShadow: AppShadows.card,
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const SizedBox(
+                  width: 72,
+                  child: Text(
+                    'Weight',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.grey,
+                    ),
+                  ),
+                ),
+                for (final size in sizes)
+                  SizedBox(
+                    width: 72,
+                    child: Text(
+                      size,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.grey,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            for (var r = 0; r < variantLabels.length; r++) ...[
+              Row(
+                children: [
+                  SizedBox(
+                    width: 72,
+                    child: Text(
+                      variantLabels[r],
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  for (final size in sizes)
+                    SizedBox(
+                      width: 72,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: TextFormField(
+                          controller: controllerFor(variantIndexes[r], size),
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 8,
+                            ),
+                          ),
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              if (r < variantLabels.length - 1)
+                const SizedBox(height: AppSpacing.sm),
+            ],
+          ],
+        ),
       ),
     );
   }

@@ -1,15 +1,34 @@
 import 'dart:typed_data';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/product.dart';
+
+/// True only for errors that mean "the schema/table/relationship isn't
+/// there yet" (e.g. migration 0008/0020 not applied) — the one case this
+/// fallback is meant for. Anything else (network error, RLS denial,
+/// transient timeout) should surface as a real error instead of silently
+/// showing zero variants/stock, which previously masked genuine failures
+/// as "no variants".
+bool _isMissingSchemaError(Object e) {
+  if (e is! PostgrestException) return false;
+  final code = e.code;
+  final message = e.message.toLowerCase();
+  return code == '42P01' || // undefined_table
+      code == 'PGRST200' || // PostgREST: could not find relationship
+      code == 'PGRST205' || // PostgREST: could not find table in schema cache
+      message.contains('does not exist') ||
+      message.contains('schema cache');
+}
 
 class ProductRepository {
   final _client = SupabaseService.client;
 
-  /// Embeds each product's variants (`product_variants` FK) so grid cards
-  /// know whether a product needs a size picked before it can be added to
-  /// the cart, and can total stock across variants.
-  static const _withVariants = '*, variants:product_variants(*)';
+  /// Embeds each product's variants and per-size stocks so grid cards and
+  /// the PDP can total / gate inventory across the weight×size matrix.
+  static const _withVariants =
+      '*, variants:product_variants(*, size_stocks:product_variant_size_stocks(*))';
 
   Future<List<Product>> fetchProducts({ProductCategory? category}) async {
     var query = _client.from('products').select(_withVariants);
@@ -17,6 +36,30 @@ class ProductRepository {
       query = query.eq('category', category.name == 'fishFood' ? 'fish_food' : category.name);
     }
     final data = await query.order('created_at', ascending: false);
+    final products = (data as List)
+        .map((e) => Product.fromMap(e as Map<String, dynamic>))
+        .toList();
+    return _withStats(products);
+  }
+
+  /// Admin: one page of products (`[offset, offset+limit)`) — see
+  /// PagedNotifier (shared/providers/paged_notifier.dart). Used for the
+  /// default (no search query) admin Products list; a search falls back
+  /// to [fetchProducts]' unbounded fetch + client-side filter, same as
+  /// today, since paginating would otherwise only search within whatever
+  /// page happened to be loaded.
+  Future<List<Product>> fetchProductsPage({
+    ProductCategory? category,
+    required int offset,
+    required int limit,
+  }) async {
+    var query = _client.from('products').select(_withVariants);
+    if (category != null) {
+      query = query.eq('category', category.name == 'fishFood' ? 'fish_food' : category.name);
+    }
+    final data = await query
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
     final products = (data as List)
         .map((e) => Product.fromMap(e as Map<String, dynamic>))
         .toList();
@@ -52,12 +95,8 @@ class ProductRepository {
         await _client.from('products').select().eq('id', id).maybeSingle();
     if (data == null) return null;
     var product = Product.fromMap(data);
-    // Variants only ever apply to restockable goods (fish_food/
-    // accessories) — skip the extra query for live fish (koi/arowana).
-    if (!product.isLiveFish) {
-      final variants = await fetchVariantsForProduct(id);
-      product = product.copyWithVariants(variants);
-    }
+    final variants = await fetchVariantsForProduct(id);
+    product = product.copyWithVariants(variants);
     return product;
   }
 
@@ -68,14 +107,23 @@ class ProductRepository {
     try {
       final data = await _client
           .from('product_variants')
+          .select('*, size_stocks:product_variant_size_stocks(*)')
+          .eq('product_id', productId)
+          .order('sort_order', ascending: true);
+      return (data as List)
+          .map((e) => ProductVariant.fromMap(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      if (!_isMissingSchemaError(e)) rethrow;
+      // Fallback if size-stocks embed isn't available yet (migration pending).
+      final data = await _client
+          .from('product_variants')
           .select()
           .eq('product_id', productId)
           .order('sort_order', ascending: true);
       return (data as List)
           .map((e) => ProductVariant.fromMap(e as Map<String, dynamic>))
           .toList();
-    } catch (_) {
-      return [];
     }
   }
 
@@ -91,6 +139,41 @@ class ProductRepository {
 
   Future<void> deleteVariant(String id) async {
     await _client.from('product_variants').delete().eq('id', id);
+  }
+
+  /// Upserts one weight×size stock cell. Creates the row when missing.
+  Future<void> upsertVariantSizeStock({
+    required String variantId,
+    required String sizeLabel,
+    required int stockQuantity,
+  }) async {
+    await _client.from('product_variant_size_stocks').upsert(
+      {
+        'variant_id': variantId,
+        'size_label': sizeLabel,
+        'stock_quantity': stockQuantity < 0 ? 0 : stockQuantity,
+      },
+      onConflict: 'variant_id,size_label',
+    );
+  }
+
+  /// Drops size-stock rows whose label is no longer in the product's size list.
+  Future<void> deleteOrphanSizeStocks({
+    required String productId,
+    required List<String> keepSizes,
+  }) async {
+    final variants = await fetchVariantsForProduct(productId);
+    for (final v in variants) {
+      for (final size in v.sizeStocks.keys) {
+        if (!keepSizes.contains(size)) {
+          await _client
+              .from('product_variant_size_stocks')
+              .delete()
+              .eq('variant_id', v.id)
+              .eq('size_label', size);
+        }
+      }
+    }
   }
 
   /// Other products in the same category as [productId] (excluding it) —

@@ -86,6 +86,7 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery> {
                 children: [
                   _CircleIconButton(
                     icon: Icons.close,
+                    tooltip: 'Close',
                     onTap: () => Navigator.of(context).pop(),
                   ),
                   if (widget.imageUrls.length > 1)
@@ -116,19 +117,25 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery> {
 class _CircleIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _CircleIconButton({required this.icon, required this.onTap});
+  final String tooltip;
+  const _CircleIconButton({required this.icon, required this.onTap, required this.tooltip});
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.black.withValues(alpha: 0.55),
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Icon(icon, color: AppColors.white, size: 22),
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: AppColors.black.withValues(alpha: 0.55),
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          // 11px padding + 22px icon = 44px, the recommended minimum tap
+          // target (was 8px padding = 38px total).
+          child: Padding(
+            padding: const EdgeInsets.all(11),
+            child: Icon(icon, color: AppColors.white, size: 22),
+          ),
         ),
       ),
     );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/utils/view_tracker.dart';
 import '../../auth/presentation/profile_screen.dart';
 import '../../knowledge/presentation/knowledge_screen.dart';
 import '../../orders/presentation/orders_screen.dart';
@@ -23,6 +24,14 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     OrdersScreen(),
     ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Once per app session — this shell is only built once (kept alive by
+    // its IndexedStack tabs) after auth/role resolves to "customer".
+    ViewTracker.logAppVisit();
+  }
 
   @override
   Widget build(BuildContext context) {

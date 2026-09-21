@@ -7,6 +7,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
 import '../../../shared/models/promo_code.dart';
 import '../../../shared/providers/settings_providers.dart';
+import '../../../shared/utils/price_format.dart';
+import '../../cart/domain/cart_item.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../profile/presentation/address_providers.dart';
@@ -14,11 +16,18 @@ import '../../promo/presentation/promo_providers.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 import '../data/order_repository.dart';
 import '../data/payment_repository.dart';
-
-enum _Fulfillment { delivery, pickup }
+import 'orders_providers.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
-  const CheckoutScreen({super.key});
+  /// When set (Buy Now — see product_detail_screen.dart's `_buyNow`), this
+  /// screen charges ONLY these items and never touches the persistent
+  /// cart at all: not read from it, not cleared on success. When null
+  /// (the normal "Cart" screen's Checkout button), it reads/clears
+  /// [cartProvider] as before. This mirrors how Amazon/Shopee/Lazada's
+  /// "Buy Now" works — an isolated single-purchase flow that never mixes
+  /// with or mutates whatever is already sitting in the cart.
+  final List<CartItem>? buyNowItems;
+  const CheckoutScreen({super.key, this.buyNowItems});
 
   @override
   ConsumerState<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -28,11 +37,29 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   bool _processing = false;
   String? _error;
   String? _selectedAddressId;
-  _Fulfillment _fulfillment = _Fulfillment.delivery;
   final _promoCtrl = TextEditingController();
   PromoCode? _appliedPromo;
   String? _promoError;
   bool _promoLoading = false;
+
+  /// Buy Now mode keeps its own removable local copy — there's no
+  /// provider backing it, unlike the persistent cart.
+  late final List<CartItem>? _buyNowItems =
+      widget.buyNowItems == null ? null : List.of(widget.buyNowItems!);
+
+  bool get _isBuyNow => _buyNowItems != null;
+
+  void _removeItem(CartItem item) {
+    if (_isBuyNow) {
+      setState(() => _buyNowItems!.removeWhere((i) => i.lineKey == item.lineKey));
+    } else {
+      ref.read(cartProvider.notifier).remove(
+            item.product.id,
+            variantId: item.selectedVariant?.id,
+            size: item.selectedSize,
+          );
+    }
+  }
 
   @override
   void dispose() {
@@ -55,8 +82,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           _promoError = promo == null
               ? 'Invalid promo code.'
               : promo.isExpired
-                  ? 'This promo code has expired.'
-                  : 'This promo code is no longer active.';
+              ? 'This promo code has expired.'
+              : promo.isRedemptionCapReached
+              ? 'This promo code has reached its usage limit.'
+              : 'This promo code is no longer active.';
         });
       } else {
         setState(() {
@@ -89,14 +118,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       return _selectedAddressId;
     }
     final defaultAddress = addresses.where((a) => a.isDefault).toList();
-    return defaultAddress.isNotEmpty ? defaultAddress.first.id : addresses.first.id;
+    return defaultAddress.isNotEmpty
+        ? defaultAddress.first.id
+        : addresses.first.id;
   }
 
   Future<bool> _revalidateCart() async {
     final result = await ref.read(cartProvider.notifier).refreshFromServer();
     if (!mounted) return false;
     if (result.isEmpty) {
-      setState(() => _error = 'Your cart is empty or items are no longer available.');
+      setState(
+        () => _error = 'Your cart is empty or items are no longer available.',
+      );
       return false;
     }
     if (result.changed) {
@@ -117,7 +150,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 
   Future<void> _pay({Address? shippingAddress}) async {
-    final items = ref.read(cartProvider);
+    // The Pay button's disabled-while-processing state only takes effect
+    // on the next rebuild frame, so a very fast double-tap could otherwise
+    // invoke this twice before that frame — creating two pending orders/
+    // PaymentIntents for the same cart. Guard re-entrancy directly here.
+    if (_processing) return;
+    final items = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
     if (items.isEmpty) return;
 
     setState(() {
@@ -127,23 +165,27 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     String? pendingOrderId;
     try {
-      if (!await _revalidateCart()) return;
-      final freshItems = ref.read(cartProvider);
+      // Buy Now items were just picked from the product page moments ago
+      // and aren't backed by a persisted cart to re-sync against —
+      // create-payment-intent still independently revalidates stock/price
+      // server-side regardless (see supabase/functions/create-payment-intent),
+      // so skipping this client-side pre-check here is safe.
+      if (!_isBuyNow && !await _revalidateCart()) return;
+      final freshItems = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
       if (freshItems.isEmpty) return;
 
       final intent = await PaymentRepository().createPaymentIntent(
         currency: 'sgd',
-        fulfillment: _fulfillment == _Fulfillment.pickup ? 'pickup' : 'delivery',
-        shippingAddress: _fulfillment == _Fulfillment.delivery
-            ? shippingAddress?.toShippingJson()
-            : null,
+        shippingAddress: shippingAddress?.toShippingJson(),
         promoCode: _appliedPromo?.code,
         items: [
           for (final item in freshItems)
             {
               'product_id': item.product.id,
               'quantity': item.quantity,
-              if (item.selectedVariant != null) 'variant_id': item.selectedVariant!.id,
+              if (item.selectedVariant != null)
+                'variant_id': item.selectedVariant!.id,
+              if (item.selectedSize != null) 'size_label': item.selectedSize,
             },
         ],
       );
@@ -174,7 +216,19 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       );
       await Stripe.instance.presentPaymentSheet();
 
-      ref.read(cartProvider.notifier).clear();
+      // Buy Now never touched the persistent cart, so there's nothing to
+      // clear — whatever was already in the cart before this purchase
+      // stays exactly as it was.
+      if (!_isBuyNow) ref.read(cartProvider.notifier).clear();
+      // The Orders list is a plain (non-autoDispose) FutureProvider, so
+      // without this it keeps showing whatever it last fetched — a
+      // customer who'd already opened "My Orders" before checking out
+      // would place an order successfully (see the order-detail screen
+      // that follows) but then find it missing from their order history
+      // until something else happened to invalidate it. Same reasoning
+      // for admin's list, since staff may have it open at the same time.
+      ref.invalidate(myOrdersProvider);
+      refreshAdminOrders(ref);
       // Land on the order itself (with a success banner) instead of
       // dumping the customer back to the shop grid with only a toast —
       // the order confirmation *is* the order detail screen, not a
@@ -215,8 +269,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final items = ref.watch(cartProvider);
-    final subtotal = ref.watch(cartTotalProvider);
+    final items = _isBuyNow ? _buyNowItems! : ref.watch(cartProvider);
+    final subtotal = _isBuyNow
+        ? items.fold<double>(0, (sum, i) => sum + i.subtotal)
+        : ref.watch(cartTotalProvider);
     final addressesAsync = ref.watch(myAddressesProvider);
     final settingsAsync = ref.watch(shopSettingsProvider);
 
@@ -231,165 +287,112 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             Expanded(
               child: ListView(
                 children: [
-                  const Text('FULFILLMENT',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.8,
-                          color: AppColors.grey)),
-                  const SizedBox(height: AppSpacing.sm),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                      boxShadow: AppShadows.card,
+                  const Text(
+                    'DELIVERY ADDRESS',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 0.8,
+                      color: AppColors.grey,
                     ),
-                    child: SegmentedButton<_Fulfillment>(
-                      segments: const [
-                        ButtonSegment(
-                          value: _Fulfillment.delivery,
-                          label: Text('Delivery'),
-                          icon: Icon(Icons.local_shipping_outlined, size: 18),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  addressesAsync.when(
+                    data: (addresses) {
+                      final selectedId = _resolveSelectedId(addresses);
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.white,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          boxShadow: AppShadows.card,
                         ),
-                        ButtonSegment(
-                          value: _Fulfillment.pickup,
-                          label: Text('Pickup'),
-                          icon: Icon(Icons.storefront_outlined, size: 18),
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          children: [
+                            if (addresses.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.all(AppSpacing.lg),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'You need a delivery address to check out.',
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        color: AppColors.grey,
+                                      ),
+                                    ),
+                                    const SizedBox(height: AppSpacing.md),
+                                    OutlinedButton.icon(
+                                      onPressed: _addAddress,
+                                      icon: const Icon(Icons.add, size: 18),
+                                      label: const Text('Add Address'),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else ...[
+                              for (final address in addresses)
+                                ListTile(
+                                  onTap: () => setState(
+                                    () => _selectedAddressId = address.id,
+                                  ),
+                                  leading: Icon(
+                                    address.id == selectedId
+                                        ? Icons.radio_button_checked
+                                        : Icons.radio_button_unchecked,
+                                    color: address.id == selectedId
+                                        ? AppColors.red
+                                        : AppColors.greySoft,
+                                  ),
+                                  title: Text(
+                                    '${address.label} — ${address.recipientName}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13.5,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    address.oneLine,
+                                    style: const TextStyle(fontSize: 12.5),
+                                  ),
+                                ),
+                              const Divider(
+                                height: 1,
+                                indent: 16,
+                                endIndent: 16,
+                              ),
+                              TextButton.icon(
+                                onPressed: _addAddress,
+                                icon: const Icon(Icons.add, size: 16),
+                                label: const Text('Add new address'),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
-                      selected: {_fulfillment},
-                      onSelectionChanged: (s) =>
-                          setState(() => _fulfillment = s.first),
+                      );
+                    },
+                    loading: () => const Padding(
+                      padding: EdgeInsets.all(AppSpacing.lg),
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                    error: (e, _) => _InlineRetryError(
+                      message: "Couldn't load your addresses.",
+                      onRetry: () => ref.invalidate(myAddressesProvider),
                     ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  if (_fulfillment == _Fulfillment.delivery) ...[
-                    const Text('DELIVERY ADDRESS',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppColors.grey)),
-                    const SizedBox(height: AppSpacing.sm),
-                    addressesAsync.when(
-                      data: (addresses) {
-                        final selectedId = _resolveSelectedId(addresses);
-                        return Container(
-                          decoration: BoxDecoration(
-                            color: AppColors.white,
-                            borderRadius: BorderRadius.circular(AppRadius.md),
-                            boxShadow: AppShadows.card,
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Column(
-                            children: [
-                              if (addresses.isEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.all(AppSpacing.lg),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'You need a delivery address to check out.',
-                                        style: TextStyle(fontSize: 13.5, color: AppColors.grey),
-                                      ),
-                                      const SizedBox(height: AppSpacing.md),
-                                      OutlinedButton.icon(
-                                        onPressed: _addAddress,
-                                        icon: const Icon(Icons.add, size: 18),
-                                        label: const Text('Add Address'),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              else ...[
-                                for (final address in addresses)
-                                  ListTile(
-                                    onTap: () =>
-                                        setState(() => _selectedAddressId = address.id),
-                                    leading: Icon(
-                                      address.id == selectedId
-                                          ? Icons.radio_button_checked
-                                          : Icons.radio_button_unchecked,
-                                      color: address.id == selectedId
-                                          ? AppColors.red
-                                          : AppColors.greySoft,
-                                    ),
-                                    title: Text(
-                                      '${address.label} — ${address.recipientName}',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600, fontSize: 13.5),
-                                    ),
-                                    subtitle: Text(address.oneLine,
-                                        style: const TextStyle(fontSize: 12.5)),
-                                  ),
-                                const Divider(height: 1, indent: 16, endIndent: 16),
-                                TextButton.icon(
-                                  onPressed: _addAddress,
-                                  icon: const Icon(Icons.add, size: 16),
-                                  label: const Text('Add new address'),
-                                ),
-                              ],
-                            ],
-                          ),
-                        );
-                      },
-                      loading: () => const Padding(
-                        padding: EdgeInsets.all(AppSpacing.lg),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                      error: (e, _) => Text('Error loading addresses: $e'),
+                  const Text(
+                    'ORDER SUMMARY',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 0.8,
+                      color: AppColors.grey,
                     ),
-                  ] else
-                    settingsAsync.when(
-                      data: (settings) {
-                        final farm = (settings['shop_address'] as String?)?.trim();
-                        final phone = (settings['shop_phone'] as String?)?.trim();
-                        return Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(AppSpacing.lg),
-                          decoration: BoxDecoration(
-                            color: AppColors.white,
-                            borderRadius: BorderRadius.circular(AppRadius.md),
-                            boxShadow: AppShadows.card,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('PICKUP LOCATION',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 12,
-                                      letterSpacing: 0.8,
-                                      color: AppColors.grey)),
-                              const SizedBox(height: AppSpacing.sm),
-                              Text(
-                                farm?.isNotEmpty == true ? farm! : 'Farm address TBD — contact shop.',
-                                style: const TextStyle(fontSize: 13.5, height: 1.4),
-                              ),
-                              if (phone != null && phone.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Text(phone,
-                                    style: const TextStyle(
-                                        fontSize: 12.5, color: AppColors.grey)),
-                              ],
-                            ],
-                          ),
-                        );
-                      },
-                      loading: () => const SizedBox.shrink(),
-                      error: (e, _) => Text('Error: $e'),
-                    ),
-                  const SizedBox(height: AppSpacing.lg),
-                  const Text('ORDER SUMMARY',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.8,
-                          color: AppColors.grey)),
+                  ),
                   const SizedBox(height: AppSpacing.sm),
                   Container(
                     decoration: BoxDecoration(
@@ -402,31 +405,56 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       children: [
                         for (final item in items)
                           ListTile(
-                            title: Text(item.product.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 14)),
+                            title: Text(
+                              item.product.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
                             subtitle: Text(
-                                item.selectedVariant != null
-                                    ? '${item.selectedVariant!.label} · Qty ${item.quantity}'
-                                    : 'Qty ${item.quantity}',
-                                style: const TextStyle(
-                                    fontSize: 12.5, color: AppColors.grey)),
-                            trailing: Text('S\$${item.subtotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700, fontSize: 14)),
+                              item.optionLabel != null
+                                  ? '${item.optionLabel} · Qty ${item.quantity}'
+                                  : 'Qty ${item.quantity}',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                color: AppColors.grey,
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  formatPrice(item.subtotal),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Remove',
+                                  visualDensity: VisualDensity.compact,
+                                  icon: const Icon(Icons.close, size: 18, color: AppColors.grey),
+                                  onPressed: () => _removeItem(item),
+                                ),
+                              ],
+                            ),
                           ),
                       ],
                     ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  const Text('PROMO CODE',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.8,
-                          color: AppColors.grey)),
+                  const Text(
+                    'PROMO CODE',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 0.8,
+                      color: AppColors.grey,
+                    ),
+                  ),
                   const SizedBox(height: AppSpacing.sm),
                   Container(
                     padding: const EdgeInsets.all(AppSpacing.lg),
@@ -438,18 +466,25 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     child: _appliedPromo != null
                         ? Row(
                             children: [
-                              const Icon(Icons.local_offer_outlined,
-                                  size: 18, color: AppColors.red),
+                              const Icon(
+                                Icons.local_offer_outlined,
+                                size: 18,
+                                color: AppColors.red,
+                              ),
                               const SizedBox(width: AppSpacing.sm),
                               Expanded(
                                 child: Text(
                                   '"${_appliedPromo!.code}" applied',
                                   style: const TextStyle(
-                                      fontWeight: FontWeight.w600, fontSize: 13.5),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13.5,
+                                  ),
                                 ),
                               ),
                               TextButton(
-                                  onPressed: _removePromo, child: const Text('Remove')),
+                                onPressed: _removePromo,
+                                child: const Text('Remove'),
+                              ),
                             ],
                           )
                         : Row(
@@ -458,7 +493,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                               Expanded(
                                 child: TextField(
                                   controller: _promoCtrl,
-                                  textCapitalization: TextCapitalization.characters,
+                                  textCapitalization:
+                                      TextCapitalization.characters,
                                   decoration: InputDecoration(
                                     hintText: 'Enter code',
                                     errorText: _promoError,
@@ -476,7 +512,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                       ? const SizedBox(
                                           height: 16,
                                           width: 16,
-                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
                                         )
                                       : const Text('Apply'),
                                 ),
@@ -491,13 +529,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           (settings['gst_percent'] as num?)?.toDouble() ?? 0;
                       final gstIncluded =
                           settings['gst_included_in_price'] as bool? ?? true;
-                      final discountAmount = _appliedPromo?.discountFor(subtotal) ?? 0;
+                      final discountAmount =
+                          _appliedPromo?.discountFor(subtotal) ?? 0;
                       final netSubtotal = subtotal - discountAmount;
                       final double gstAmount;
                       final double payableTotal;
                       if (gstIncluded) {
                         gstAmount =
-                            netSubtotal - (netSubtotal / (1 + gstPercent / 100));
+                            netSubtotal -
+                            (netSubtotal / (1 + gstPercent / 100));
                         payableTotal = netSubtotal;
                       } else {
                         gstAmount = netSubtotal * gstPercent / 100;
@@ -516,7 +556,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       padding: EdgeInsets.all(AppSpacing.lg),
                       child: Center(child: CircularProgressIndicator()),
                     ),
-                    error: (e, _) => Text('Error loading settings: $e'),
+                    error: (e, _) => _InlineRetryError(
+                      message: "Couldn't load checkout totals.",
+                      onRetry: () => ref.invalidate(shopSettingsProvider),
+                    ),
                   ),
                 ],
               ),
@@ -529,18 +572,22 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   color: AppColors.redSoft,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                child: Text(_error!,
-                    style: const TextStyle(color: AppColors.redDark, fontSize: 13)),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(
+                    color: AppColors.redDark,
+                    fontSize: 13,
+                  ),
+                ),
               ),
             ],
             const SizedBox(height: AppSpacing.lg),
             _PayButton(
-              fulfillment: _fulfillment,
               processing: _processing,
+              hasItems: items.isNotEmpty,
               addressesAsync: addressesAsync,
               resolveSelectedId: _resolveSelectedId,
               onPayDelivery: (address) => _pay(shippingAddress: address),
-              onPayPickup: () => _pay(),
             ),
           ],
         ),
@@ -549,45 +596,56 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 }
 
+/// Compact inline error+retry for a section nested inside the checkout
+/// list — a full-page [ErrorState] would look oversized here since this
+/// only replaces one card's worth of content, not the whole screen.
+class _InlineRetryError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _InlineRetryError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          const Icon(Icons.wifi_off_outlined, size: 18, color: AppColors.grey),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(message, style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+          ),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+}
+
 class _PayButton extends StatelessWidget {
-  final _Fulfillment fulfillment;
   final bool processing;
+  final bool hasItems;
   final AsyncValue<List<Address>> addressesAsync;
   final String? Function(List<Address>) resolveSelectedId;
   final void Function(Address) onPayDelivery;
-  final VoidCallback onPayPickup;
 
   const _PayButton({
-    required this.fulfillment,
     required this.processing,
+    required this.hasItems,
     required this.addressesAsync,
     required this.resolveSelectedId,
     required this.onPayDelivery,
-    required this.onPayPickup,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (fulfillment == _Fulfillment.pickup) {
-      return ElevatedButton(
-        onPressed: processing ? null : onPayPickup,
-        child: processing
-            ? const SizedBox(
-                height: 18,
-                width: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: AppColors.white),
-              )
-            : const Text('Pay with Stripe'),
-      );
-    }
-
     return addressesAsync.maybeWhen(
       data: (addresses) {
         final selectedId = resolveSelectedId(addresses);
         final matching = addresses.where((a) => a.id == selectedId);
         final selectedAddress = matching.isNotEmpty ? matching.first : null;
-        final canPay = selectedAddress != null && !processing;
+        final canPay = selectedAddress != null && !processing && hasItems;
         return ElevatedButton(
           onPressed: canPay ? () => onPayDelivery(selectedAddress) : null,
           child: processing
@@ -595,11 +653,15 @@ class _PayButton extends StatelessWidget {
                   height: 18,
                   width: 18,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.white),
+                    strokeWidth: 2,
+                    color: AppColors.white,
+                  ),
                 )
-              : Text(selectedAddress == null
-                  ? 'Add an address to continue'
-                  : 'Pay with Stripe'),
+              : Text(
+                  selectedAddress == null
+                      ? 'Add an address to continue'
+                      : 'Pay with Stripe',
+                ),
         );
       },
       orElse: () => const SizedBox.shrink(),
@@ -638,10 +700,14 @@ class _TotalsCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Subtotal',
-                  style: TextStyle(fontSize: 13.5, color: AppColors.grey)),
-              Text('S\$${subtotal.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 13.5)),
+              const Text(
+                'Subtotal',
+                style: TextStyle(fontSize: 13.5, color: AppColors.grey),
+              ),
+              Text(
+                formatPrice(subtotal),
+                style: const TextStyle(fontSize: 13.5),
+              ),
             ],
           ),
           if (discountAmount > 0) ...[
@@ -649,10 +715,14 @@ class _TotalsCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Promo discount',
-                    style: TextStyle(fontSize: 13.5, color: AppColors.grey)),
-                Text('-S\$${discountAmount.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 13.5, color: AppColors.red)),
+                const Text(
+                  'Promo discount',
+                  style: TextStyle(fontSize: 13.5, color: AppColors.grey),
+                ),
+                Text(
+                  '-${formatPrice(discountAmount)}',
+                  style: const TextStyle(fontSize: 13.5, color: AppColors.red),
+                ),
               ],
             ),
           ],
@@ -660,10 +730,14 @@ class _TotalsCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('GST (${gstPercent.toStringAsFixed(0)}%)',
-                  style: const TextStyle(fontSize: 13.5, color: AppColors.grey)),
-              Text('S\$${gstAmount.toStringAsFixed(2)}',
-                  style: const TextStyle(fontSize: 13.5)),
+              Text(
+                'GST (${gstPercent.toStringAsFixed(0)}%)',
+                style: const TextStyle(fontSize: 13.5, color: AppColors.grey),
+              ),
+              Text(
+                formatPrice(gstAmount),
+                style: const TextStyle(fontSize: 13.5),
+              ),
             ],
           ),
           const Divider(height: AppSpacing.lg),
@@ -672,23 +746,31 @@ class _TotalsCard extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Text('Total',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          color: AppColors.grey)),
+                  const Text(
+                    'Total',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: AppColors.grey,
+                    ),
+                  ),
                   if (gstIncluded) ...[
                     const SizedBox(width: 4),
-                    const Text('(incl. GST)',
-                        style: TextStyle(fontSize: 11, color: AppColors.greySoft)),
+                    const Text(
+                      '(incl. GST)',
+                      style: TextStyle(fontSize: 11, color: AppColors.greySoft),
+                    ),
                   ],
                 ],
               ),
-              Text('S\$${payableTotal.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.black,
-                      fontSize: 20)),
+              Text(
+                formatPrice(payableTotal),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.black,
+                  fontSize: 20,
+                ),
+              ),
             ],
           ),
         ],

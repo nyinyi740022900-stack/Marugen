@@ -10,7 +10,6 @@ class PaymentRepository {
   /// the server ignores it and recalculates from the database.
   Future<Map<String, dynamic>> createPaymentIntent({
     required List<Map<String, dynamic>> items,
-    required String fulfillment, // 'delivery' | 'pickup'
     Map<String, dynamic>? shippingAddress,
     String currency = 'sgd',
     String? promoCode,
@@ -19,7 +18,6 @@ class PaymentRepository {
       'create-payment-intent',
       body: {
         'currency': currency,
-        'fulfillment': fulfillment,
         'items': items,
         'shipping_address': ?shippingAddress,
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,

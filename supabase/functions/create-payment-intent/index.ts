@@ -23,6 +23,7 @@ type CartLineIn = {
   product_id: string;
   quantity: number;
   variant_id?: string | null;
+  size_label?: string | null;
 };
 
 type BuiltLine = {
@@ -32,6 +33,8 @@ type BuiltLine = {
   unit_price: number;
   variant_id?: string;
   variant_label?: string;
+  size_label?: string;
+  image_url?: string | null;
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -57,8 +60,13 @@ Deno.serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    // Prefer the new publishable/secret key pair (set explicitly via
+    // `supabase secrets set`) over the legacy JWT anon/service_role names
+    // auto-injected by the platform, so this keeps working whether or not
+    // legacy JWT-based API keys are later disabled project-wide.
+    const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+    const serviceKey =
+      Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
@@ -76,7 +84,6 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const itemsIn = (body.items ?? []) as CartLineIn[];
     const currency = (body.currency as string | undefined) ?? 'sgd';
-    const fulfillment = body.fulfillment === 'pickup' ? 'pickup' : 'delivery';
     const shippingIn = body.shipping_address as Record<string, unknown> | undefined;
     const promoCodeRaw = (body.promo_code as string | undefined)?.trim();
 
@@ -84,28 +91,14 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Cart is empty' }, 400);
     }
 
-    let shippingAddress: Record<string, unknown>;
-    if (fulfillment === 'pickup') {
-      const { data: settings } = await admin
-        .from('settings')
-        .select('shop_name, shop_phone, shop_address')
-        .eq('id', 1)
-        .maybeSingle();
-      shippingAddress = {
-        fulfillment: 'pickup',
-        label: 'Self-collection',
-        recipient_name: settings?.shop_name ?? 'Marugen Koi Farm',
-        phone: settings?.shop_phone ?? '',
-        line1: settings?.shop_address ?? 'Farm pickup',
-        city: 'Singapore',
-        postal_code: '',
-      };
-    } else {
-      if (!shippingIn) {
-        return jsonResponse({ error: 'Shipping address required' }, 400);
-      }
-      shippingAddress = { ...shippingIn, fulfillment: 'delivery' };
+    // Delivery-only: the shop hand-delivers every order (see
+    // delivery_repository.dart for how live fish are routed to
+    // self-delivery instead of a courier). There is no self-collection/
+    // pickup flow anymore.
+    if (!shippingIn) {
+      return jsonResponse({ error: 'Shipping address required' }, 400);
     }
+    const shippingAddress: Record<string, unknown> = { ...shippingIn };
 
     const builtLines: BuiltLine[] = [];
     let subtotal = 0;
@@ -119,7 +112,9 @@ Deno.serve(async (req) => {
 
       const { data: product, error: productError } = await admin
         .from('products')
-        .select('id, name, category, price, show_price, stock_quantity, is_sold')
+        .select(
+          'id, name, category, price, sale_price, show_price, stock_quantity, is_sold, size_options, image_urls',
+        )
         .eq('id', productId)
         .maybeSingle();
 
@@ -128,10 +123,39 @@ Deno.serve(async (req) => {
       }
 
       const isLiveFish = product.category === 'koi' || product.category === 'arowana';
+      // Snapshot the product's cover photo onto the order line — the
+      // product itself (and its images) can be edited or deleted later,
+      // but the order's item photo should stay as it was at purchase time.
+      const imageUrl: string | null =
+        Array.isArray(product.image_urls) && product.image_urls.length > 0
+          ? product.image_urls[0]
+          : null;
+      const sizeOptions: string[] = Array.isArray(product.size_options)
+        ? product.size_options.filter((s: unknown) => typeof s === 'string' && s.trim().length > 0)
+        : [];
+      const sizeLabelRaw =
+        typeof line.size_label === 'string' ? line.size_label.trim() : '';
+      let sizeLabel: string | undefined;
+      if (!isLiveFish && sizeOptions.length > 0) {
+        if (!sizeLabelRaw || !sizeOptions.includes(sizeLabelRaw)) {
+          return jsonResponse(
+            { error: `${product.name} requires a valid size` },
+            400,
+          );
+        }
+        sizeLabel = sizeLabelRaw;
+      } else if (sizeLabelRaw) {
+        // Ignore stale client size when the product no longer has sizes.
+        sizeLabel = undefined;
+      }
 
       if (line.variant_id) {
-        if (isLiveFish) {
-          return jsonResponse({ error: 'Live fish cannot have variants' }, 400);
+        // A live-fish batch listing (e.g. "Japan Imported Koi Selection")
+        // uses variants as individual fish/variety picks — each is still
+        // one specific animal, so quantity must be 1 just like the
+        // no-variant live-fish path below.
+        if (isLiveFish && qty !== 1) {
+          return jsonResponse({ error: 'Live fish quantity must be 1' }, 400);
         }
 
         const { data: variant, error: variantError } = await admin
@@ -147,8 +171,31 @@ Deno.serve(async (req) => {
         if (!product.show_price) {
           return jsonResponse({ error: `${product.name} is contact-for-price` }, 400);
         }
-        if (variant.stock_quantity < qty) {
-          return jsonResponse({ error: `${product.name} (${variant.label}) is out of stock` }, 400);
+
+        if (sizeLabel) {
+          const { data: sizeStock, error: sizeStockError } = await admin
+            .from('product_variant_size_stocks')
+            .select('stock_quantity')
+            .eq('variant_id', variant.id)
+            .eq('size_label', sizeLabel)
+            .maybeSingle();
+          if (sizeStockError) {
+            return jsonResponse({ error: 'Could not check size stock' }, 500);
+          }
+          const available = Number(sizeStock?.stock_quantity ?? 0);
+          if (available < qty) {
+            return jsonResponse(
+              {
+                error: `${product.name} (${variant.label} · ${sizeLabel}) is out of stock`,
+              },
+              400,
+            );
+          }
+        } else if (variant.stock_quantity < qty) {
+          return jsonResponse(
+            { error: `${product.name} (${variant.label}) is out of stock` },
+            400,
+          );
         }
 
         const unit = Number(variant.price);
@@ -159,12 +206,26 @@ Deno.serve(async (req) => {
           unit_price: unit,
           variant_id: variant.id,
           variant_label: variant.label,
+          size_label: sizeLabel,
+          image_url: imageUrl,
         });
         subtotal += unit * qty;
       } else {
         if (!product.show_price || product.price == null) {
           return jsonResponse({ error: `${product.name} is contact-for-price` }, 400);
         }
+        // Variant products (weight options, or a live-fish batch listing's
+        // fish/variety picks) must choose one on the client — checked
+        // before the base price/stock fields below, which are unused once
+        // variants exist and may be stale.
+        const { count } = await admin
+          .from('product_variants')
+          .select('id', { count: 'exact', head: true })
+          .eq('product_id', productId);
+        if ((count ?? 0) > 0) {
+          return jsonResponse({ error: `${product.name} requires a variant` }, 400);
+        }
+
         if (isLiveFish) {
           if (qty !== 1) {
             return jsonResponse({ error: 'Live fish quantity must be 1' }, 400);
@@ -176,21 +237,20 @@ Deno.serve(async (req) => {
           return jsonResponse({ error: `${product.name} is out of stock` }, 400);
         }
 
-        // Variant products must pick a size on the client.
-        const { count } = await admin
-          .from('product_variants')
-          .select('id', { count: 'exact', head: true })
-          .eq('product_id', productId);
-        if (!isLiveFish && (count ?? 0) > 0) {
-          return jsonResponse({ error: `${product.name} requires a variant` }, 400);
-        }
-
-        const unit = Number(product.price);
+        // Sale price wins only when it's actually a discount — never
+        // trust it blindly (e.g. a stale/bad value >= price).
+        const salePrice = Number(product.sale_price);
+        const unit =
+          product.sale_price != null && salePrice < Number(product.price)
+            ? salePrice
+            : Number(product.price);
         builtLines.push({
           product_id: product.id,
           product_name: product.name,
           quantity: qty,
           unit_price: unit,
+          size_label: sizeLabel,
+          image_url: imageUrl,
         });
         subtotal += unit * qty;
       }
@@ -200,10 +260,13 @@ Deno.serve(async (req) => {
 
     let discountAmount = 0;
     let promoCode: string | null = null;
+    let promoId: string | null = null;
     if (promoCodeRaw) {
       const { data: promo } = await admin
         .from('promo_codes')
-        .select('code, discount_type, discount_value, active, expires_at')
+        .select(
+          'id, code, discount_type, discount_value, active, expires_at, max_redemptions, times_redeemed',
+        )
         .ilike('code', promoCodeRaw)
         .maybeSingle();
 
@@ -213,6 +276,18 @@ Deno.serve(async (req) => {
       if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
         return jsonResponse({ error: 'Promo code expired' }, 400);
       }
+      if (promo.max_redemptions != null && promo.times_redeemed >= promo.max_redemptions) {
+        return jsonResponse({ error: 'This promo code has reached its usage limit' }, 400);
+      }
+      const { data: alreadyUsed } = await admin
+        .from('promo_code_redemptions')
+        .select('id')
+        .eq('promo_code_id', promo.id)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (alreadyUsed) {
+        return jsonResponse({ error: 'You have already used this promo code' }, 400);
+      }
 
       const raw =
         promo.discount_type === 'percent'
@@ -220,6 +295,7 @@ Deno.serve(async (req) => {
           : Number(promo.discount_value);
       discountAmount = roundMoney(Math.min(Math.max(raw, 0), subtotal));
       promoCode = promo.code;
+      promoId = promo.id;
     }
 
     const netSubtotal = roundMoney(subtotal - discountAmount);
@@ -272,12 +348,47 @@ Deno.serve(async (req) => {
         unit_price: line.unit_price,
         variant_id: line.variant_id ?? null,
         variant_label: line.variant_label ?? null,
+        size_label: line.size_label ?? null,
+        image_url: line.image_url ?? null,
       })),
     );
 
     if (itemsError) {
       await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
       return jsonResponse({ error: itemsError.message || 'Stock unavailable' }, 409);
+    }
+
+    // Claim the promo code atomically, the same way live-fish stock is
+    // claimed above (0010_payment_integrity.sql) — a plain check-then-use
+    // here would let two concurrent checkouts both slip past the cap or
+    // both redeem as the same user. `claim_promo_redemption` does the
+    // capped increment as one server-side statement; the redemption
+    // INSERT can only succeed once per (promo_code_id, user_id) thanks to
+    // the unique constraint in 0015_promo_code_limits.sql. Cancelling the
+    // order on failure re-runs the same stock-restore trigger the
+    // itemsError/stripeErr paths rely on, so nothing is left half-reserved.
+    if (promoId) {
+      const { data: claimed, error: claimError } = await admin.rpc('claim_promo_redemption', {
+        p_promo_id: promoId,
+      });
+      if (claimError || !claimed) {
+        await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
+        return jsonResponse({ error: 'This promo code has reached its usage limit' }, 409);
+      }
+
+      const { error: redemptionError } = await admin.from('promo_code_redemptions').insert({
+        promo_code_id: promoId,
+        user_id: user.id,
+        order_id: orderId,
+      });
+      if (redemptionError) {
+        // Unique violation (promo_code_id, user_id) means this user
+        // already redeemed it — release the slot we just claimed above so
+        // the cap isn't wrongly consumed by a rejected attempt.
+        await admin.rpc('release_promo_redemption', { p_promo_id: promoId });
+        await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
+        return jsonResponse({ error: 'You have already used this promo code' }, 409);
+      }
     }
 
     let paymentIntent: Stripe.PaymentIntent;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/confirm_dialog.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'settings_repository.dart';
 
@@ -20,10 +21,28 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _gstCtrl = TextEditingController();
   final _deliveryMinCtrl = TextEditingController();
   final _deliveryMaxCtrl = TextEditingController();
+  final _lowStockThresholdCtrl = TextEditingController();
   bool _gstIncluded = true;
   bool _showPriceDefault = true;
   bool _loading = true;
   bool _saving = false;
+  bool _signingOut = false;
+
+  Future<void> _confirmSignOut() async {
+    final confirmed = await confirmLogout(context);
+    if (!confirmed) return;
+
+    setState(() => _signingOut = true);
+    try {
+      await ref.read(authRepositoryProvider).signOut();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _signingOut = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not log out: $e')),
+      );
+    }
+  }
 
   @override
   void initState() {
@@ -41,6 +60,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _showPriceDefault = s['show_price_default'] as bool? ?? true;
     _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
     _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
+    _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
     if (mounted) setState(() => _loading = false);
   }
 
@@ -56,6 +76,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         'show_price_default': _showPriceDefault,
         'delivery_lead_days_min': int.tryParse(_deliveryMinCtrl.text.trim()) ?? 2,
         'delivery_lead_days_max': int.tryParse(_deliveryMaxCtrl.text.trim()) ?? 5,
+        'low_stock_threshold':
+            int.tryParse(_lowStockThresholdCtrl.text.trim()) ?? 5,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved')));
@@ -136,6 +158,20 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             style: TextStyle(fontSize: 12, color: AppColors.grey),
           ),
           const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('INVENTORY'),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _lowStockThresholdCtrl,
+            decoration: const InputDecoration(labelText: 'Low stock alert quantity'),
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            'Products at or below this quantity appear in the dashboard\'s '
+            'Low Stock list',
+            style: TextStyle(fontSize: 12, color: AppColors.grey),
+          ),
+          const SizedBox(height: AppSpacing.xl),
           ElevatedButton(
             onPressed: _saving ? null : _save,
             child: _saving
@@ -148,9 +184,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           const SizedBox(height: AppSpacing.xl),
           const Divider(),
           ListTile(
-            leading: const Icon(Icons.logout, color: AppColors.error),
+            leading: _signingOut
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                  )
+                : const Icon(Icons.logout, color: AppColors.error),
             title: const Text('Log Out', style: TextStyle(color: AppColors.error)),
-            onTap: () => ref.read(authRepositoryProvider).signOut(),
+            enabled: !_signingOut,
+            onTap: _confirmSignOut,
           ),
         ],
       ),

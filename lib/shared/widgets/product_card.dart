@@ -78,6 +78,15 @@ class ProductCard extends ConsumerWidget {
                         top: 8,
                         right: 40,
                         child: _Tag(label: product.fishDetails!.variety!),
+                      )
+                    else if (product.hasActiveSale)
+                      Positioned(
+                        left: 8,
+                        top: 8,
+                        child: _Tag(
+                          label: '-${product.discountPercent}%',
+                          color: AppColors.red,
+                        ),
                       ),
                     if (showFavoriteToggle)
                       Positioned(
@@ -141,26 +150,52 @@ class ProductCard extends ConsumerWidget {
                       style: const TextStyle(
                           fontWeight: FontWeight.w600, fontSize: 14, height: 1.2),
                     ),
-                    if (product.reviewCount > 0 ||
-                        product.soldCount > 0 ||
-                        product.hasVariants) ...[
-                      const SizedBox(height: 3),
-                      _StatsRow(product: product),
-                    ],
+                    // Always reserve this line's height (even with nothing
+                    // to show) so the price/cart-button row lands at the
+                    // same Y across every card in a grid row, whether or
+                    // not that particular card has options/reviews/sold count.
+                    const SizedBox(height: 3),
+                    _StatsRow(product: product),
                     const SizedBox(height: 4),
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            _priceLabel(product),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: product.isPurchasable ? AppColors.red : AppColors.grey,
-                              fontSize: 14,
-                            ),
-                          ),
+                          child: product.hasActiveSale
+                              ? Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      formatPrice(product.price!),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        color: AppColors.grey,
+                                        decoration: TextDecoration.lineThrough,
+                                      ),
+                                    ),
+                                    Text(
+                                      formatPrice(product.salePrice!),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.red,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Text(
+                                  _priceLabel(product),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: product.isPurchasable ? AppColors.red : AppColors.grey,
+                                    fontSize: 14,
+                                  ),
+                                ),
                         ),
                         _CardActionButtons(product: product, onOpenDetail: onTap),
                       ],
@@ -214,11 +249,10 @@ class _CardActionButtons extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    if (product.isLiveFish) {
+    if (product.isLiveFish && !product.hasVariants) {
       return _RoundIconButton(
-        icon: Icons.flash_on,
+        icon: Icons.add_shopping_cart,
         tooltip: 'Buy Now',
-        color: AppColors.red,
         onTap: () {
           final result = ref.read(cartProvider.notifier).add(product);
           if (result == CartAddResult.outOfStock) {
@@ -250,13 +284,11 @@ class _RoundIconButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
-  final Color color;
 
   const _RoundIconButton({
     required this.icon,
     required this.tooltip,
     required this.onTap,
-    this.color = AppColors.black,
   });
 
   @override
@@ -264,7 +296,7 @@ class _RoundIconButton extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: color,
+        color: AppColors.black,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -383,6 +415,11 @@ class _StatsRow extends StatelessWidget {
     }
     if (product.hasVariants) {
       parts.add('${product.variantCount} option${product.variantCount == 1 ? '' : 's'}');
+    }
+    // Nothing to say — still reserve the line's height so cards without
+    // stats don't pull their price/cart row up relative to cards that do.
+    if (product.avgRating == null && parts.isEmpty) {
+      return const SizedBox(height: 15);
     }
     return Row(
       mainAxisSize: MainAxisSize.min,

@@ -14,26 +14,76 @@ final myWishlistProvider = FutureProvider<List<WishlistItem>>((ref) {
 
 /// Just the favorited product ids — used to drive heart toggles on cards
 /// and the product detail screen without loading full product rows.
-final wishlistProductIdsProvider = FutureProvider<Set<String>>((ref) {
-  ref.watch(authStateProvider);
-  return ref.watch(wishlistRepositoryProvider).fetchMyWishlistProductIds();
-});
+///
+/// A hand-rolled `Notifier` (same pattern as `CartNotifier` in
+/// cart_providers.dart) rather than a plain `FutureProvider`: toggling a
+/// heart used to `ref.invalidate` this and wait for a full network
+/// refetch before the icon visually updated, which read as laggy/
+/// unresponsive on a tap that should feel instant. `toggle()` below
+/// flips the cached set immediately and only talks to the network in the
+/// background, reverting on failure.
+class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
+  @override
+  AsyncValue<Set<String>> build() {
+    ref.watch(authStateProvider);
+    _load();
+    return const AsyncLoading();
+  }
 
-/// Toggles a product's wishlist membership and refreshes the dependent
-/// providers. Callers (product card / detail) are expected to have already
-/// confirmed the user is logged in — guests are prompted to log in instead.
+  Future<void> _load() async {
+    try {
+      final ids = await ref.read(wishlistRepositoryProvider).fetchMyWishlistProductIds();
+      state = AsyncData(ids);
+    } catch (e, st) {
+      state = AsyncError(e, st);
+    }
+  }
+
+  Future<void> toggle(String productId, bool currentlyFavorited) async {
+    final current = state.valueOrNull ?? {};
+    final optimistic = {...current};
+    if (currentlyFavorited) {
+      optimistic.remove(productId);
+    } else {
+      optimistic.add(productId);
+    }
+    state = AsyncData(optimistic);
+
+    try {
+      final repo = ref.read(wishlistRepositoryProvider);
+      if (currentlyFavorited) {
+        await repo.remove(productId);
+      } else {
+        await repo.add(productId);
+      }
+    } catch (_) {
+      // Revert to the pre-toggle set on failure — the network call is the
+      // source of truth, the optimistic flip was only a guess.
+      state = AsyncData(current);
+      rethrow;
+    }
+  }
+}
+
+final wishlistProductIdsProvider =
+    NotifierProvider<WishlistIdsNotifier, AsyncValue<Set<String>>>(
+        WishlistIdsNotifier.new);
+
+/// Toggles a product's wishlist membership. Callers (product card /
+/// detail) are expected to have already confirmed the user is logged in
+/// — guests are prompted to log in instead.
 class WishlistController {
   final Ref ref;
   const WishlistController(this.ref);
 
   Future<void> toggle(String productId, bool currentlyFavorited) async {
-    final repo = ref.read(wishlistRepositoryProvider);
-    if (currentlyFavorited) {
-      await repo.remove(productId);
-    } else {
-      await repo.add(productId);
-    }
-    ref.invalidate(wishlistProductIdsProvider);
+    await ref
+        .read(wishlistProductIdsProvider.notifier)
+        .toggle(productId, currentlyFavorited);
+    // myWishlistProvider (full item list, used only by WishlistScreen's
+    // grid) still refetches — WishlistScreen itself removes the tapped
+    // card from local state immediately, so this lagging behind by a
+    // network round-trip doesn't show up as jank there.
     ref.invalidate(myWishlistProvider);
   }
 }

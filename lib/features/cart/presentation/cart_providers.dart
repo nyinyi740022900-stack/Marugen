@@ -4,14 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../shared/models/product.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../domain/cart_item.dart';
 
 /// Local storage key the cart is serialized under (product id + variant id
-/// + quantity only — full [Product]/[ProductVariant] data is re-fetched on
-/// hydration so stock/price stay in sync with the server instead of going
-/// stale on disk).
-const _cartPrefsKey = 'cart_items_v1';
+/// + size + quantity only — full [Product]/[ProductVariant] data is
+/// re-fetched on hydration so stock/price stay in sync with the server
+/// instead of going stale on disk). Scoped per signed-in user (falling
+/// back to a shared 'guest' bucket while logged out) — a single global key
+/// meant a device shared between two customers (or a demo/testing device)
+/// would show whoever logs in next the previous person's cart, letting
+/// them unknowingly buy/pay for someone else's items.
+String _cartPrefsKey(String? userId) => 'cart_items_v1::${userId ?? 'guest'}';
 
 /// Outcome of [CartNotifier.add] — lets the UI word its snackbar.
 enum CartAddResult { added, stockLimit, alreadyInCart, outOfStock }
@@ -32,8 +37,15 @@ String cartAddMessage(CartAddResult result) {
 }
 
 class CartNotifier extends Notifier<List<CartItem>> {
+  String? _userId;
+
   @override
   List<CartItem> build() {
+    // Re-runs whenever the signed-in user actually changes (login/logout/
+    // switch account) — see currentUserIdProvider — discarding whatever
+    // was in memory for the previous account and hydrating fresh from
+    // that user's own scoped storage key.
+    _userId = ref.watch(currentUserIdProvider);
     // Notifier.build() is synchronous, so kick the async hydration off in
     // a microtask and populate state once the saved cart (if any) has
     // been re-fetched from Supabase.
@@ -42,9 +54,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
   }
 
   Future<void> _hydrate() async {
+    final userId = _userId;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_cartPrefsKey);
+      final raw = prefs.getString(_cartPrefsKey(userId));
       if (raw == null || raw.isEmpty) return;
 
       final saved = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
@@ -55,6 +68,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
       for (final entry in saved) {
         final productId = entry['product_id'] as String?;
         final variantId = entry['variant_id'] as String?;
+        final sizeLabel = entry['size_label'] as String?;
         final quantity = entry['quantity'] as int? ?? 1;
         if (productId == null) continue;
         final product = await repo.fetchProductById(productId);
@@ -68,11 +82,24 @@ class CartNotifier extends Notifier<List<CartItem>> {
           if (match.isEmpty) continue;
           variant = match.first;
         }
-        items.add(CartItem(product: product, quantity: quantity, selectedVariant: variant));
+        if (product.hasSizeOptions) {
+          if (sizeLabel == null || !product.sizeOptions.contains(sizeLabel)) {
+            continue;
+          }
+        }
+        items.add(CartItem(
+          product: product,
+          quantity: quantity,
+          selectedVariant: variant,
+          selectedSize: product.hasSizeOptions ? sizeLabel : null,
+        ));
       }
-      // Only overwrite if the user hasn't already started shopping while
-      // hydration was in flight.
-      if (state.isEmpty) {
+      // Only apply if the user hasn't already started shopping while
+      // hydration was in flight, and — since fetching each product is
+      // several awaits deep — the signed-in user hasn't changed again in
+      // the meantime (a fast logout/login during hydration would otherwise
+      // let the previous account's items land in the new account's state).
+      if (state.isEmpty && _userId == userId) {
         state = items;
       }
     } catch (_) {
@@ -81,6 +108,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
   }
 
   Future<void> _persist() async {
+    final userId = _userId;
     try {
       final prefs = await SharedPreferences.getInstance();
       final payload = [
@@ -88,27 +116,42 @@ class CartNotifier extends Notifier<List<CartItem>> {
           {
             'product_id': item.product.id,
             'variant_id': item.selectedVariant?.id,
+            'size_label': item.selectedSize,
             'quantity': item.quantity,
           },
       ];
-      await prefs.setString(_cartPrefsKey, jsonEncode(payload));
+      await prefs.setString(_cartPrefsKey(userId), jsonEncode(payload));
     } catch (_) {
       // Non-fatal — cart just won't survive a restart this time.
     }
   }
 
-  /// Units of this line the shop can actually supply — the variant's
-  /// stock when one is selected, else the product's.
-  static int availableFor(Product product, ProductVariant? variant) =>
-      variant?.stockQuantity ?? product.availableStock;
+  /// Units of this line the shop can actually supply — weight×size cell
+  /// when sizes exist, else the variant's stock, else the product's.
+  static int availableFor(
+    Product product,
+    ProductVariant? variant, {
+    String? size,
+  }) {
+    if (product.hasSizeOptions && variant != null) {
+      return product.stockFor(variantId: variant.id, size: size);
+    }
+    return variant?.stockQuantity ?? product.availableStock;
+  }
 
   /// Adds [quantity] units, never exceeding available stock. Returns the
   /// result so the caller can tell the customer when the cap was hit
   /// instead of silently adding fewer than requested.
-  CartAddResult add(Product product, {int quantity = 1, ProductVariant? variant}) {
-    final key = '${product.id}::${variant?.id ?? ''}';
+  CartAddResult add(
+    Product product, {
+    int quantity = 1,
+    ProductVariant? variant,
+    String? size,
+  }) {
+    final selectedSize = product.hasSizeOptions ? size : null;
+    final key = '${product.id}::${variant?.id ?? ''}::${selectedSize ?? ''}';
     final index = state.indexWhere((i) => i.lineKey == key);
-    final available = availableFor(product, variant);
+    final available = availableFor(product, variant, size: selectedSize);
     if (available <= 0) return CartAddResult.outOfStock;
 
     if (index >= 0) {
@@ -122,7 +165,9 @@ class CartNotifier extends Notifier<List<CartItem>> {
       );
       state = updated;
       _persist();
-      return current + quantity > available ? CartAddResult.stockLimit : CartAddResult.added;
+      return current + quantity > available
+          ? CartAddResult.stockLimit
+          : CartAddResult.added;
     }
 
     state = [
@@ -131,32 +176,48 @@ class CartNotifier extends Notifier<List<CartItem>> {
         product: product,
         quantity: quantity.clamp(1, available),
         selectedVariant: variant,
+        selectedSize: selectedSize,
       ),
     ];
     _persist();
     return quantity > available ? CartAddResult.stockLimit : CartAddResult.added;
   }
 
-  void remove(String productId, {String? variantId}) {
+  void remove(String productId, {String? variantId, String? size}) {
     state = state
-        .where((i) => !(i.product.id == productId && i.selectedVariant?.id == variantId))
+        .where(
+          (i) => !(i.product.id == productId &&
+              i.selectedVariant?.id == variantId &&
+              i.selectedSize == size),
+        )
         .toList();
     _persist();
   }
 
-  void updateQuantity(String productId, int quantity, {String? variantId}) {
+  void updateQuantity(
+    String productId,
+    int quantity, {
+    String? variantId,
+    String? size,
+  }) {
     if (quantity <= 0) {
-      remove(productId, variantId: variantId);
+      remove(productId, variantId: variantId, size: size);
       return;
     }
     state = [
       for (final item in state)
-        if (item.product.id == productId && item.selectedVariant?.id == variantId)
+        if (item.product.id == productId &&
+            item.selectedVariant?.id == variantId &&
+            item.selectedSize == size)
           item.copyWith(
             quantity: quantity.clamp(
               1,
               // Never let the stepper run past what's in stock.
-              availableFor(item.product, item.selectedVariant).clamp(1, 1 << 30),
+              availableFor(
+                item.product,
+                item.selectedVariant,
+                size: item.selectedSize,
+              ).clamp(1, 1 << 30),
             ),
           )
         else
@@ -195,7 +256,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
       ProductVariant? variant = item.selectedVariant;
       if (variant != null) {
         final match = product.variants.where((v) => v.id == variant!.id);
-        if (match.isEmpty || match.first.stockQuantity < 1) {
+        if (match.isEmpty) {
           removed++;
           continue;
         }
@@ -206,7 +267,17 @@ class CartNotifier extends Notifier<List<CartItem>> {
         continue;
       }
 
-      final available = availableFor(product, variant);
+      String? size = item.selectedSize;
+      if (product.hasSizeOptions) {
+        if (size == null || !product.sizeOptions.contains(size)) {
+          removed++;
+          continue;
+        }
+      } else {
+        size = null;
+      }
+
+      final available = availableFor(product, variant, size: size);
       if (available < 1) {
         removed++;
         continue;
@@ -222,6 +293,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
         product: product,
         quantity: qty,
         selectedVariant: variant,
+        selectedSize: size,
       );
       if (refreshed.unitPrice != item.unitPrice) adjusted++;
       kept.add(refreshed);

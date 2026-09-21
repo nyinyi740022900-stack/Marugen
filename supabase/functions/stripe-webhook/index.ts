@@ -15,10 +15,36 @@ const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
 });
 const webhookSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? '';
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-);
+const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+// Prefer the new secret key (set explicitly via `supabase secrets set`)
+// over the legacy JWT service_role name the platform auto-injects, so
+// this keeps working whether or not legacy JWT-based API keys are later
+// disabled project-wide.
+const serviceRoleKey =
+  Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+
+const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+
+// Best-effort push notification via send-order-notification (see that
+// function for the full explanation) — service-role-to-service-role call,
+// so it's trusted without an extra admin check on the receiving end.
+// Never allowed to fail the webhook response back to Stripe: a push that
+// doesn't go out is far less costly than Stripe retrying (or giving up on)
+// an otherwise-successful payment confirmation.
+async function notifyOrderStatus(orderId: string, status: string) {
+  try {
+    await fetch(`${supabaseUrl}/functions/v1/send-order-notification`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ order_id: orderId, status }),
+    });
+  } catch (err) {
+    console.error('[stripe-webhook] notifyOrderStatus failed', err);
+  }
+}
 
 Deno.serve(async (req) => {
   const signature = req.headers.get('stripe-signature');
@@ -47,6 +73,9 @@ Deno.serve(async (req) => {
       if (error) {
         console.error('Failed to mark order paid', intent.id, error);
         return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+      }
+      if (orderId) {
+        await notifyOrderStatus(orderId, 'paid');
       }
       break;
     }

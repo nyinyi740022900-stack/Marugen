@@ -63,6 +63,10 @@ const STATUS_COPY: Record<string, { title: string; body: (orderShort: string) =>
     title: 'Order confirmed',
     body: (id) => `We've received payment for order #${id}. We'll start packing it soon.`,
   },
+  packing: {
+    title: 'Order packing',
+    body: (id) => `We're packing order #${id} now.`,
+  },
   shipped: {
     title: 'Order shipped',
     body: (id) => `Order #${id} is on its way.`,
@@ -100,6 +104,7 @@ async function sendPush(
   title: string,
   body: string,
   data: Record<string, string>,
+  badge: number,
 ): Promise<{ ok: boolean; error?: string; unregistered?: boolean }> {
   const fcmRes = await fetch(
     `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`,
@@ -109,7 +114,20 @@ async function sendPush(
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ message: { token, notification: { title, body }, data } }),
+      body: JSON.stringify({
+        message: {
+          token,
+          notification: { title, body },
+          data,
+          // Android ignores `apns`; harmless to always include. Sets the
+          // home screen app icon badge count to the recipient's current
+          // unread total (not just +1) so it's correct even if a push
+          // arrives out of order or a previous one was missed — mirrors
+          // AppIconBadge on the client, which does the same from the
+          // in-app inbox whenever the app is foregrounded.
+          apns: { payload: { aps: { badge } } },
+        },
+      }),
     },
   );
   if (!fcmRes.ok) {
@@ -349,11 +367,31 @@ Deno.serve(async (req) => {
     }
 
     const data = { order_id: order.id, ...(status ? { status } : {}), ...(event ? { event } : {}) };
+    // Each recipient's own current unread total, not just "+1" — so the
+    // badge is right even if this recipient had unread notifications
+    // from before, or if two pushes land close together.
+    const unreadCounts = await Promise.all(
+      tokenOwners.map((t) =>
+        admin
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', t.userId)
+          .eq('read', false)
+          .then(({ count }) => ({ userId: t.userId, count: count ?? 0 })),
+      ),
+    );
+    const badgeByUserId = new Map(unreadCounts.map((u) => [u.userId, u.count]));
     const results = await Promise.all(
       tokenOwners.map((t) =>
-        sendPush(serviceAccount, accessToken.token!, t.token, t.copy.title, t.copy.body, data).then(
-          (r) => ({ ...r, userId: t.userId }),
-        ),
+        sendPush(
+          serviceAccount,
+          accessToken.token!,
+          t.token,
+          t.copy.title,
+          t.copy.body,
+          data,
+          badgeByUserId.get(t.userId) ?? 1,
+        ).then((r) => ({ ...r, userId: t.userId })),
       ),
     );
     const sentCount = results.filter((r) => r.ok).length;

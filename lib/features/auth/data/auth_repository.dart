@@ -8,6 +8,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/config/env.dart';
+import '../../../core/notifications/app_icon_badge.dart';
 import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/app_user.dart';
@@ -216,6 +217,10 @@ class AuthRepository {
     // Must run before auth.signOut() below — clearing the token relies on
     // RLS scoping the update to the still-authenticated auth.uid().
     await PushNotificationService.clearTokenForCurrentUser();
+    // The app icon badge reflects *this* account's unread count — clear it
+    // so it doesn't keep showing a stale number on a shared/handed-down
+    // device after signing out.
+    await AppIconBadge.clear();
     try {
       if (_googleInitialized) {
         await GoogleSignIn.instance.signOut();

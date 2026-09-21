@@ -68,12 +68,13 @@ class OrderRepository {
   /// send-order-notification for the full explanation) — fire-and-forget
   /// so a notification hiccup never blocks or fails the admin's status
   /// update, which already succeeded above by the time this runs. Only
-  /// customer-meaningful transitions are worth a push; packing/refunded
-  /// are internal/rare enough to skip (the function itself would also
-  /// just skip an unrecognised status, this just avoids the network call).
+  /// customer-meaningful transitions are worth a push; refunded is
+  /// internal/rare enough to skip (the function itself would also just
+  /// skip an unrecognised status, this just avoids the network call).
   void _notifyStatus(String orderId, OrderStatus status) {
     const notifiable = {
       OrderStatus.paid,
+      OrderStatus.packing,
       OrderStatus.shipped,
       OrderStatus.delivered,
       OrderStatus.cancelled,

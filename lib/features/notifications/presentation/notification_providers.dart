@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/notifications/app_icon_badge.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/app_notification.dart';
 import '../../auth/presentation/auth_providers.dart';
@@ -66,7 +69,7 @@ class NotificationsNotifier extends Notifier<AsyncValue<List<AppNotification>>> 
             // initial select and the subscription coming up) — don't
             // double-add it.
             if (current.any((n) => n.id == notification.id)) return;
-            state = AsyncData([notification, ...current]);
+            _setData([notification, ...current]);
           },
         )
         .subscribe();
@@ -75,7 +78,7 @@ class NotificationsNotifier extends Notifier<AsyncValue<List<AppNotification>>> 
   Future<void> _load() async {
     try {
       final items = await ref.read(notificationRepositoryProvider).fetchMine();
-      state = AsyncData(items);
+      _setData(items);
     } catch (e, st) {
       state = AsyncError(e, st);
     }
@@ -84,26 +87,36 @@ class NotificationsNotifier extends Notifier<AsyncValue<List<AppNotification>>> 
   Future<void> markRead(String id) async {
     final current = state.valueOrNull;
     if (current == null) return;
-    state = AsyncData([
+    _setData([
       for (final n in current)
         if (n.id == id) n.copyWith(read: true) else n,
     ]);
     try {
       await ref.read(notificationRepositoryProvider).markRead(id);
     } catch (_) {
-      state = AsyncData(current);
+      _setData(current);
     }
   }
 
   Future<void> markAllRead() async {
     final current = state.valueOrNull;
     if (current == null) return;
-    state = AsyncData([for (final n in current) n.copyWith(read: true)]);
+    _setData([for (final n in current) n.copyWith(read: true)]);
     try {
       await ref.read(notificationRepositoryProvider).markAllRead();
     } catch (_) {
-      state = AsyncData(current);
+      _setData(current);
     }
+  }
+
+  /// Updates the provider state and keeps the home screen app icon badge
+  /// (see AppIconBadge) in sync with it in the same place, so every code
+  /// path that changes the inbox — initial load, a realtime insert, or a
+  /// read/unread flip — updates the badge too instead of relying on each
+  /// call site to remember to.
+  void _setData(List<AppNotification> items) {
+    state = AsyncData(items);
+    unawaited(AppIconBadge.set(items.where((n) => !n.read).length));
   }
 }
 

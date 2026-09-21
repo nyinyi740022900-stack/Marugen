@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Address;
@@ -17,6 +19,16 @@ import '../../shop/presentation/shell_tab_provider.dart';
 import '../data/order_repository.dart';
 import '../data/payment_repository.dart';
 import 'orders_providers.dart';
+
+/// A random per-attempt key for `create-payment-intent` — see
+/// CheckoutScreen's `_idempotencyKey` doc. Just needs to be unique per
+/// attempt, not a spec-compliant UUID, so a plain random hex string avoids
+/// pulling in a uuid package for this alone.
+String _randomIdempotencyKey() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+}
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   /// When set (Buy Now — see product_detail_screen.dart's `_buyNow`), this
@@ -48,6 +60,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       widget.buyNowItems == null ? null : List.of(widget.buyNowItems!);
 
   bool get _isBuyNow => _buyNowItems != null;
+
+  /// One key per checkout *attempt* — this screen instance. Every retry of
+  /// `_pay()` (a second tap after an error, or the app itself retrying a
+  /// dropped network response) reuses it so the server can recognize "this
+  /// is the same attempt" and return the already-reserved order/PaymentIntent
+  /// instead of creating a duplicate. Re-entering checkout (a new screen
+  /// instance) gets a fresh key, as it should — that's a genuinely new
+  /// attempt, possibly against a changed cart.
+  late final String _idempotencyKey = _randomIdempotencyKey();
 
   void _removeItem(CartItem item) {
     if (_isBuyNow) {
@@ -178,6 +199,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         currency: 'sgd',
         shippingAddress: shippingAddress?.toShippingJson(),
         promoCode: _appliedPromo?.code,
+        idempotencyKey: _idempotencyKey,
         items: [
           for (final item in freshItems)
             {

@@ -86,10 +86,44 @@ Deno.serve(async (req) => {
     const currency = (body.currency as string | undefined) ?? 'sgd';
     const shippingIn = body.shipping_address as Record<string, unknown> | undefined;
     const promoCodeRaw = (body.promo_code as string | undefined)?.trim();
+    const idempotencyKey = (body.idempotency_key as string | undefined)?.trim() || null;
 
     if (!Array.isArray(itemsIn) || itemsIn.length === 0) {
       return jsonResponse({ error: 'Cart is empty' }, 400);
     }
+
+    // Client sends the same idempotency_key for every retry of one checkout
+    // attempt (see checkout_screen.dart). If an earlier call already got as
+    // far as creating a pending order + PaymentIntent for this exact key —
+    // whether this request is a genuine retry after a dropped response, or
+    // it's racing a concurrent one — return that instead of reserving stock
+    // and creating a Stripe PaymentIntent a second time.
+    const userId: string = user.id;
+    async function findExistingPendingOrder() {
+      if (!idempotencyKey) return null;
+      const { data: existing } = await admin
+        .from('orders')
+        .select('id, stripe_payment_intent_id, total')
+        .eq('user_id', userId)
+        .eq('idempotency_key', idempotencyKey)
+        .eq('status', 'pending')
+        .maybeSingle();
+      if (!existing?.stripe_payment_intent_id) return null;
+      const existingIntent = await stripe.paymentIntents.retrieve(
+        existing.stripe_payment_intent_id,
+      );
+      return jsonResponse({
+        clientSecret: existingIntent.client_secret,
+        paymentIntentId: existingIntent.id,
+        orderId: existing.id,
+        amount: existing.total,
+        amountCents: existingIntent.amount,
+        currency: existingIntent.currency,
+      });
+    }
+
+    const existingResponse = await findExistingPendingOrder();
+    if (existingResponse) return existingResponse;
 
     // Delivery-only: the shop hand-delivers every order (see
     // delivery_repository.dart for how live fish are routed to
@@ -329,11 +363,20 @@ Deno.serve(async (req) => {
         shipping_address: shippingAddress,
         promo_code: promoCode,
         discount_amount: discountAmount > 0 ? discountAmount : null,
+        idempotency_key: idempotencyKey,
       })
       .select('id')
       .single();
 
     if (orderError || !order) {
+      // 23505 = unique_violation on orders_user_pending_idempotency_key_uidx
+      // — a concurrent request with the same idempotency_key won the race
+      // and inserted its pending order first. Return that one instead of
+      // failing the request outright.
+      if (orderError?.code === '23505') {
+        const raced = await findExistingPendingOrder();
+        if (raced) return raced;
+      }
       return jsonResponse({ error: `Could not create order: ${orderError?.message}` }, 500);
     }
 

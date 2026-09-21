@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1080887158917",
+    "project_id": "marugen-app",
+    "storage_bucket": "marugen-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1080887158917:android:98258cde310fb2928961ec",
+        "android_client_info": {
+          "package_name": "com.marugen.marugen_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBb2s30SfLDFleTDeiIsuV3UuJhyCPMZZ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

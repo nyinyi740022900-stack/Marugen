@@ -1,13 +1,18 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../delivery/easyparcel_providers.dart';
+import '../delivery/easyparcel_repository.dart';
 import 'settings_repository.dart';
 
 class AdminSettingsScreen extends ConsumerStatefulWidget {
@@ -27,6 +32,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _deliveryMaxCtrl = TextEditingController();
   final _lowStockThresholdCtrl = TextEditingController();
   final _bannerLinkCtrl = TextEditingController();
+  final _shopPostcodeCtrl = TextEditingController();
+  final _shopCityCtrl = TextEditingController();
+  final _shopStateCtrl = TextEditingController();
+  final _defaultWeightCtrl = TextEditingController();
   bool _gstIncluded = true;
   bool _showPriceDefault = true;
   bool _loading = true;
@@ -35,6 +44,42 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   XFile? _pickedBannerImage;
   String? _existingBannerImageUrl;
   bool _bannerActive = false;
+  final _easyParcelRepo = EasyParcelRepository();
+  bool _checkingEasyParcel = true;
+  EasyParcelStatus? _easyParcelStatus;
+
+  Future<void> _checkEasyParcelStatus() async {
+    setState(() => _checkingEasyParcel = true);
+    try {
+      final status = await _easyParcelRepo.connectionStatus();
+      if (mounted) setState(() => _easyParcelStatus = status);
+      // So the Delivery tab's "Ship with EasyParcel" option appears
+      // immediately once connected, instead of waiting for its own
+      // provider to happen to re-run.
+      ref.invalidate(easyParcelConnectedProvider);
+    } catch (_) {
+      // Non-fatal — Settings should still render if the check itself fails.
+    } finally {
+      if (mounted) setState(() => _checkingEasyParcel = false);
+    }
+  }
+
+  /// Opens EasyParcel's OAuth consent screen in the external browser — the
+  /// admin logs into their EasyParcel account there and approves, then
+  /// easyparcel-oauth-callback (a Supabase Edge Function, not this app)
+  /// exchanges the code and stores the tokens server-side. There's no way
+  /// for the app to know the moment that finishes, so "Refresh status"
+  /// (calling _checkEasyParcelStatus again) is how the admin confirms it.
+  Future<void> _connectEasyParcel() async {
+    final state = List.generate(24, (_) => Random.secure().nextInt(16).toRadixString(16)).join();
+    final uri = Uri.https('api.easyparcel.com', '/oauth/login', {
+      'client_id': 'f0e209dd-f3db-4f6f-a74b-c5aa743af87e',
+      'redirect_uri':
+          'https://gexgcwdkbeythrnqmihe.supabase.co/functions/v1/easyparcel-oauth-callback',
+      'state': state,
+    });
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 
   Future<void> _pickBannerImage() async {
     final picked = await ImagePicker().pickImage(
@@ -64,6 +109,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   void initState() {
     super.initState();
     _load();
+    _checkEasyParcelStatus();
   }
 
   Future<void> _load() async {
@@ -80,6 +126,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _existingBannerImageUrl = s['promo_banner_image_url']?.toString();
     _bannerLinkCtrl.text = s['promo_banner_link_url']?.toString() ?? '';
     _bannerActive = s['promo_banner_active'] as bool? ?? false;
+    _shopPostcodeCtrl.text = s['shop_postcode']?.toString() ?? '';
+    _shopCityCtrl.text = s['shop_city']?.toString() ?? '';
+    _shopStateCtrl.text = s['shop_state']?.toString() ?? '';
+    _defaultWeightCtrl.text = s['default_parcel_weight_kg']?.toString() ?? '1';
     if (mounted) setState(() => _loading = false);
   }
 
@@ -116,6 +166,11 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ? null
             : _bannerLinkCtrl.text.trim(),
         'promo_banner_active': _bannerActive,
+        'shop_postcode': _shopPostcodeCtrl.text.trim(),
+        'shop_city': _shopCityCtrl.text.trim(),
+        'shop_state': _shopStateCtrl.text.trim(),
+        'default_parcel_weight_kg':
+            double.tryParse(_defaultWeightCtrl.text.trim()) ?? 1.0,
       });
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -196,6 +251,105 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           const Text(
             'Shown on shop cards as an estimated delivery date range',
             style: TextStyle(fontSize: 12, color: AppColors.grey),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('EASYPARCEL INTEGRATION'),
+          const SizedBox(height: AppSpacing.sm),
+          const Text(
+            'Connect once to auto-book couriers and auto-track shipments '
+            'from the Delivery tab, instead of typing tracking numbers in '
+            'by hand.',
+            style: TextStyle(fontSize: 12, color: AppColors.grey),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.offWhite,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _easyParcelStatus?.connected == true
+                      ? Icons.check_circle
+                      : Icons.link_off,
+                  color: _easyParcelStatus?.connected == true
+                      ? AppColors.success
+                      : AppColors.grey,
+                  size: 20,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    _checkingEasyParcel
+                        ? 'Checking connection…'
+                        : _easyParcelStatus?.connected == true
+                            ? 'Connected'
+                                '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
+                            : 'Not connected',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                  ),
+                ),
+                TextButton(
+                  onPressed: _checkingEasyParcel ? null : _checkEasyParcelStatus,
+                  child: const Text('Refresh'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton.icon(
+            onPressed: _connectEasyParcel,
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: Text(
+              _easyParcelStatus?.connected == true
+                  ? 'Reconnect EasyParcel'
+                  : 'Connect EasyParcel',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Text(
+            'SENDER ADDRESS (used for shipping rate quotes)',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+              letterSpacing: 0.6,
+              color: AppColors.grey,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _shopPostcodeCtrl,
+                  decoration: const InputDecoration(labelText: 'Postcode'),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  controller: _shopCityCtrl,
+                  decoration: const InputDecoration(labelText: 'City'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _shopStateCtrl,
+            decoration: const InputDecoration(labelText: 'State (if applicable)'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _defaultWeightCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Default parcel weight (kg)',
+              hintText: 'Used for every order — per-item weight isn\'t tracked yet',
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
           ),
           const SizedBox(height: AppSpacing.xl),
           const _SectionLabel('INVENTORY'),

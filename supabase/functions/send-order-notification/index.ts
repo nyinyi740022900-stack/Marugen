@@ -86,6 +86,13 @@ const EVENT_COPY: Record<string, { title: string; body: (orderShort: string) => 
     title: 'Out for delivery',
     body: (id) => `Order #${id} is out for delivery today.`,
   },
+  // Fired by easyparcel-webhook on a courier-reported return — admin-only
+  // alert, no automatic order.status change (there's no "returned" status;
+  // whether to cancel/refund/re-ship is an admin judgment call).
+  shipment_returned: {
+    title: 'Shipment returned',
+    body: (id) => `The courier is returning order #${id}'s shipment to the shop.`,
+  },
 };
 
 const ADMIN_NEW_ORDER_COPY = {

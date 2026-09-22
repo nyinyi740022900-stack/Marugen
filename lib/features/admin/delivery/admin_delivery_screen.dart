@@ -8,6 +8,8 @@ import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../orders/presentation/orders_providers.dart';
 import 'delivery_repository.dart';
+import 'easyparcel_providers.dart';
+import 'easyparcel_repository.dart';
 
 /// 17TRACK carrier codes for couriers this shop actually uses — passed as
 /// `carrier_code` so 17TRACK doesn't have to guess from the tracking
@@ -34,6 +36,11 @@ class AdminDeliveryPane extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ordersAsync = ref.watch(adminOrdersProvider);
+    // Defaults to false (manual-entry-only) while unknown/loading/errored —
+    // EasyParcel is meant to be a convenience on top of the always-working
+    // manual path, never a blocker if the status check itself fails.
+    final easyParcelConnected =
+        ref.watch(easyParcelConnectedProvider).valueOrNull ?? false;
 
     return ordersAsync.when(
       data: (orders) {
@@ -55,7 +62,10 @@ class AdminDeliveryPane extends ConsumerWidget {
           padding: const EdgeInsets.all(AppSpacing.lg),
           itemCount: readyToShip.length,
           separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-          itemBuilder: (context, i) => _FulfillmentCard(order: readyToShip[i]),
+          itemBuilder: (context, i) => _FulfillmentCard(
+            order: readyToShip[i],
+            easyParcelConnected: easyParcelConnected,
+          ),
         );
       },
       loading: () => const Center(
@@ -68,7 +78,8 @@ class AdminDeliveryPane extends ConsumerWidget {
 
 class _FulfillmentCard extends ConsumerStatefulWidget {
   final Order order;
-  const _FulfillmentCard({required this.order});
+  final bool easyParcelConnected;
+  const _FulfillmentCard({required this.order, required this.easyParcelConnected});
 
   @override
   ConsumerState<_FulfillmentCard> createState() => _FulfillmentCardState();
@@ -76,6 +87,41 @@ class _FulfillmentCard extends ConsumerStatefulWidget {
 
 class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
   bool _markingDelivered = false;
+
+  /// Bottom sheet: fetch live rates, let the admin pick a courier, then
+  /// book — mirrors _enterTracking's dialog-then-register shape, but as a
+  /// sheet since the rate list is a longer, scrollable choice.
+  Future<void> _shipWithEasyParcel() async {
+    final selected = await showModalBottomSheet<EasyParcelRate>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => _EasyParcelRateSheet(orderId: widget.order.id),
+    );
+    if (selected == null || !mounted) return;
+
+    try {
+      await EasyParcelRepository().bookShipment(
+        orderId: widget.order.id,
+        serviceId: selected.serviceId,
+        courierId: selected.courierId,
+      );
+      refreshAdminOrders(ref);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(content: Text('Booked with ${selected.courierName} — tracking is automatic')),
+          );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text('EasyParcel error: $e')));
+      }
+    }
+  }
 
   Future<void> _markDeliveredByShop() async {
     final order = widget.order;
@@ -236,6 +282,22 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                           ),
                         ),
                       ),
+                      if (order.trackingProvider == 'easyparcel')
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.success.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(AppRadius.pill),
+                          ),
+                          child: const Text(
+                            'via EasyParcel',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.success,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                   if (order.trackingStatus != null) ...[
@@ -259,7 +321,12 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                         color: AppColors.grey,
                       ),
                     ),
-                  ] else ...[
+                  ] else if (order.trackingProvider != 'easyparcel') ...[
+                    // Manual/17TRACK path only — an EasyParcel-booked
+                    // shipment with no status yet just hasn't had its
+                    // first webhook update land; there's no "retry" action
+                    // for it (re-typing a tracking number would overwrite
+                    // a real EasyParcel booking with a manual one).
                     const SizedBox(height: AppSpacing.sm),
                     SizedBox(
                       width: double.infinity,
@@ -275,24 +342,35 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
               ),
             ),
           ] else
-            // Stacked full-width, not side-by-side: "Enter Tracking Number"
-            // wraps to 2 lines at this card's width while "Delivered by
-            // shop" fits on 1, so a Row split them into visibly mismatched
-            // heights. Stacking also reads as intended: courier tracking
-            // is the primary/default path (ElevatedButton, themed red —
-            // the app's actual primary-button style, not the unthemed
-            // `FilledButton` this used before, which rendered as a fully
-            // pill-shaped stadium and didn't match OutlinedButton's
-            // rounded-rect corners elsewhere on this same card),
-            // hand-delivery is the secondary path underneath.
+            // Stacked full-width, not side-by-side: buttons wrap to 2
+            // lines at this card's width while a Row split them into
+            // visibly mismatched heights. Stacking also reads as intended:
+            // when EasyParcel is connected it's the primary/default path
+            // (ElevatedButton, themed red — the app's actual
+            // primary-button style), manual entry demotes to secondary
+            // (OutlinedButton, matching everything below it), and
+            // hand-delivery stays the last/fallback path underneath.
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ElevatedButton.icon(
-                  onPressed: () => _enterTracking(),
-                  icon: const Icon(Icons.local_shipping_outlined, size: 17),
-                  label: const Text('Enter Tracking Number'),
-                ),
+                if (widget.easyParcelConnected) ...[
+                  ElevatedButton.icon(
+                    onPressed: _shipWithEasyParcel,
+                    icon: const Icon(Icons.local_shipping_outlined, size: 17),
+                    label: const Text('Ship with EasyParcel'),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  OutlinedButton.icon(
+                    onPressed: () => _enterTracking(),
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('Enter Tracking Number Manually'),
+                  ),
+                ] else
+                  ElevatedButton.icon(
+                    onPressed: () => _enterTracking(),
+                    icon: const Icon(Icons.local_shipping_outlined, size: 17),
+                    label: const Text('Enter Tracking Number'),
+                  ),
                 const SizedBox(height: AppSpacing.sm),
                 // For orders the shop hand-delivers itself — live fish
                 // especially, which never go through a courier/tracking
@@ -310,6 +388,154 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                 ),
               ],
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bottom sheet content for _shipWithEasyParcel — fetches rates on open,
+/// lets the admin pick one (price shown so it's an informed choice, not a
+/// black box), and pops the selection back for the caller to book.
+class _EasyParcelRateSheet extends StatefulWidget {
+  final String orderId;
+  const _EasyParcelRateSheet({required this.orderId});
+
+  @override
+  State<_EasyParcelRateSheet> createState() => _EasyParcelRateSheetState();
+}
+
+class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
+  late Future<List<EasyParcelRate>> _ratesFuture = _fetchRates();
+  EasyParcelRate? _selected;
+
+  Future<List<EasyParcelRate>> _fetchRates() {
+    // Cheapest first (EasyParcel's own docs recommend this default sort) —
+    // lets the admin book the cheapest option with one tap most of the time.
+    return EasyParcelRepository()
+        .getRates(widget.orderId)
+        .then((rates) => rates..sort((a, b) => a.price.compareTo(b.price)));
+  }
+
+  void _retry() => setState(() {
+        _selected = null;
+        _ratesFuture = _fetchRates();
+      });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Choose a courier',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            FutureBuilder<List<EasyParcelRate>>(
+              future: _ratesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Padding(
+                    padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.red)),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return _RateSheetMessage(
+                    icon: Icons.error_outline,
+                    message: 'Could not fetch rates: ${snapshot.error}',
+                    color: AppColors.error,
+                    onRetry: _retry,
+                  );
+                }
+                final rates = snapshot.data ?? [];
+                if (rates.isEmpty) {
+                  return _RateSheetMessage(
+                    icon: Icons.local_shipping_outlined,
+                    message: 'No courier rates available for this address.',
+                    color: AppColors.grey,
+                    onRetry: _retry,
+                  );
+                }
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final rate in rates)
+                      RadioListTile<EasyParcelRate>(
+                        contentPadding: EdgeInsets.zero,
+                        value: rate,
+                        groupValue: _selected,
+                        onChanged: (v) => setState(() => _selected = v),
+                        title: Text(rate.courierName),
+                        secondary: Text(
+                          '${rate.currency ?? 'S\$'} ${rate.price.toStringAsFixed(2)}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+            ElevatedButton(
+              onPressed: _selected == null
+                  ? null
+                  : () => Navigator.of(context).pop(_selected),
+              child: const Text('Book Shipment'),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shared empty/error state for the rate sheet — always offers a Retry so a
+/// transient failure (or fixing Settings in another tab) doesn't force the
+/// admin to close and reopen the whole sheet.
+class _RateSheetMessage extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  final Color color;
+  final VoidCallback onRetry;
+
+  const _RateSheetMessage({
+    required this.icon,
+    required this.message,
+    required this.color,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: color, fontSize: 13),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Retry'),
+          ),
         ],
       ),
     );

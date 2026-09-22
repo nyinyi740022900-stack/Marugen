@@ -137,6 +137,13 @@ class Order {
   final DateTime? trackingUpdatedAt;
   final bool trackingRegistered;
 
+  /// Which system booked/owns this shipment's tracking — 'easyparcel' or
+  /// 'seventeentrack' (manual entry), null if not shipped yet. Only
+  /// changes which admin actions are offered (e.g. hides "Enter Tracking
+  /// Number" once EasyParcel owns it); the tracking display itself reads
+  /// the same qxpressTrackingNo/trackingStatus* fields regardless.
+  final String? trackingProvider;
+
   /// What every screen should actually show — the assigned order number,
   /// or a shortened id fallback for the rare pre-migration row without one.
   String get displayNumber => orderNumber ?? id.substring(0, 8).toUpperCase();
@@ -158,6 +165,7 @@ class Order {
     this.trackingStatusDetail,
     this.trackingUpdatedAt,
     this.trackingRegistered = false,
+    this.trackingProvider,
   });
 
   factory Order.fromMap(Map<String, dynamic> map) {
@@ -183,6 +191,7 @@ class Order {
           ? DateTime.tryParse(map['tracking_updated_at'] as String)
           : null,
       trackingRegistered: map['tracking_registered'] as bool? ?? false,
+      trackingProvider: map['tracking_provider'] as String?,
     );
   }
 }

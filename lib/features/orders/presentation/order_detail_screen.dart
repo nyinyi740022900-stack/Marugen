@@ -13,6 +13,7 @@ import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../admin/delivery/delivery_repository.dart';
+import '../../admin/delivery/easyparcel_repository.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/review_providers.dart';
@@ -741,9 +742,13 @@ class _ShareReceiptButton extends ConsumerWidget {
   }
 }
 
-/// Live carrier status pulled from 17TRACK (via `track-register` when the
-/// admin ships the order, kept fresh by `track-webhook` pushes, and
-/// refreshable on demand here with `track-status`).
+/// Live carrier status — 17TRACK (via `track-register`/`track-webhook`/
+/// `track-status`) for manually-entered tracking numbers, or EasyParcel
+/// (via `easyparcel-book-shipment`/`easyparcel-webhook`/
+/// `easyparcel-refresh-status`) when `order.trackingProvider == 'easyparcel'`
+/// — the refresh button below routes to whichever one actually owns this
+/// shipment instead of always asking 17TRACK, which doesn't know about
+/// EasyParcel's tracking numbers at all.
 class _TrackingStatusCard extends ConsumerStatefulWidget {
   final Order order;
   const _TrackingStatusCard({required this.order});
@@ -758,7 +763,11 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
   Future<void> _refresh() async {
     setState(() => _refreshing = true);
     try {
-      await DeliveryRepository().refreshTrackingStatus(widget.order.id);
+      if (widget.order.trackingProvider == 'easyparcel') {
+        await EasyParcelRepository().refreshStatus(widget.order.id);
+      } else {
+        await DeliveryRepository().refreshTrackingStatus(widget.order.id);
+      }
       ref.invalidate(orderByIdProvider(widget.order.id));
     } catch (e) {
       if (mounted) {

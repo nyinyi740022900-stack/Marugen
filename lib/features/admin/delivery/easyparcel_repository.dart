@@ -71,6 +71,26 @@ class EasyParcelRepository {
       throw Exception(message);
     }
   }
+
+  /// Pulls the shipment's current status straight from EasyParcel (pickup,
+  /// in transit, delivered, returned, ...) and writes it onto the order —
+  /// the EasyParcel equivalent of [DeliveryRepository.refreshTrackingStatus]
+  /// for 17TRACK. Needed because easyparcel-webhook's push can't be relied
+  /// on alone (unverified signature — see its file header) and doesn't fire
+  /// at all in the EasyParcel sandbox.
+  Future<void> refreshStatus(String orderId) async {
+    final res = await _client.functions.invoke(
+      'easyparcel-refresh-status',
+      body: {'order_id': orderId},
+    );
+    if (res.status >= 400) {
+      final data = res.data;
+      final message = data is Map && data['error'] != null
+          ? data['error'].toString()
+          : 'Could not refresh tracking status';
+      throw Exception(message);
+    }
+  }
 }
 
 class EasyParcelStatus {

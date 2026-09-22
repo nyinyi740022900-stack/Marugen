@@ -236,7 +236,11 @@ class _OrderDetailBody extends ConsumerWidget {
           _TrackingStatusCard(order: order),
         ],
         const SizedBox(height: AppSpacing.lg),
-        OrderStatusTimeline(status: order.status),
+        OrderStatusTimeline(
+          status: order.status,
+          trackingProvider: order.trackingProvider,
+          trackingStatusCode: order.trackingStatusCode,
+        ),
         const SizedBox(height: AppSpacing.lg),
         if (shipping != null) ...[
           Row(

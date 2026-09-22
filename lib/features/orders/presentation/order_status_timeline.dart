@@ -68,36 +68,63 @@ class OrderStatusTimeline extends StatelessWidget {
       );
     }
 
-    final currentIndex = _steps.indexWhere((s) => s.$1 == status);
     final showCollected = trackingProvider == 'easyparcel';
 
-    // Whether the parcel has actually been collected — true either once
-    // EasyParcel reports it (code 3+), or implicitly once the order has
-    // moved past "shipped" (delivered), even if that particular refresh
-    // never landed.
-    final collected =
-        (trackingStatusCode != null && trackingStatusCode! >= 3) ||
-            currentIndex > _steps.indexWhere((s) => s.$1 == OrderStatus.shipped);
-    final collectedState = collected
-        ? _StepState.done
-        : status == OrderStatus.shipped
-            ? _StepState.current
-            : _StepState.upcoming;
+    // Build the merged step list (with "Collected" spliced in right after
+    // "Packed" for EasyParcel orders), then pick a single "current"
+    // position by its place IN THAT MERGED LIST — everything before it is
+    // done, everything after is upcoming. This is deliberately positional
+    // rather than deriving each step's done/current state from its own
+    // independent signal (status-index for the base steps,
+    // trackingStatusCode for Collected): those two signals disagree in the
+    // common case where an order is already `shipped` in the DB (set the
+    // moment it's booked) but not yet physically collected, and computing
+    // each step's state independently from whichever signal it happens to
+    // track could mark two steps "current" at once. Anchoring everything
+    // to one merged index guarantees exactly one current step, and also
+    // means "Shipped" intentionally doesn't show done until collection
+    // is confirmed — a more accurate label than the raw DB status alone.
+    final baseIndex = _steps.indexWhere((s) => s.$1 == status);
+    final packingIndex = _steps.indexWhere((s) => s.$1 == OrderStatus.packing);
+    final shippedIndex = _steps.indexWhere((s) => s.$1 == OrderStatus.shipped);
+    final collected = trackingStatusCode != null && trackingStatusCode! >= 3;
+
+    final labels = <String>[];
+    final icons = <IconData>[];
+    int? collectedMergedIndex;
+    int? shippedMergedIndex;
+    for (var i = 0; i < _steps.length; i++) {
+      if (i == shippedIndex) shippedMergedIndex = labels.length;
+      labels.add(_steps[i].$2);
+      icons.add(_steps[i].$3);
+      if (i == packingIndex && showCollected) {
+        collectedMergedIndex = labels.length;
+        labels.add('Collected');
+        icons.add(Icons.local_shipping_outlined);
+      }
+    }
+
+    final currentIndex = switch (baseIndex) {
+      // Steps at or before "Packed" are never preceded by the spliced-in
+      // Collected step, so their merged index still equals their original
+      // index in _steps.
+      _ when baseIndex <= packingIndex => baseIndex,
+      _ when baseIndex == shippedIndex =>
+        (showCollected && !collected) ? collectedMergedIndex! : shippedMergedIndex!,
+      _ => labels.length - 1, // delivered — last step
+    };
 
     final steps = <(String, IconData, _StepState)>[];
-    for (var i = 0; i < _steps.length; i++) {
+    for (var i = 0; i < labels.length; i++) {
       steps.add((
-        _steps[i].$2,
-        _steps[i].$3,
+        labels[i],
+        icons[i],
         i < currentIndex
             ? _StepState.done
             : i == currentIndex
                 ? _StepState.current
                 : _StepState.upcoming,
       ));
-      if (_steps[i].$1 == OrderStatus.packing && showCollected) {
-        steps.add(('Collected', Icons.local_shipping_outlined, collectedState));
-      }
     }
 
     return Container(

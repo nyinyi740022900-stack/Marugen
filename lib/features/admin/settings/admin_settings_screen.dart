@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -71,7 +70,16 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   /// for the app to know the moment that finishes, so "Refresh status"
   /// (calling _checkEasyParcelStatus again) is how the admin confirms it.
   Future<void> _connectEasyParcel() async {
-    final state = List.generate(24, (_) => Random.secure().nextInt(16).toRadixString(16)).join();
+    final String state;
+    try {
+      state = await EasyParcelRepository().startOAuth();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not start EasyParcel connection: $e')));
+      }
+      return;
+    }
     final uri = Uri.https('api.easyparcel.com', '/oauth/login', {
       'client_id': 'f0e209dd-f3db-4f6f-a74b-c5aa743af87e',
       'redirect_uri':

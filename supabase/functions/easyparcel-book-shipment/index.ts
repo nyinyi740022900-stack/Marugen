@@ -86,10 +86,22 @@ Deno.serve(async (req) => {
 
     const { data: order } = await admin
       .from('orders')
-      .select('id, status, total, shipping_address')
+      .select('id, status, total, shipping_address, tracking_registered, tracking_provider, qxpress_tracking_no')
       .eq('id', order_id)
       .maybeSingle();
     if (!order) return jsonError('Order not found', 404);
+    if (order.tracking_registered) {
+      // Guards a double-tap/retry from booking (and paying for) a second
+      // real shipment — without this, two calls for the same order_id both
+      // pass every check below independently and both hit EasyParcel's
+      // real, billed booking API.
+      return jsonError(
+        order.tracking_provider === 'easyparcel'
+          ? `This order already has an EasyParcel shipment booked (tracking: ${order.qxpress_tracking_no}).`
+          : 'This order already has a tracking number registered.',
+        409,
+      );
+    }
     const shipping = order.shipping_address as Record<string, unknown> | null;
     if (!shipping) return jsonError('Order has no shipping address', 400);
 
@@ -125,6 +137,25 @@ Deno.serve(async (req) => {
       .toISOString()
       .slice(0, 10);
     const weight = settings.default_parcel_weight_kg ?? 1;
+
+    // Atomically claim the order right before the real (billed) booking
+    // call — the `tracking_registered` check above is only a first-pass
+    // guard (two near-simultaneous requests could both pass it before
+    // either writes); this conditional update is what actually closes that
+    // window, since only one concurrent request can match
+    // `tracking_registered = false` and flip it. If the booking call below
+    // fails, the claim is released in the catch block so the admin can
+    // retry.
+    const { data: claimed } = await admin
+      .from('orders')
+      .update({ tracking_registered: true, tracking_provider: 'easyparcel' })
+      .eq('id', order_id)
+      .eq('tracking_registered', false)
+      .select('id')
+      .maybeSingle();
+    if (!claimed) {
+      return jsonError('This order is already being booked — please refresh.', 409);
+    }
 
     const submitRes = await fetch(
       'https://api.easyparcel.com/open_api/2026-06/shipment/submit_orders',
@@ -182,12 +213,22 @@ Deno.serve(async (req) => {
         }),
       },
     );
+    // Releases the claim taken above so a failed booking attempt doesn't
+    // permanently lock the order out of being retried (manually or via
+    // EasyParcel again) even though no real shipment was ever created.
+    const releaseClaim = () =>
+      admin
+        .from('orders')
+        .update({ tracking_registered: false, tracking_provider: null })
+        .eq('id', order_id);
+
     const submitData = await submitRes.json();
     // EasyParcel encodes success/failure in the body's own status_code
     // (HTTP status alone can be 200 with an error message inside) — see
     // easyparcel-get-rates for the same gotcha found while testing.
     if (!submitRes.ok || (submitData?.status_code && submitData.status_code !== 200)) {
       console.error('[easyparcel-book-shipment] submit failed', submitRes.status, JSON.stringify(submitData));
+      await releaseClaim();
       return jsonError(
         submitData?.message
             ? `EasyParcel: ${submitData.message}`
@@ -207,6 +248,7 @@ Deno.serve(async (req) => {
         ?.map((e: { message?: string }) => e?.message)
         .filter(Boolean)
         .join('; ');
+      await releaseClaim();
       return jsonError(
         `EasyParcel: ${errorMessage || 'shipment could not be booked'}`,
         502,
@@ -220,7 +262,18 @@ Deno.serve(async (req) => {
 
     if (!trackingNumber) {
       console.error('[easyparcel-book-shipment] no tracking number in response', submitData);
-      return jsonError('EasyParcel did not return a tracking number', 502);
+      // Deliberately NOT released — EasyParcel did create a real shipment
+      // (shipmentResult.status was "success") even though it withheld a
+      // tracking number, so retrying would book a second, duplicate one.
+      // shipmentId/awbUrl are saved below so the booking isn't lost.
+      await admin
+        .from('orders')
+        .update({ easyparcel_shipment_id: shipmentId ?? null, easyparcel_awb_url: awbUrl ?? null })
+        .eq('id', order_id);
+      return jsonError(
+        'EasyParcel booked the shipment but did not return a tracking number yet — check back shortly or contact EasyParcel support.',
+        502,
+      );
     }
 
     // Mirrors track-register: a shipment being booked means the parcel is
@@ -256,6 +309,14 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (err) {
+    // Deliberately does NOT release the tracking_registered claim here —
+    // an unexpected error (e.g. the submit_orders fetch itself throwing,
+    // network timeout) leaves it genuinely unknown whether EasyParcel
+    // actually created the shipment before this failed. Auto-releasing
+    // would let a retry double-book if it did; leaving it claimed forces a
+    // manual check (EasyParcel dashboard, or the admin's Settings →
+    // EasyParcel connection) before booking again.
+    console.error('[easyparcel-book-shipment] unexpected error', err);
     return jsonError(`${err}`, 500);
   }
 });

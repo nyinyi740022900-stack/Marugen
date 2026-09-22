@@ -88,6 +88,15 @@ class _FulfillmentCard extends ConsumerStatefulWidget {
 class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
   bool _markingDelivered = false;
 
+  // Guards against a double-tap/second call while a booking is in flight —
+  // without it, the button stayed enabled for the whole await below, and a
+  // second tap before the order's qxpressTrackingNo/refreshAdminOrders
+  // updated the UI could fire a second, real (billed) EasyParcel booking
+  // for the same order. The Edge Function itself also now refuses a
+  // second booking (see easyparcel-book-shipment's tracking_registered
+  // claim) — this is the fast, same-request defense in front of that.
+  bool _bookingShipment = false;
+
   /// Bottom sheet: fetch live rates, let the admin pick a courier, then
   /// book — mirrors _enterTracking's dialog-then-register shape, but as a
   /// sheet since the rate list is a longer, scrollable choice.
@@ -100,6 +109,7 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
     );
     if (selected == null || !mounted) return;
 
+    setState(() => _bookingShipment = true);
     try {
       await EasyParcelRepository().bookShipment(
         orderId: widget.order.id,
@@ -120,6 +130,8 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
           ..clearSnackBars()
           ..showSnackBar(SnackBar(content: Text('EasyParcel error: $e')));
       }
+    } finally {
+      if (mounted) setState(() => _bookingShipment = false);
     }
   }
 
@@ -355,9 +367,15 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
               children: [
                 if (widget.easyParcelConnected) ...[
                   ElevatedButton.icon(
-                    onPressed: _shipWithEasyParcel,
-                    icon: const Icon(Icons.local_shipping_outlined, size: 17),
-                    label: const Text('Ship with EasyParcel'),
+                    onPressed: _bookingShipment ? null : _shipWithEasyParcel,
+                    icon: _bookingShipment
+                        ? const SizedBox(
+                            height: 16,
+                            width: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                          )
+                        : const Icon(Icons.local_shipping_outlined, size: 17),
+                    label: Text(_bookingShipment ? 'Booking…' : 'Ship with EasyParcel'),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   OutlinedButton.icon(

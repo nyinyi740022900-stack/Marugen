@@ -42,16 +42,48 @@ function htmlResponse(body: string, status = 200) {
   );
 }
 
+// A state older than this is rejected even if it's still in the table —
+// bounds how long an admin has to complete the EasyParcel login/consent
+// screen after tapping "Connect EasyParcel".
+const maxStateAgeMs = 10 * 60 * 1000;
+
 Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
     const code = url.searchParams.get('code');
     const error = url.searchParams.get('error');
+    const state = url.searchParams.get('state');
     if (error) {
       return htmlResponse(`<h2>EasyParcel connection failed</h2><p>${error}</p>`, 400);
     }
     if (!code) {
       return htmlResponse('<h2>Missing authorization code</h2>', 400);
+    }
+    if (!state) {
+      return htmlResponse('<h2>Missing state parameter</h2>', 400);
+    }
+
+    // Single-use: delete on lookup regardless of outcome, so a replayed
+    // callback URL (state reused) is always rejected from here on.
+    const { data: stateRow } = await admin
+      .from('easyparcel_oauth_state')
+      .delete()
+      .eq('state', state)
+      .select('created_at')
+      .maybeSingle();
+    if (!stateRow) {
+      return htmlResponse(
+        '<h2>This connection link is invalid or was already used</h2>' +
+          '<p>Please start over from Settings → Connect EasyParcel.</p>',
+        400,
+      );
+    }
+    const stateAgeMs = Date.now() - new Date(stateRow.created_at).getTime();
+    if (stateAgeMs > maxStateAgeMs) {
+      return htmlResponse(
+        '<h2>This connection link expired</h2><p>Please start over from Settings → Connect EasyParcel.</p>',
+        400,
+      );
     }
 
     const tokenRes = await fetch('https://api.easyparcel.com/oauth/token', {

@@ -12,6 +12,21 @@ import '../../../core/supabase/supabase_client.dart';
 class EasyParcelRepository {
   final _client = SupabaseService.client;
 
+  /// Server-generates and stores a single-use OAuth `state` value for the
+  /// connect flow (see 0047_easyparcel_oauth_state.sql / easyparcel-oauth-
+  /// callback) — the caller embeds this in the `oauth/login` URL it opens.
+  /// Doing this server-side (rather than generating `state` locally and
+  /// never persisting it, as this used to) is what lets the callback
+  /// actually verify the request came from a real admin session instead of
+  /// accepting any code for any EasyParcel account.
+  Future<String> startOAuth() async {
+    final res = await _client.functions.invoke('easyparcel-oauth-start');
+    if (res.status >= 400) {
+      throw Exception('Could not start EasyParcel connection');
+    }
+    return (res.data as Map)['state'] as String;
+  }
+
   Future<EasyParcelStatus> connectionStatus() async {
     final res = await _client.functions.invoke('easyparcel-status');
     if (res.status >= 400) {

@@ -19,6 +19,20 @@ class OrderRepository {
         .toList();
   }
 
+  /// Admin: a specific customer's full order history — for the "view
+  /// customer" screen. Works under the existing "Admins can view all
+  /// orders" RLS policy (0001_init.sql), no new migration needed.
+  Future<List<Order>> fetchOrdersForUser(String userId) async {
+    final data = await _client
+        .from('orders')
+        .select('*, items:order_items(*)')
+        .eq('user_id', userId)
+        .order('created_at', ascending: false);
+    return (data as List)
+        .map((e) => Order.fromMap(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Admin: all orders, optionally filtered by status. Unbounded — kept
   /// as the fallback path for when a search query is active (see
   /// [fetchAllOrdersPage] for the normal paged path); admin order counts

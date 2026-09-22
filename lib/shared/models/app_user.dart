@@ -24,6 +24,7 @@ class AppUser {
   final String? avatarUrl;
   final UserRole role;
   final bool notificationsEnabled;
+  final DateTime? createdAt;
 
   const AppUser({
     required this.id,
@@ -33,6 +34,7 @@ class AppUser {
     this.avatarUrl,
     this.role = UserRole.customer,
     this.notificationsEnabled = true,
+    this.createdAt,
   });
 
   factory AppUser.fromMap(Map<String, dynamic> map) {
@@ -44,6 +46,9 @@ class AppUser {
       avatarUrl: map['avatar_url'] as String?,
       role: userRoleFromString(map['role'] as String?),
       notificationsEnabled: map['notifications_enabled'] as bool? ?? true,
+      createdAt: map['created_at'] != null
+          ? DateTime.tryParse(map['created_at'] as String)
+          : null,
     );
   }
 }

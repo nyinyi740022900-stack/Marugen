@@ -41,6 +41,16 @@ class AuthRepository {
     return AppUser.fromMap(data);
   }
 
+  /// Looks up another user's profile by id — for the admin "view customer"
+  /// screen. Relies on the admin-only RLS policy added in
+  /// 0045_admin_view_profiles.sql; returns null for a non-admin caller or a
+  /// missing id, same as a not-found result.
+  Future<AppUser?> fetchAppUserById(String id) async {
+    final data = await _client.from('profiles').select().eq('id', id).maybeSingle();
+    if (data == null) return null;
+    return AppUser.fromMap(data);
+  }
+
   /// Uploads a new profile photo and saves its public URL onto the
   /// caller's own `profiles` row. Reuses the same `product-images`
   /// bucket as product/variety/service photos (see ProductRepository.

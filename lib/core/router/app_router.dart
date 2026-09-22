@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../features/admin/admin_shell.dart';
+import '../../features/admin/customers/admin_customer_profile_screen.dart';
 import '../../features/admin/dashboard/admin_low_stock_screen.dart';
 import '../../features/admin/products/admin_product_edit_screen.dart';
 import '../../features/auth/presentation/auth_providers.dart';
@@ -138,6 +139,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(path: '/admin', builder: (_, _) => const AdminShell()),
+      GoRoute(
+        path: '/admin/customers/:id',
+        builder: (_, state) =>
+            AdminCustomerProfileScreen(userId: state.pathParameters['id']!),
+      ),
       GoRoute(
         path: '/admin/low-stock',
         builder: (_, _) => const AdminLowStockScreen(),

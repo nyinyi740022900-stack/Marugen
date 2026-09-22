@@ -59,7 +59,7 @@ class OrderDetailScreen extends ConsumerWidget {
         title: const Text('Order Detail'),
         actions: [
           orderAsync.maybeWhen(
-            data: (o) => o == null ? const SizedBox.shrink() : _ShareReceiptButton(order: o),
+            data: (o) => o == null ? const SizedBox.shrink() : _OrderAppBarActions(order: o),
             orElse: () => const SizedBox.shrink(),
           ),
         ],
@@ -103,7 +103,7 @@ class _OrderDetailScaffold extends StatelessWidget {
       appBar: AppBar(
         title: Text(justPlaced ? 'Order Placed' : 'Order #${order.displayNumber}'),
         automaticallyImplyLeading: !justPlaced,
-        actions: [_ShareReceiptButton(order: order)],
+        actions: [_OrderAppBarActions(order: order)],
       ),
       body: _OrderDetailBody(order: order, justPlaced: justPlaced),
     );
@@ -718,6 +718,32 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
         label: const Text('Cancel Order'),
       ),
     );
+  }
+}
+
+/// AppBar action(s) for the order detail screen: an admin looking at a
+/// customer's order (not their own) gets a "view customer" button instead
+/// of the share-receipt one — sharing a receipt is a customer action, and
+/// swapping it out keeps the AppBar to one icon rather than crowding it.
+/// Everyone else (the customer on their own order, or an admin viewing
+/// their own order) keeps the share button as before.
+class _OrderAppBarActions extends ConsumerWidget {
+  final Order order;
+  const _OrderAppBarActions({required this.order});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final currentUser = ref.watch(currentAppUserProvider).valueOrNull;
+    final isAdmin = currentUser?.role.isAdmin ?? false;
+    final isOwnOrder = order.userId == currentUser?.id;
+    if (isAdmin && !isOwnOrder) {
+      return IconButton(
+        tooltip: 'View Customer',
+        icon: const Icon(Icons.person_outline),
+        onPressed: () => context.push('/admin/customers/${order.userId}'),
+      );
+    }
+    return _ShareReceiptButton(order: order);
   }
 }
 

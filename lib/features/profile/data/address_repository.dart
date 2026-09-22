@@ -18,6 +18,19 @@ class AddressRepository {
     return (data as List).map((e) => Address.fromMap(e as Map<String, dynamic>)).toList();
   }
 
+  /// Read-only lookup of another user's saved addresses — for the admin
+  /// "view customer" screen. Relies on the admin-only RLS policy added in
+  /// 0046_admin_view_addresses.sql.
+  Future<List<Address>> fetchAddressesForUser(String userId) async {
+    final data = await _client
+        .from('addresses')
+        .select()
+        .eq('user_id', userId)
+        .order('is_default', ascending: false)
+        .order('created_at', ascending: false);
+    return (data as List).map((e) => Address.fromMap(e as Map<String, dynamic>)).toList();
+  }
+
   Future<Address> createAddress(Address address) async {
     final user = SupabaseService.currentUser;
     if (user == null) throw Exception('Not logged in');

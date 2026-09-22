@@ -786,19 +786,20 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
   /// first refresh) keeps the original generic icon.
   (IconData, Color) _iconForStatusCode(int? code) {
     switch (code) {
-      case 0:
-        return (Icons.cancel_outlined, AppColors.error);
-      case 2:
-      case 7:
-      case 8:
+      case 2: // To Be Collected
+      case 7: // Schedule In Arrangement
+      case 8: // On Hold
         return (Icons.schedule, AppColors.warning);
-      case 3:
-      case 4:
-      case 11:
+      case 3: // Collected — courier has picked it up from the shop
+        return (Icons.inventory_2_outlined, AppColors.red);
+      case 11: // Drop Off — shop dropped it at a courier point itself
+        return (Icons.storefront_outlined, AppColors.red);
+      case 4: // Delivery In Transit
         return (Icons.local_shipping_outlined, AppColors.red);
-      case 5:
+      case 5: // Delivered
         return (Icons.check_circle_outline, AppColors.success);
-      case 6:
+      case 0: // Cancel
+      case 6: // Returned
         return (Icons.assignment_return_outlined, AppColors.error);
       default:
         return (Icons.track_changes, AppColors.red);

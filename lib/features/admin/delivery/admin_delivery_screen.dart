@@ -424,76 +424,88 @@ class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
 
   @override
   Widget build(BuildContext context) {
+    // A long courier list (10+ options is common) must not just overflow
+    // silently past the screen — cap the sheet's height and let only the
+    // list scroll, so the title stays put on top and Book/Cancel stay
+    // reachable at the bottom instead of being pushed off-screen.
+    final maxHeight = MediaQuery.of(context).size.height * 0.85;
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Choose a courier',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            FutureBuilder<List<EasyParcelRate>>(
-              future: _ratesFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-                    child: Center(child: CircularProgressIndicator(color: AppColors.red)),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return _RateSheetMessage(
-                    icon: Icons.error_outline,
-                    message: 'Could not fetch rates: ${snapshot.error}',
-                    color: AppColors.error,
-                    onRetry: _retry,
-                  );
-                }
-                final rates = snapshot.data ?? [];
-                if (rates.isEmpty) {
-                  return _RateSheetMessage(
-                    icon: Icons.local_shipping_outlined,
-                    message: 'No courier rates available for this address.',
-                    color: AppColors.grey,
-                    onRetry: _retry,
-                  );
-                }
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final rate in rates)
-                      RadioListTile<EasyParcelRate>(
-                        contentPadding: EdgeInsets.zero,
-                        value: rate,
-                        groupValue: _selected,
-                        onChanged: (v) => setState(() => _selected = v),
-                        title: Text(rate.courierName),
-                        secondary: Text(
-                          '${rate.currency ?? 'S\$'} ${rate.price.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: AppSpacing.md),
-            ElevatedButton(
-              onPressed: _selected == null
-                  ? null
-                  : () => Navigator.of(context).pop(_selected),
-              child: const Text('Book Shipment'),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-          ],
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: maxHeight),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Choose a courier',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: FutureBuilder<List<EasyParcelRate>>(
+                    future: _ratesFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
+                          child: Center(child: CircularProgressIndicator(color: AppColors.red)),
+                        );
+                      }
+                      if (snapshot.hasError) {
+                        return _RateSheetMessage(
+                          icon: Icons.error_outline,
+                          message: 'Could not fetch rates: ${snapshot.error}',
+                          color: AppColors.error,
+                          onRetry: _retry,
+                        );
+                      }
+                      final rates = snapshot.data ?? [];
+                      if (rates.isEmpty) {
+                        return _RateSheetMessage(
+                          icon: Icons.local_shipping_outlined,
+                          message: 'No courier rates available for this address.',
+                          color: AppColors.grey,
+                          onRetry: _retry,
+                        );
+                      }
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final rate in rates)
+                            RadioListTile<EasyParcelRate>(
+                              contentPadding: EdgeInsets.zero,
+                              value: rate,
+                              groupValue: _selected,
+                              onChanged: (v) => setState(() => _selected = v),
+                              title: Text(rate.courierName),
+                              secondary: Text(
+                                '${rate.currency ?? 'S\$'} ${rate.price.toStringAsFixed(2)}',
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              ElevatedButton(
+                onPressed: _selected == null
+                    ? null
+                    : () => Navigator.of(context).pop(_selected),
+                child: const Text('Book Shipment'),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
         ),
       ),
     );

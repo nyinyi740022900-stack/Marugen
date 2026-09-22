@@ -137,6 +137,11 @@ class Order {
   final DateTime? trackingUpdatedAt;
   final bool trackingRegistered;
 
+  /// EasyParcel's numeric shipment status code (see migration 0043) — null
+  /// for 17TRACK-tracked orders. Lets the UI pick a status-appropriate icon
+  /// without parsing free-text courier status strings.
+  final int? trackingStatusCode;
+
   /// Which system booked/owns this shipment's tracking — 'easyparcel' or
   /// 'seventeentrack' (manual entry), null if not shipped yet. Only
   /// changes which admin actions are offered (e.g. hides "Enter Tracking
@@ -166,6 +171,7 @@ class Order {
     this.trackingUpdatedAt,
     this.trackingRegistered = false,
     this.trackingProvider,
+    this.trackingStatusCode,
   });
 
   factory Order.fromMap(Map<String, dynamic> map) {
@@ -192,6 +198,7 @@ class Order {
           : null,
       trackingRegistered: map['tracking_registered'] as bool? ?? false,
       trackingProvider: map['tracking_provider'] as String?,
+      trackingStatusCode: map['tracking_status_code'] as int?,
     );
   }
 }

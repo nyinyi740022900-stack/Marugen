@@ -138,6 +138,7 @@ Deno.serve(async (req) => {
       .update({
         tracking_status: statusText ?? null,
         tracking_status_detail: location,
+        tracking_status_code: statusCode ?? null,
         tracking_updated_at: new Date().toISOString(),
       })
       .eq('id', order_id);

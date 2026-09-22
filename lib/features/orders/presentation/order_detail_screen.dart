@@ -779,10 +779,37 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
     }
   }
 
+  /// Maps EasyParcel's numeric shipment status code (migration 0043) to an
+  /// icon + color so the card visually distinguishes "booked, courier
+  /// hasn't collected it yet" from "actually moving" instead of showing the
+  /// same truck-ish icon throughout. Null (17TRACK orders, or before the
+  /// first refresh) keeps the original generic icon.
+  (IconData, Color) _iconForStatusCode(int? code) {
+    switch (code) {
+      case 0:
+        return (Icons.cancel_outlined, AppColors.error);
+      case 2:
+      case 7:
+      case 8:
+        return (Icons.schedule, AppColors.warning);
+      case 3:
+      case 4:
+      case 11:
+        return (Icons.local_shipping_outlined, AppColors.red);
+      case 5:
+        return (Icons.check_circle_outline, AppColors.success);
+      case 6:
+        return (Icons.assignment_return_outlined, AppColors.error);
+      default:
+        return (Icons.track_changes, AppColors.red);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
     final hasStatus = order.trackingStatus != null && order.trackingStatus!.isNotEmpty;
+    final (statusIcon, statusColor) = _iconForStatusCode(order.trackingStatusCode);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -798,11 +825,11 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: AppColors.redSoft,
+              color: statusColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
             alignment: Alignment.center,
-            child: const Icon(Icons.track_changes, size: 18, color: AppColors.red),
+            child: Icon(statusIcon, size: 18, color: statusColor),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(

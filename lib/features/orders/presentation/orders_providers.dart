@@ -2,11 +2,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/order.dart';
 import '../../../shared/providers/paged_notifier.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../data/order_repository.dart';
 
 final orderRepositoryProvider = Provider<OrderRepository>((ref) => OrderRepository());
 
+/// Watches [authStateProvider] (same pattern as [currentAppUserProvider]) so
+/// this re-fetches once sign-in/session-restore actually completes. Without
+/// it, this FutureProvider reads `SupabaseService.currentUser` once at
+/// whatever instant Riverpod first builds the Orders tab — which happens
+/// immediately on app start inside CustomerShell's IndexedStack, often
+/// before the session has finished restoring — and permanently caches an
+/// empty list for the rest of the session since nothing else invalidates it.
 final myOrdersProvider = FutureProvider<List<Order>>((ref) {
+  ref.watch(authStateProvider);
   return ref.watch(orderRepositoryProvider).fetchMyOrders();
 });
 

@@ -235,6 +235,11 @@ Deno.serve(async (req) => {
         tracking_provider: 'easyparcel',
         tracking_registered: true,
         tracking_status: 'Booked',
+        // 7 = "Schedule In Arrangement" per EasyParcel's Shipment Status
+        // Codes — booked but not yet collected by the courier. Lets the
+        // customer-facing tracking card show a "waiting for pickup" icon
+        // instead of implying the parcel is already moving.
+        tracking_status_code: 7,
         tracking_updated_at: new Date().toISOString(),
         easyparcel_shipment_id: shipmentId ?? null,
         easyparcel_awb_url: awbUrl ?? null,

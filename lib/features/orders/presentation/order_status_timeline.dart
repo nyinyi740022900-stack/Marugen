@@ -53,118 +53,32 @@ class OrderStatusTimeline extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
-      child: StepDotRow(
-        steps: [for (final s in _steps) (s.$2, s.$3)],
-        currentIndex: currentIndex,
-      ),
-    );
-  }
-}
-
-/// The always-visible expected-journey path (booked → collected → in
-/// transit → delivered) for an EasyParcel shipment. Shown alongside the
-/// free-text tracking status card so the customer sees the whole route and
-/// roughly where they are even between refreshes/webhook pushes, instead of
-/// only ever a single current-status line with no sense of what's next.
-/// Codes per migration 0043 / EasyParcel's Shipment Status Codes.
-class EasyParcelStageTimeline extends StatelessWidget {
-  final int? statusCode;
-  const EasyParcelStageTimeline({super.key, required this.statusCode});
-
-  static const _stages = [
-    ('Booked', Icons.schedule),
-    ('Collected', Icons.inventory_2_outlined),
-    ('In Transit', Icons.local_shipping_outlined),
-    ('Delivered', Icons.check_circle_outline),
-  ];
-
-  int _stageIndexForCode(int? code) {
-    switch (code) {
-      case 3: // Collected
-        return 1;
-      case 4: // Delivery In Transit
-      case 11: // Drop Off
-        return 2;
-      case 5: // Delivered
-        return 3;
-      default: // null, 2 To Be Collected, 7 Schedule In Arrangement, 8 On Hold
-        return 0;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (statusCode == 0 || statusCode == 6) {
-      final isCancelled = statusCode == 0;
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        decoration: BoxDecoration(
-          color: AppColors.error.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(AppRadius.md),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.assignment_return_outlined, color: AppColors.error, size: 20),
-            const SizedBox(width: AppSpacing.sm),
-            Text(
-              isCancelled ? 'This shipment was cancelled.' : 'This shipment was returned.',
-              style: const TextStyle(
-                  color: AppColors.error, fontWeight: FontWeight.w600, fontSize: 13.5),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: AppShadows.card,
-      ),
-      child: StepDotRow(steps: _stages, currentIndex: _stageIndexForCode(statusCode)),
-    );
-  }
-}
-
-/// Shared horizontal stepper row used by [OrderStatusTimeline] and
-/// [EasyParcelStageTimeline] — a list of (label, icon) steps with the one
-/// at [currentIndex] highlighted and everything before it marked done.
-class StepDotRow extends StatelessWidget {
-  final List<(String, IconData)> steps;
-  final int currentIndex;
-  const StepDotRow({super.key, required this.steps, required this.currentIndex});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < steps.length; i++) ...[
-          Expanded(
-            child: _StepDot(
-              label: steps[i].$1,
-              icon: steps[i].$2,
-              state: i < currentIndex
-                  ? _StepState.done
-                  : i == currentIndex
-                      ? _StepState.current
-                      : _StepState.upcoming,
-            ),
-          ),
-          if (i != steps.length - 1)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 20),
-              child: Container(
-                width: 14,
-                height: 2,
-                color: i < currentIndex ? AppColors.red : AppColors.lightGrey,
+      child: Row(
+        children: [
+          for (var i = 0; i < _steps.length; i++) ...[
+            Expanded(
+              child: _StepDot(
+                label: _steps[i].$2,
+                icon: _steps[i].$3,
+                state: i < currentIndex
+                    ? _StepState.done
+                    : i == currentIndex
+                        ? _StepState.current
+                        : _StepState.upcoming,
               ),
             ),
+            if (i != _steps.length - 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Container(
+                  width: 14,
+                  height: 2,
+                  color: i < currentIndex ? AppColors.red : AppColors.lightGrey,
+                ),
+              ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

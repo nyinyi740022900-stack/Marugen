@@ -234,15 +234,6 @@ class _OrderDetailBody extends ConsumerWidget {
         if (order.qxpressTrackingNo != null) ...[
           const SizedBox(height: AppSpacing.lg),
           _TrackingStatusCard(order: order),
-          // The free-text status card above only ever shows the single
-          // latest known status, which can look stuck (e.g. sandbox
-          // shipments, or before the next refresh/webhook push). This
-          // always-visible expected route gives the customer a sense of
-          // progress and what's still ahead even without real-time data.
-          if (order.trackingProvider == 'easyparcel') ...[
-            const SizedBox(height: AppSpacing.md),
-            EasyParcelStageTimeline(statusCode: order.trackingStatusCode),
-          ],
         ],
         const SizedBox(height: AppSpacing.lg),
         OrderStatusTimeline(status: order.status),

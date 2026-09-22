@@ -132,14 +132,35 @@ class AdminDashboardScreen extends ConsumerWidget {
                     ),
               orElse: () => const SizedBox.shrink(),
             ),
-            const Text(
-              'TOP PRODUCTS',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppColors.grey,
-              ),
+            Row(
+              children: [
+                const Text(
+                  'TOP PRODUCTS',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    letterSpacing: 0.8,
+                    color: AppColors.grey,
+                  ),
+                ),
+                const Spacer(),
+                ordersAsync.maybeWhen(
+                  data: (orders) => rankTopProducts(orders).length > _TopProductsCard.maxRows
+                      ? GestureDetector(
+                          onTap: () => context.push('/admin/top-products'),
+                          child: const Text(
+                            'See all',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12.5,
+                              color: AppColors.red,
+                            ),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
+                  orElse: () => const SizedBox.shrink(),
+                ),
+              ],
             ),
             const SizedBox(height: AppSpacing.sm),
             ordersAsync.when(
@@ -493,23 +514,20 @@ class _StuckPendingSection extends ConsumerWidget {
 
 /// Top products by order-item quantity across all orders. Renders an
 /// empty state rather than nothing when there isn't enough order data yet.
+/// Only shows the top [maxRows] on the dashboard home to avoid the list
+/// growing unbounded as more products sell — "See all" (above) opens the
+/// full ranking on its own page instead.
 class _TopProductsCard extends StatelessWidget {
+  static const maxRows = 5;
+
   final List<Order> orders;
   const _TopProductsCard({required this.orders});
 
   @override
   Widget build(BuildContext context) {
-    final qtyByName = <String, int>{};
-    for (final order in orders) {
-      if (order.status == OrderStatus.cancelled) continue;
-      for (final item in order.items) {
-        qtyByName[item.productName] =
-            (qtyByName[item.productName] ?? 0) + item.quantity;
-      }
-    }
-    final ranked = qtyByName.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final top = ranked.take(5).toList();
+    final ranked = rankTopProducts(orders);
+    final top = ranked.take(maxRows).toList();
+    final hasMore = ranked.length > top.length;
 
     if (top.isEmpty) {
       return Container(
@@ -566,10 +584,42 @@ class _TopProductsCard extends StatelessWidget {
               ),
             ),
           ],
+          if (hasMore) ...[
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              dense: true,
+              onTap: () => context.push('/admin/top-products'),
+              title: Text(
+                '+${ranked.length - top.length} more',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: AppColors.grey,
+                ),
+              ),
+              trailing: const Icon(Icons.chevron_right, size: 18, color: AppColors.grey),
+            ),
+          ],
         ],
       ),
     );
   }
+}
+
+/// Product name → total quantity sold across non-cancelled orders,
+/// ranked highest-first. Shared by the dashboard's capped preview and the
+/// full "See all" page so both agree on the same ranking.
+List<MapEntry<String, int>> rankTopProducts(List<Order> orders) {
+  final qtyByName = <String, int>{};
+  for (final order in orders) {
+    if (order.status == OrderStatus.cancelled) continue;
+    for (final item in order.items) {
+      qtyByName[item.productName] = (qtyByName[item.productName] ?? 0) + item.quantity;
+    }
+  }
+  final ranked = qtyByName.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  return ranked;
 }
 
 class _StatCard extends StatelessWidget {

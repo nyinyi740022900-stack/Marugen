@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../features/admin/admin_shell.dart';
 import '../../features/admin/customers/admin_customer_profile_screen.dart';
 import '../../features/admin/dashboard/admin_low_stock_screen.dart';
+import '../../features/admin/dashboard/admin_top_products_screen.dart';
 import '../../features/admin/products/admin_product_edit_screen.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/auth/presentation/forgot_password_screen.dart';
@@ -147,6 +148,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/low-stock',
         builder: (_, _) => const AdminLowStockScreen(),
+      ),
+      GoRoute(
+        path: '/admin/top-products',
+        builder: (_, _) => const AdminTopProductsScreen(),
       ),
       GoRoute(
         path: '/admin/products/new',

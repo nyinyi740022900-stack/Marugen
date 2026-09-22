@@ -38,6 +38,10 @@ class Variety {
   /// young to mature.
   final List<VarietyStage> stages;
 
+  /// Off hides this entry from customers (RLS-enforced — see migration
+  /// 0044) without deleting it; admins still see it regardless.
+  final bool active;
+
   const Variety({
     required this.id,
     required this.name,
@@ -46,6 +50,7 @@ class Variety {
     this.imageUrl,
     this.traits = const [],
     this.stages = const [],
+    this.active = true,
   });
 
   factory Variety.fromMap(Map<String, dynamic> map) {
@@ -60,6 +65,7 @@ class Variety {
               ?.map((e) => VarietyStage.fromMap(e as Map<String, dynamic>))
               .toList() ??
           const [],
+      active: map['active'] as bool? ?? true,
     );
   }
 }
@@ -73,12 +79,17 @@ class KnowledgeArticle {
   final String? coverImageUrl;
   final DateTime? publishedAt;
 
+  /// Off hides this guide from customers (RLS-enforced — see migration
+  /// 0044) without deleting it; admins still see it regardless.
+  final bool active;
+
   const KnowledgeArticle({
     required this.id,
     required this.title,
     required this.bodyMarkdown,
     this.coverImageUrl,
     this.publishedAt,
+    this.active = true,
   });
 
   factory KnowledgeArticle.fromMap(Map<String, dynamic> map) {
@@ -90,6 +101,7 @@ class KnowledgeArticle {
       publishedAt: map['published_at'] != null
           ? DateTime.tryParse(map['published_at'] as String)
           : null,
+      active: map['active'] as bool? ?? true,
     );
   }
 }

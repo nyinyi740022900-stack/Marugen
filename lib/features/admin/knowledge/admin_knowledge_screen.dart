@@ -61,22 +61,43 @@ class _AdminVarieties extends ConsumerWidget {
                 ),
                 title: Text(v.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(
-                  '${v.category.toUpperCase()}'
-                  '${v.stages.isNotEmpty ? ' · ${v.stages.length} stages' : ''}',
+                  v.active
+                      ? '${v.category.toUpperCase()}'
+                          '${v.stages.isNotEmpty ? ' · ${v.stages.length} stages' : ''}'
+                      : 'Hidden from customers',
+                  style: TextStyle(color: v.active ? null : AppColors.error),
                 ),
-                trailing: IconButton(
-                  tooltip: 'Delete',
-                  icon: const Icon(Icons.delete_outline, color: AppColors.error),
-                  onPressed: () async {
-                    final confirmed = await confirmDestructiveAction(
-                      context,
-                      title: 'Delete variety?',
-                      message: 'This permanently removes "${v.name}". This cannot be undone.',
-                    );
-                    if (!confirmed) return;
-                    await ref.read(knowledgeRepositoryProvider).deleteVariety(v.id);
-                    ref.invalidate(varietiesProvider);
-                  },
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: v.active ? 'Hide from customers' : 'Show to customers',
+                      icon: Icon(
+                        v.active ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        color: v.active ? AppColors.grey : AppColors.error,
+                      ),
+                      onPressed: () async {
+                        await ref
+                            .read(knowledgeRepositoryProvider)
+                            .upsertVariety({'active': !v.active}, id: v.id);
+                        ref.invalidate(varietiesProvider);
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Delete',
+                      icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                      onPressed: () async {
+                        final confirmed = await confirmDestructiveAction(
+                          context,
+                          title: 'Delete variety?',
+                          message: 'This permanently removes "${v.name}". This cannot be undone.',
+                        );
+                        if (!confirmed) return;
+                        await ref.read(knowledgeRepositoryProvider).deleteVariety(v.id);
+                        ref.invalidate(varietiesProvider);
+                      },
+                    ),
+                  ],
                 ),
                 onTap: () => showVarietyForm(context, ref, existing: v),
               ),
@@ -121,20 +142,43 @@ class _AdminArticles extends ConsumerWidget {
                       : null,
                 ),
                 title: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(a.bodyMarkdown, maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: IconButton(
-                  tooltip: 'Delete',
-                  icon: const Icon(Icons.delete_outline, color: AppColors.error),
-                  onPressed: () async {
-                    final confirmed = await confirmDestructiveAction(
-                      context,
-                      title: 'Delete article?',
-                      message: 'This permanently removes "${a.title}". This cannot be undone.',
-                    );
-                    if (!confirmed) return;
-                    await ref.read(knowledgeRepositoryProvider).deleteArticle(a.id);
-                    ref.invalidate(articlesProvider);
-                  },
+                subtitle: Text(
+                  a.active ? a.bodyMarkdown : 'Hidden from customers',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: a.active ? null : AppColors.error),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: a.active ? 'Hide from customers' : 'Show to customers',
+                      icon: Icon(
+                        a.active ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        color: a.active ? AppColors.grey : AppColors.error,
+                      ),
+                      onPressed: () async {
+                        await ref
+                            .read(knowledgeRepositoryProvider)
+                            .upsertArticle({'active': !a.active}, id: a.id);
+                        ref.invalidate(articlesProvider);
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'Delete',
+                      icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                      onPressed: () async {
+                        final confirmed = await confirmDestructiveAction(
+                          context,
+                          title: 'Delete article?',
+                          message: 'This permanently removes "${a.title}". This cannot be undone.',
+                        );
+                        if (!confirmed) return;
+                        await ref.read(knowledgeRepositoryProvider).deleteArticle(a.id);
+                        ref.invalidate(articlesProvider);
+                      },
+                    ),
+                  ],
                 ),
                 onTap: () => showArticleForm(context, ref, existing: a),
               ),

@@ -199,8 +199,16 @@ Deno.serve(async (req) => {
     const shipmentResult = orderResult?.shipments?.[0];
     if (!shipmentResult || shipmentResult.status !== 'success') {
       console.error('[easyparcel-book-shipment] shipment not successful', JSON.stringify(submitData));
+      // shipmentResult.errors is an array of arrays of {message, code, data}
+      // — e.g. [[{"message":"Insufficient Credit Balance", ...}]] — not a
+      // flat remark/reason field.
+      const errorMessage = shipmentResult?.errors
+        ?.flat()
+        ?.map((e: { message?: string }) => e?.message)
+        .filter(Boolean)
+        .join('; ');
       return jsonError(
-        `EasyParcel: ${shipmentResult?.remark ?? shipmentResult?.reason ?? 'shipment could not be booked'}`,
+        `EasyParcel: ${errorMessage || 'shipment could not be booked'}`,
         502,
       );
     }

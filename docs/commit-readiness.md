@@ -18,8 +18,9 @@ This is a source readiness check recorded before the user authorized commit/push
 - A filename/content scan of tracked and non-ignored candidate files found no matching Stripe secret, Supabase service-role JWT/secret, GitHub token, AWS access key or private key patterns. This is a targeted scan, not proof that every possible secret format is absent.
 - Real iPhone preview: Profile build succeeded, installed and launched on the connected iPhone. An explicit temporary empty entitlement file was used only for this local preview because the Personal Apple team cannot provision Sign in with Apple. Production entitlement/project sources were preserved; this does not validate Apple sign-in or App Store release signing.
 - iPad simulator preview: rebuilt after the UI polish; Shop and Guide layouts inspected natively. Guest Profile, Fulfillment, compact layouts, large text, light/dark themes and header safe areas are covered by widget tests. These latest UI changes have not been reinstalled on the real iPhone.
-- Android debug build remains unverified. The online build was stopped after approximately six minutes waiting on dependency downloads. An offline check then failed because the Gradle Kotlin DSL plugin `6.4.2` was not cached. This is a dependency resolution blocker, not evidence of a successful native build or a source compilation failure.
-- Retry the Android build when Gradle Plugin Portal dependencies can be downloaded; verify a signed release build separately before distributing the app.
+- Follow-up: the signed Android release bundle for [closed beta 1.0.1 (6)](closed-beta-1.0.1.md) succeeded and was accepted by Play Console for review. The remarks migration and matching payment/notification functions were deployed during that release task.
+- The earlier Android debug build remained unverified. The online build was stopped after approximately six minutes waiting on dependency downloads. An offline check then failed because the Gradle Kotlin DSL plugin `6.4.2` was not cached. This is a dependency resolution blocker, not evidence of a successful native build or a source compilation failure.
+- The follow-up release build downloaded the required Gradle dependencies successfully. Android device runtime testing remains separate from build verification.
 
 ## Readiness fixes
 

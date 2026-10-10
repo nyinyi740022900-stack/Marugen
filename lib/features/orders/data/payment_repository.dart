@@ -1,10 +1,15 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../../core/supabase/supabase_client.dart';
+import '../../../shared/utils/order_remarks.dart';
 
 /// Talks to the `create-payment-intent` Edge Function, which validates
 /// cart lines against DB prices/stock, creates a pending order, and
 /// returns a Stripe PaymentIntent for the *server-calculated* total.
 class PaymentRepository {
-  final _client = SupabaseService.client;
+  final SupabaseClient _client;
+  PaymentRepository({SupabaseClient? client})
+    : _client = client ?? SupabaseService.client;
 
   /// Creates a pending checkout. Do not send a client-computed [amount] —
   /// the server ignores it and recalculates from the database.
@@ -21,7 +26,13 @@ class PaymentRepository {
     String currency = 'sgd',
     String? promoCode,
     String? idempotencyKey,
+    String? customerRemarks,
+    int customerRemarksRevision = 0,
   }) async {
+    final remarks = normaliseOrderRemarks(customerRemarks);
+    if (customerRemarksRevision < 0 || customerRemarksRevision > 2147483647) {
+      throw const FormatException('Invalid order requests revision.');
+    }
     final res = await _client.functions.invoke(
       'create-payment-intent',
       body: {
@@ -30,6 +41,8 @@ class PaymentRepository {
         'shipping_address': ?shippingAddress,
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
         'idempotency_key': ?idempotencyKey,
+        'customer_remarks': remarks,
+        'customer_remarks_revision': customerRemarksRevision,
       },
     );
     if (res.status >= 400) {

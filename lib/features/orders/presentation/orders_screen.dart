@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -31,88 +34,113 @@ class OrdersScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('My Orders')),
-      body: Column(
-        children: [
-          if (rawOrdersAsync.valueOrNull?.isNotEmpty ?? false)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: _OrderSearchField(),
-            ),
-          Expanded(
-            child: visibleOrdersAsync.when(
-              data: (orders) {
-                if (orders.isEmpty) {
-                  return hasQuery
-                      ? const EmptyState(
-                          icon: Icons.search_off_outlined,
-                          title: 'No matching orders',
-                          subtitle: 'Try a different order number, status, or item name.',
-                        )
-                      : const EmptyState(
-                          icon: Icons.receipt_long_outlined,
-                          title: 'No orders yet',
-                          subtitle: 'Your placed orders will show up here.',
-                        );
-                }
-                // Pull-to-refresh — standard on every major shopping app's
-                // order list (Amazon/Shopee/Lazada) so a customer can
-                // manually confirm a just-placed order landed, rather than
-                // only ever seeing whatever was cached on first load.
-                return RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(myOrdersProvider),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: orders.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, i) {
-                      final order = orders[i];
-                      return Card(
-                        child: InkWell(
-                          onTap: () => context.push('/orders/${order.id}', extra: order),
-                          borderRadius: BorderRadius.circular(AppRadius.md),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text('Order #${order.displayNumber}',
-                                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                                    _StatusBadge(status: order.status),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(DateFormat.yMMMd().add_jm().format(order.createdAt),
-                                    style: const TextStyle(color: AppColors.grey, fontSize: 12)),
-                                const SizedBox(height: 6),
-                                Text(formatPrice(order.total),
-                                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                                if (order.qxpressTrackingNo != null) ...[
+      body: ContentWidth(
+        maxWidth: 760,
+        child: Column(
+          children: [
+            if (rawOrdersAsync.valueOrNull?.isNotEmpty ?? false)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: _OrderSearchField(),
+              ),
+            Expanded(
+              child: visibleOrdersAsync.when(
+                data: (orders) {
+                  if (orders.isEmpty) {
+                    return hasQuery
+                        ? const EmptyState(
+                            icon: Icons.search_off_outlined,
+                            title: 'No matching orders',
+                            subtitle: 'Try a different order number, status, or item name.',
+                          )
+                        : const EmptyState(
+                            icon: Icons.receipt_long_outlined,
+                            title: 'No orders yet',
+                            subtitle: 'Your placed orders will show up here.',
+                          );
+                  }
+                  // Pull-to-refresh — standard on every major shopping app's
+                  // order list (Amazon/Shopee/Lazada) so a customer can
+                  // manually confirm a just-placed order landed, rather than
+                  // only ever seeing whatever was cached on first load.
+                  return RefreshIndicator(
+                    onRefresh: () async => ref.invalidate(myOrdersProvider),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: orders.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, i) {
+                        final order = orders[i];
+                        return Card(
+                          child: InkWell(
+                            onTap: () => context.push(
+                              '/orders/${order.id}',
+                              extra: order,
+                            ),
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            child: Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Order #${order.displayNumber}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      _StatusBadge(status: order.status),
+                                    ],
+                                  ),
                                   const SizedBox(height: 6),
-                                  Text('Tracking: ${order.qxpressTrackingNo}',
-                                      style: const TextStyle(fontSize: 12)),
+                                  Text(
+                                    DateFormat.yMMMd().add_jm().format(
+                                      order.createdAt,
+                                    ),
+                                    style: TextStyle(
+                                      color: AppPalette.of(context).textMuted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    formatPrice(order.total),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  if (order.qxpressTrackingNo != null) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Tracking: ${order.qxpressTrackingNo}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                );
-              },
-              loading: () => ListView.separated(
-                padding: const EdgeInsets.all(16),
-                itemCount: 4,
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
-                itemBuilder: (context, i) => const ListRowSkeleton(),
+                        );
+                      },
+                    ),
+                  );
+                },
+                loading: () => ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: 4,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, i) => const ListRowSkeleton(),
+                ),
+                error: (e, _) =>
+                    ErrorState(onRetry: () => ref.invalidate(myOrdersProvider)),
               ),
-              error: (e, _) => ErrorState(onRetry: () => ref.invalidate(myOrdersProvider)),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -134,7 +162,9 @@ class _OrderSearchFieldState extends ConsumerState<_OrderSearchField> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: ref.read(myOrdersSearchQueryProvider));
+    _controller = TextEditingController(
+      text: ref.read(myOrdersSearchQueryProvider),
+    );
   }
 
   @override
@@ -154,7 +184,8 @@ class _OrderSearchFieldState extends ConsumerState<_OrderSearchField> {
     }
     return TextField(
       controller: _controller,
-      onChanged: (v) => ref.read(myOrdersSearchQueryProvider.notifier).state = v,
+      onChanged: (v) =>
+          ref.read(myOrdersSearchQueryProvider.notifier).state = v,
       decoration: InputDecoration(
         hintText: 'Search order #, status, or item…',
         isDense: true,
@@ -163,11 +194,12 @@ class _OrderSearchFieldState extends ConsumerState<_OrderSearchField> {
             ? null
             : IconButton(
                 icon: const Icon(Icons.close, size: 18),
-                onPressed: () => ref.read(myOrdersSearchQueryProvider.notifier).state = '',
+                onPressed: () =>
+                    ref.read(myOrdersSearchQueryProvider.notifier).state = '',
               ),
         contentPadding: const EdgeInsets.symmetric(vertical: 10),
         filled: true,
-        fillColor: AppColors.offWhite,
+        fillColor: AppPalette.of(context).background,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
           borderSide: BorderSide.none,
@@ -197,17 +229,17 @@ class _StatusBadge extends StatelessWidget {
   final OrderStatus status;
   const _StatusBadge({required this.status});
 
-  Color get _color {
+  Color _color(BuildContext context) {
     switch (status) {
       case OrderStatus.delivered:
-        return AppColors.success;
+        return AppPalette.of(context).success;
       case OrderStatus.cancelled:
       case OrderStatus.refunded:
-        return AppColors.error;
+        return AppPalette.of(context).error;
       case OrderStatus.pending:
-        return AppColors.warning;
+        return AppPalette.of(context).warning;
       default:
-        return AppColors.red;
+        return AppPalette.of(context).accent;
     }
   }
 
@@ -215,10 +247,17 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: _color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: _color(context).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Text(
         orderStatusLabel(status),
-        style: TextStyle(color: _color, fontSize: 11, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: _color(context),
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/utils/password_validator.dart';
 import 'auth_providers.dart';
 import 'login_screen.dart' show friendlyAuthError;
 
@@ -14,7 +15,8 @@ class ResetPasswordScreen extends ConsumerStatefulWidget {
   const ResetPasswordScreen({super.key});
 
   @override
-  ConsumerState<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
+  ConsumerState<ResetPasswordScreen> createState() =>
+      _ResetPasswordScreenState();
 }
 
 class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
@@ -75,7 +77,10 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           const SizedBox(height: 4),
           Text(
             'Enter and confirm your new password below.',
-            style: TextStyle(fontSize: 13.5, color: AppColors.grey),
+            style: TextStyle(
+              fontSize: 13.5,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
           const SizedBox(height: AppSpacing.xl),
           TextFormField(
@@ -88,14 +93,16 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
               suffixIcon: IconButton(
                 tooltip: _obscure ? 'Show password' : 'Hide password',
                 icon: Icon(
-                  _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                  _obscure
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
                   size: 20,
-                  color: AppColors.grey,
+                  color: AppPalette.of(context).textMuted,
                 ),
                 onPressed: () => setState(() => _obscure = !_obscure),
               ),
             ),
-            validator: (v) => (v == null || v.length < 6) ? 'Minimum 6 characters' : null,
+            validator: validateNewPassword,
           ),
           const SizedBox(height: AppSpacing.md),
           TextFormField(
@@ -115,12 +122,15 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
-                color: AppColors.redSoft,
+                color: AppPalette.of(context).accentSoft,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
               child: Text(
                 _error!,
-                style: const TextStyle(color: AppColors.redDark, fontSize: 13),
+                style: TextStyle(
+                  color: AppPalette.of(context).accent,
+                  fontSize: 13,
+                ),
               ),
             ),
           ],
@@ -131,7 +141,10 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
                 ? const SizedBox(
                     height: 18,
                     width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
                   )
                 : const Text('Update Password'),
           ),
@@ -147,8 +160,15 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         Container(
           width: 72,
           height: 72,
-          decoration: const BoxDecoration(color: AppColors.offWhite, shape: BoxShape.circle),
-          child: const Icon(Icons.check_circle_outline, size: 32, color: AppColors.red),
+          decoration: BoxDecoration(
+            color: AppPalette.of(context).background,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.check_circle_outline,
+            size: 32,
+            color: AppPalette.of(context).accent,
+          ),
         ),
         const SizedBox(height: AppSpacing.lg),
         const Text(
@@ -159,7 +179,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         Text(
           'Your password has been changed. Continue to the app.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13.5, color: AppColors.grey, height: 1.4),
+          style: TextStyle(
+            fontSize: 13.5,
+            color: AppPalette.of(context).textMuted,
+            height: 1.4,
+          ),
         ),
         const SizedBox(height: AppSpacing.xl),
         ElevatedButton(

@@ -68,20 +68,21 @@ class AdminPromoScreen extends ConsumerWidget {
                         p.isUsable ? Icons.check_circle_outline : Icons.block,
                         size: 18,
                         color: p.isUsable
-                            ? AppColors.success
-                            : AppColors.greySoft,
+                            ? AppPalette.of(context).success
+                            : AppPalette.of(context).textMuted,
                       ),
                       IconButton(
                         tooltip: 'Delete',
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.delete_outline,
-                          color: AppColors.error,
+                          color: AppPalette.of(context).error,
                         ),
                         onPressed: () async {
                           final confirmed = await confirmDestructiveAction(
                             context,
                             title: 'Delete promo code?',
-                            message: 'This permanently removes "${p.code}". This cannot be undone.',
+                            message:
+                                'This permanently removes "${p.code}". This cannot be undone.',
                           );
                           if (!confirmed) return;
                           await ref.read(promoRepositoryProvider).delete(p.id);
@@ -96,10 +97,13 @@ class AdminPromoScreen extends ConsumerWidget {
             },
           );
         },
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.red),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(adminPromoCodesProvider)),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(adminPromoCodesProvider)),
       ),
     );
   }
@@ -194,14 +198,20 @@ class AdminPromoScreen extends ConsumerWidget {
                   const SizedBox(height: 4),
                   Text(
                     'Used ${existing.timesRedeemed} time(s) so far.',
-                    style: const TextStyle(fontSize: 12, color: AppColors.grey),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppPalette.of(context).textMuted,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 4),
-                const Text(
+                Text(
                   'Every code is one-use-per-customer automatically — this '
                   'limit only caps the total number of customers who can use it.',
-                  style: TextStyle(fontSize: 12, color: AppColors.grey),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppPalette.of(context).textMuted,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 ListTile(
@@ -258,7 +268,9 @@ class AdminPromoScreen extends ConsumerWidget {
                     if (code.isEmpty || value <= 0) {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(
-                          content: Text('Enter a code and a discount value greater than 0.'),
+                          content: Text(
+                            'Enter a code and a discount value greater than 0.',
+                          ),
                         ),
                       );
                       return;
@@ -270,7 +282,9 @@ class AdminPromoScreen extends ConsumerWidget {
                     if (type == DiscountType.percent && value > 100) {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(
-                          content: Text('Percent discount can\'t be more than 100%.'),
+                          content: Text(
+                            'Percent discount can\'t be more than 100%.',
+                          ),
                         ),
                       );
                       return;

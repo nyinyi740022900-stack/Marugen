@@ -21,7 +21,7 @@ class AdminCustomerProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final profileAsync = ref.watch(customerProfileProvider(userId));
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: Text(profileAsync.valueOrNull?.fullName ?? 'Customer Profile'),
       ),
@@ -41,7 +41,7 @@ class AdminCustomerProfileScreen extends ConsumerWidget {
                 width: double.infinity,
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 decoration: BoxDecoration(
-                  color: AppColors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(AppRadius.md),
                   boxShadow: AppShadows.card,
                 ),
@@ -49,16 +49,20 @@ class AdminCustomerProfileScreen extends ConsumerWidget {
                   children: [
                     CircleAvatar(
                       radius: 28,
-                      backgroundColor: AppColors.redSoft,
-                      backgroundImage:
-                          user.avatarUrl != null ? NetworkImage(user.avatarUrl!) : null,
+                      backgroundColor: AppPalette.of(context).accentSoft,
+                      backgroundImage: user.avatarUrl != null
+                          ? NetworkImage(user.avatarUrl!)
+                          : null,
                       child: user.avatarUrl == null
                           ? Text(
                               (user.fullName?.isNotEmpty ?? false)
                                   ? user.fullName![0].toUpperCase()
                                   : '?',
-                              style: const TextStyle(
-                                  color: AppColors.red, fontWeight: FontWeight.w700, fontSize: 20),
+                              style: TextStyle(
+                                color: AppPalette.of(context).accent,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 20,
+                              ),
                             )
                           : null,
                     ),
@@ -67,23 +71,41 @@ class AdminCustomerProfileScreen extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(user.fullName ?? 'No name on file',
-                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                          Text(
+                            user.fullName ?? 'No name on file',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
                           if (user.email != null) ...[
                             const SizedBox(height: 2),
-                            Text(user.email!,
-                                style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+                            Text(
+                              user.email!,
+                              style: TextStyle(
+                                color: AppPalette.of(context).textMuted,
+                                fontSize: 13,
+                              ),
+                            ),
                           ],
                           if (user.phone != null) ...[
                             const SizedBox(height: 2),
-                            Text(user.phone!,
-                                style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+                            Text(
+                              user.phone!,
+                              style: TextStyle(
+                                color: AppPalette.of(context).textMuted,
+                                fontSize: 13,
+                              ),
+                            ),
                           ],
                           if (user.createdAt != null) ...[
                             const SizedBox(height: 4),
                             Text(
                               'Member since ${DateFormat.yMMMd().format(user.createdAt!)}',
-                              style: const TextStyle(color: AppColors.greySoft, fontSize: 11.5),
+                              style: TextStyle(
+                                color: AppPalette.of(context).textMuted,
+                                fontSize: 11.5,
+                              ),
                             ),
                           ],
                         ],
@@ -103,9 +125,14 @@ class AdminCustomerProfileScreen extends ConsumerWidget {
             ],
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-        error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(customerProfileProvider(userId))),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
+        ),
+        error: (e, _) => ErrorState(
+          onRetry: () => ref.invalidate(customerProfileProvider(userId)),
+        ),
       ),
     );
   }
@@ -117,9 +144,15 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: 0.8, color: AppColors.grey));
+    return Text(
+      text,
+      style: TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 12,
+        letterSpacing: 0.8,
+        color: AppPalette.of(context).textMuted,
+      ),
+    );
   }
 }
 
@@ -144,9 +177,14 @@ class _AddressesSection extends ConsumerWidget {
           ],
         );
       },
-      loading: () => const Padding(
+      loading: () => Padding(
         padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
-        child: Center(child: CircularProgressIndicator(color: AppColors.red, strokeWidth: 2)),
+        child: Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+            strokeWidth: 2,
+          ),
+        ),
       ),
       error: (e, _) => _EmptyCard(text: 'Could not load addresses: $e'),
     );
@@ -163,14 +201,18 @@ class _AddressCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.location_on_outlined, size: 18, color: AppColors.grey),
+          Icon(
+            Icons.location_on_outlined,
+            size: 18,
+            color: AppPalette.of(context).textMuted,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
@@ -178,24 +220,40 @@ class _AddressCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(address.label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(
+                      address.label,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
                     if (address.isDefault) ...[
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 1,
+                        ),
                         decoration: BoxDecoration(
-                          color: AppColors.redSoft,
+                          color: AppPalette.of(context).accentSoft,
                           borderRadius: BorderRadius.circular(AppRadius.pill),
                         ),
-                        child: const Text('Default',
-                            style: TextStyle(fontSize: 10, color: AppColors.redDark)),
+                        child: Text(
+                          'Default',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: AppPalette.of(context).accent,
+                          ),
+                        ),
                       ),
                     ],
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text('${address.recipientName} · ${address.phone}',
-                    style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
+                Text(
+                  '${address.recipientName} · ${address.phone}',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: AppPalette.of(context).textMuted,
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Text(address.oneLine, style: const TextStyle(fontSize: 12.5)),
               ],
@@ -221,32 +279,45 @@ class _OrderHistorySection extends ConsumerWidget {
         }
         return Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
           child: Column(
             children: [
               for (var i = 0; i < orders.length; i++) ...[
-                if (i != 0) const Divider(height: 1, indent: AppSpacing.lg, endIndent: AppSpacing.lg),
+                if (i != 0)
+                  const Divider(
+                    height: 1,
+                    indent: AppSpacing.lg,
+                    endIndent: AppSpacing.lg,
+                  ),
                 ListTile(
                   title: Text('Order #${orders[i].displayNumber}'),
                   subtitle: Text(
                     '${orderStatusLabel(orders[i].status)} · '
                     '${DateFormat.yMMMd().format(orders[i].createdAt)}',
                   ),
-                  trailing: Text(formatPrice(orders[i].total),
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  onTap: () => context.push('/orders/${orders[i].id}', extra: orders[i]),
+                  trailing: Text(
+                    formatPrice(orders[i].total),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  onTap: () =>
+                      context.push('/orders/${orders[i].id}', extra: orders[i]),
                 ),
               ],
             ],
           ),
         );
       },
-      loading: () => const Padding(
+      loading: () => Padding(
         padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
-        child: Center(child: CircularProgressIndicator(color: AppColors.red, strokeWidth: 2)),
+        child: Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+            strokeWidth: 2,
+          ),
+        ),
       ),
       error: (e, _) => _EmptyCard(text: 'Could not load order history: $e'),
     );
@@ -263,10 +334,13 @@ class _EmptyCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
       ),
-      child: Text(text, style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+      child: Text(
+        text,
+        style: TextStyle(color: AppPalette.of(context).textMuted, fontSize: 13),
+      ),
     );
   }
 }

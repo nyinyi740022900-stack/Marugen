@@ -9,6 +9,7 @@
 
 import Stripe from 'https://esm.sh/stripe@17?target=deno';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { normaliseCustomerRemarks, normaliseRemarksRevision, remarksRetryAction } from './order_remarks.ts';
 
 const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
   apiVersion: '2024-06-20',
@@ -87,6 +88,14 @@ Deno.serve(async (req) => {
     const shippingIn = body.shipping_address as Record<string, unknown> | undefined;
     const promoCodeRaw = (body.promo_code as string | undefined)?.trim();
     const idempotencyKey = (body.idempotency_key as string | undefined)?.trim() || null;
+    let customerRemarks: string | null;
+    let customerRemarksRevision: number;
+    try {
+      customerRemarks = normaliseCustomerRemarks(body.customer_remarks);
+      customerRemarksRevision = normaliseRemarksRevision(body.customer_remarks_revision);
+    } catch (error) {
+      return jsonResponse({ error: error instanceof Error ? error.message : 'Invalid order requests.' }, 400);
+    }
 
     if (!Array.isArray(itemsIn) || itemsIn.length === 0) {
       return jsonResponse({ error: 'Cart is empty' }, 400);
@@ -103,12 +112,37 @@ Deno.serve(async (req) => {
       if (!idempotencyKey) return null;
       const { data: existing } = await admin
         .from('orders')
-        .select('id, stripe_payment_intent_id, total')
+        .select('id, stripe_payment_intent_id, total, customer_remarks, customer_remarks_revision')
         .eq('user_id', userId)
         .eq('idempotency_key', idempotencyKey)
         .eq('status', 'pending')
         .maybeSingle();
       if (!existing?.stripe_payment_intent_id) return null;
+      // A retry must keep the same order/payment, but may carry an edited
+      // customer note after a dropped response. Never silently ignore it or
+      // modify an order that has already left the pending state.
+      const action = remarksRetryAction(
+        existing.customer_remarks ?? null, existing.customer_remarks_revision,
+        customerRemarks, customerRemarksRevision,
+      );
+      if (action === 'stale') {
+        return jsonResponse({ error: 'Your requests have changed. Retry with your latest requests.' }, 409);
+      }
+      if (action === 'update') {
+        const { data: updated, error: remarksError } = await admin
+          .from('orders')
+          .update({ customer_remarks: customerRemarks, customer_remarks_revision: customerRemarksRevision })
+          .eq('id', existing.id)
+          // Atomic version guard prevents an older in-flight retry overwriting a newer note.
+          .lt('customer_remarks_revision', customerRemarksRevision)
+          .eq('user_id', userId)
+          .eq('status', 'pending')
+          .select('id')
+          .maybeSingle();
+        if (remarksError || !updated) {
+          return jsonResponse({ error: 'Your order changed. Check your orders before trying again.' }, 409);
+        }
+      }
       const existingIntent = await stripe.paymentIntents.retrieve(
         existing.stripe_payment_intent_id,
       );
@@ -361,6 +395,8 @@ Deno.serve(async (req) => {
         status: 'pending',
         total: payableTotal,
         shipping_address: shippingAddress,
+        customer_remarks: customerRemarks,
+        customer_remarks_revision: customerRemarksRevision,
         promo_code: promoCode,
         discount_amount: discountAmount > 0 ? discountAmount : null,
         idempotency_key: idempotencyKey,

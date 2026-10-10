@@ -1,15 +1,23 @@
+import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Address;
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/env.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
 import '../../../shared/models/promo_code.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/price_format.dart';
+import '../../../shared/utils/order_remarks.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../../cart/domain/cart_item.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../profile/presentation/address_book_screen.dart';
@@ -19,6 +27,7 @@ import '../../shop/presentation/shell_tab_provider.dart';
 import '../data/order_repository.dart';
 import '../data/payment_repository.dart';
 import 'orders_providers.dart';
+import 'purchase_intent.dart';
 
 /// A random per-attempt key for `create-payment-intent` — see
 /// CheckoutScreen's `_idempotencyKey` doc. Just needs to be unique per
@@ -39,7 +48,8 @@ class CheckoutScreen extends ConsumerStatefulWidget {
   /// "Buy Now" works — an isolated single-purchase flow that never mixes
   /// with or mutates whatever is already sitting in the cart.
   final List<CartItem>? buyNowItems;
-  const CheckoutScreen({super.key, this.buyNowItems});
+  final String? purchaseIntentId;
+  const CheckoutScreen({super.key, this.buyNowItems, this.purchaseIntentId});
 
   @override
   ConsumerState<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -50,14 +60,37 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   String? _error;
   String? _selectedAddressId;
   final _promoCtrl = TextEditingController();
+  final _remarksCtrl = TextEditingController();
+  int _remarksRevision = 0;
+  String? _remarksError;
   PromoCode? _appliedPromo;
   String? _promoError;
   bool _promoLoading = false;
 
   /// Buy Now mode keeps its own removable local copy — there's no
   /// provider backing it, unlike the persistent cart.
-  late final List<CartItem>? _buyNowItems =
-      widget.buyNowItems == null ? null : List.of(widget.buyNowItems!);
+  late final List<CartItem>? _buyNowItems;
+  late final String? _checkoutOwner;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkoutOwner = ref.read(currentUserIdProvider);
+    final notifier = ref.read(purchaseIntentProvider.notifier);
+    final pendingId = ref.read(purchaseIntentProvider)?.id;
+    final saved = notifier.peek(widget.purchaseIntentId);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && ref.read(purchaseIntentProvider)?.id == pendingId) {
+        notifier.consume(widget.purchaseIntentId);
+      }
+    });
+    _buyNowItems = widget.buyNowItems == null
+        ? saved
+        : List.of(widget.buyNowItems!);
+  }
+
+  bool get _ownsCheckout =>
+      mounted && ref.read(currentUserIdProvider) == _checkoutOwner;
 
   bool get _isBuyNow => _buyNowItems != null;
 
@@ -71,24 +104,78 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   late final String _idempotencyKey = _randomIdempotencyKey();
 
   void _removeItem(CartItem item) {
+    if (_processing || !_ownsCheckout) return;
     if (_isBuyNow) {
-      setState(() => _buyNowItems!.removeWhere((i) => i.lineKey == item.lineKey));
+      final index = _buyNowItems!.indexWhere((i) => i.lineKey == item.lineKey);
+      if (index < 0) return;
+      setState(() => _buyNowItems.removeAt(index));
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${item.product.name} removed'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              if (!_ownsCheckout ||
+                  _processing ||
+                  _buyNowItems.any((i) => i.lineKey == item.lineKey)) {
+                return;
+              }
+              setState(
+                () => _buyNowItems.insert(
+                  index.clamp(0, _buyNowItems.length),
+                  item,
+                ),
+              );
+            },
+          ),
+        ),
+      );
     } else {
-      ref.read(cartProvider.notifier).remove(
+      ref
+          .read(cartProvider.notifier)
+          .remove(
             item.product.id,
             variantId: item.selectedVariant?.id,
             size: item.selectedSize,
           );
+      final ownerId = _checkoutOwner;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${item.product.name} removed'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              if (!_ownsCheckout || _processing) return;
+              final restored = ref
+                  .read(cartProvider.notifier)
+                  .restoreRemoved(item, ownerId: ownerId);
+              if (!restored && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'This item could not be restored. Check your cart and availability.',
+                    ),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
+      );
     }
   }
 
   @override
   void dispose() {
     _promoCtrl.dispose();
+    _remarksCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _applyPromo() async {
+    if (_processing || _promoLoading || !_ownsCheckout) return;
     final code = _promoCtrl.text.trim();
     if (code.isEmpty) return;
     setState(() {
@@ -97,6 +184,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     });
     try {
       final promo = await ref.read(promoRepositoryProvider).lookupCode(code);
+      if (!_ownsCheckout) return;
       if (promo == null || !promo.isUsable) {
         setState(() {
           _appliedPromo = null;
@@ -115,6 +203,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         });
       }
     } catch (e) {
+      if (!_ownsCheckout) return;
       setState(() {
         _appliedPromo = null;
         _promoError = 'Could not check promo code.';
@@ -125,6 +214,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 
   void _removePromo() {
+    if (_processing || _promoLoading) return;
     setState(() {
       _appliedPromo = null;
       _promoError = null;
@@ -175,9 +265,29 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     // on the next rebuild frame, so a very fast double-tap could otherwise
     // invoke this twice before that frame — creating two pending orders/
     // PaymentIntents for the same cart. Guard re-entrancy directly here.
-    if (_processing) return;
+    if (_processing ||
+        _promoLoading ||
+        !_ownsCheckout ||
+        ref.read(shopSettingsProvider).isLoading ||
+        ref.read(shopSettingsProvider).hasError ||
+        !ref.read(shopSettingsProvider).hasValue ||
+        shippingAddress == null) {
+      return;
+    }
     final items = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
     if (items.isEmpty) return;
+    final remarksError = orderRemarksValidationError(_remarksCtrl.text);
+    if (remarksError != null) {
+      setState(() => _remarksError = remarksError);
+      return;
+    }
+    final remarks = normaliseOrderRemarks(_remarksCtrl.text);
+    final remarksRevision = _remarksRevision;
+
+    if (!ref.read(authRepositoryProvider).isEmailVerified) {
+      await _showVerifyEmailDialog();
+      return;
+    }
 
     setState(() {
       _processing = true;
@@ -192,14 +302,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // server-side regardless (see supabase/functions/create-payment-intent),
       // so skipping this client-side pre-check here is safe.
       if (!_isBuyNow && !await _revalidateCart()) return;
+      if (!_ownsCheckout) return;
       final freshItems = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
       if (freshItems.isEmpty) return;
 
       final intent = await PaymentRepository().createPaymentIntent(
         currency: 'sgd',
-        shippingAddress: shippingAddress?.toShippingJson(),
+        shippingAddress: shippingAddress.toShippingJson(),
         promoCode: _appliedPromo?.code,
         idempotencyKey: _idempotencyKey,
+        customerRemarks: remarks,
+        customerRemarksRevision: remarksRevision,
         items: [
           for (final item in freshItems)
             {
@@ -212,11 +325,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         ],
       );
       pendingOrderId = intent['orderId'] as String?;
+      if (!mounted || !_ownsCheckout) return;
 
       await Stripe.instance.initPaymentSheet(
         paymentSheetParameters: SetupPaymentSheetParameters(
           paymentIntentClientSecret: intent['clientSecret'] as String,
-          merchantDisplayName: 'Marugen Koi Farm',
+          style: Theme.of(context).brightness == Brightness.dark
+              ? ThemeMode.dark
+              : ThemeMode.light,
+          merchantDisplayName: 'Marugen Fish Farm',
           // Required for PayNow (and any other redirect/voucher-based
           // method) to bring the customer back into the app instead of
           // stranding them in Safari — matches the `marugen` URL scheme
@@ -229,18 +346,27 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           // just hiding the button. Re-add once that account/entitlement
           // exists. Google Pay is Android-only — harmless to leave on here,
           // it's simply ignored on iOS.
-          googlePay: const PaymentSheetGooglePay(
+          googlePay: PaymentSheetGooglePay(
             merchantCountryCode: 'SG',
             currencyCode: 'SGD',
-            testEnv: true,
+            // Was hardcoded `true` — meant every build, including a real
+            // production release, would only ever offer Google Pay's test
+            // environment, silently failing/faking real customer charges
+            // via Google Pay. Derived from the actual publishable key in
+            // use (not just Env.appEnv) so it's correct even if a build is
+            // mislabeled: `pk_live_...` always means real money.
+            testEnv: !Env.stripePublishableKey.startsWith('pk_live'),
           ),
         ),
       );
+      // Native initialization may outlive this screen or its signed-in owner.
+      if (!_ownsCheckout) return;
       await Stripe.instance.presentPaymentSheet();
 
       // Buy Now never touched the persistent cart, so there's nothing to
       // clear — whatever was already in the cart before this purchase
       // stays exactly as it was.
+      if (!_ownsCheckout) return;
       if (!_isBuyNow) ref.read(cartProvider.notifier).clear();
       // The Orders list is a plain (non-autoDispose) FutureProvider, so
       // without this it keeps showing whatever it last fetched — a
@@ -265,353 +391,560 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (pendingOrderId != null) {
         try {
           await OrderRepository().cancelMyOrder(pendingOrderId);
-        } catch (_) {}
+        } catch (cancelError) {
+          // Best-effort: the order is left `pending` (auto-cancelled by
+          // cancel-stale-pending-orders after 30 min, see 0014_stale_order_
+          // cleanup.sql) rather than crashing the payment-failure path —
+          // logged so a real recurring failure isn't invisible.
+          developer.log(
+            'Could not cancel pending order after Stripe error',
+            name: 'CheckoutScreen',
+            error: cancelError,
+          );
+        }
       }
-      setState(() => _error = e.error.localizedMessage ?? 'Payment cancelled.');
+      if (mounted) {
+        setState(
+          () => _error = e.error.code == FailureCode.Canceled
+              ? 'Payment cancelled. Your items are saved; you can try again.'
+              : 'Payment could not be completed. Check your payment details and try again.',
+        );
+      }
     } catch (e) {
       if (pendingOrderId != null) {
         try {
           await OrderRepository().cancelMyOrder(pendingOrderId);
-        } catch (_) {}
+        } catch (cancelError) {
+          developer.log(
+            'Could not cancel pending order after checkout error',
+            name: 'CheckoutScreen',
+            error: cancelError,
+          );
+        }
       }
-      setState(() => _error = e.toString());
+      developer.log('Checkout failed', name: 'CheckoutScreen', error: e);
+      if (mounted) {
+        setState(
+          () => _error = 'We couldn’t complete checkout. Check your connection and try again. If payment was taken, check My Orders before retrying.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _processing = false);
     }
   }
 
+  /// Blocks checkout for an email/password account that never confirmed
+  /// its address (see AuthRepository.isEmailVerified) — an unconfirmed
+  /// email can't receive order/shipping notifications and is a common
+  /// vector for throwaway/fraudulent accounts. Offers to resend the
+  /// confirmation link right from here rather than sending the customer
+  /// away to find it themselves.
+  Future<void> _showVerifyEmailDialog() async {
+    if (!mounted) return;
+    var sending = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Verify your email first'),
+          content: const Text(
+            'Please confirm your email address before checking out — check '
+            'your inbox for the confirmation link we sent when you signed up.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('OK'),
+            ),
+            FilledButton(
+              onPressed: sending
+                  ? null
+                  : () async {
+                      setDialogState(() => sending = true);
+                      try {
+                        await ref
+                            .read(authRepositoryProvider)
+                            .resendVerificationEmail();
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            const SnackBar(
+                              content: Text('Confirmation email sent.'),
+                            ),
+                          );
+                          Navigator.of(dialogContext).pop();
+                        }
+                      } catch (e) {
+                        setDialogState(() => sending = false);
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Could not send the email. Check your connection and try again.',
+                              ),
+                            ),
+                          );
+                        }
+                      }
+                    },
+              child: sending
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Resend email'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _addAddress() async {
+    if (_processing) return;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (_) => const AddressForm(),
     );
-    ref.invalidate(myAddressesProvider);
+    if (mounted) ref.invalidate(myAddressesProvider);
   }
 
   @override
   Widget build(BuildContext context) {
-    final items = _isBuyNow ? _buyNowItems! : ref.watch(cartProvider);
-    final subtotal = _isBuyNow
-        ? items.fold<double>(0, (sum, i) => sum + i.subtotal)
-        : ref.watch(cartTotalProvider);
+    final ownerValid = ref.watch(currentUserIdProvider) == _checkoutOwner;
+    final items = !ownerValid
+        ? <CartItem>[]
+        : _isBuyNow
+        ? _buyNowItems!
+        : ref.watch(cartProvider);
+    final subtotal = items.fold<double>(0, (sum, i) => sum + i.subtotal);
     final addressesAsync = ref.watch(myAddressesProvider);
     final settingsAsync = ref.watch(shopSettingsProvider);
+    final totalsReady =
+        settingsAsync.hasValue &&
+        !settingsAsync.isLoading &&
+        !settingsAsync.hasError;
+    final settings = totalsReady ? settingsAsync.requireValue : null;
+    final net = subtotal - (_appliedPromo?.discountFor(subtotal) ?? 0);
+    final payable = settings == null
+        ? null
+        : (settings['gst_included_in_price'] as bool? ?? true)
+        ? net
+        : net *
+              (1 + ((settings['gst_percent'] as num?)?.toDouble() ?? 0) / 100);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('CHECKOUT')),
-      body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: ListView(
-                children: [
-                  const Text(
-                    'DELIVERY ADDRESS',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 0.8,
-                      color: AppColors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  addressesAsync.when(
-                    data: (addresses) {
-                      final selectedId = _resolveSelectedId(addresses);
-                      return Container(
+      body: ContentWidth(
+        maxWidth: 760,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: ListView(
+                    children: [
+                      Text(
+                        'DELIVERY ADDRESS',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          letterSpacing: 0.8,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      addressesAsync.when(
+                        data: (addresses) {
+                          final selectedId = _resolveSelectedId(addresses);
+                          return Container(
+                            decoration: BoxDecoration(
+                              color: AppPalette.of(context).surface,
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                              boxShadow: AppShadows.card,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Column(
+                              children: [
+                                if (addresses.isEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.all(
+                                      AppSpacing.lg,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'You need a delivery address to check out.',
+                                          style: TextStyle(
+                                            fontSize: 13.5,
+                                            color: AppPalette.of(context)
+                                                .textMuted,
+                                          ),
+                                        ),
+                                        const SizedBox(height: AppSpacing.md),
+                                        OutlinedButton.icon(
+                                          onPressed: _processing
+                                              ? null
+                                              : _addAddress,
+                                          icon: const Icon(Icons.add, size: 18),
+                                          label: const Text('Add Address'),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else ...[
+                                  for (final address in addresses)
+                                    Material(
+                                      color: AppPalette.of(context).surface,
+                                      child: ListTile(
+                                        onTap: _processing
+                                            ? null
+                                            : () => setState(
+                                                () => _selectedAddressId =
+                                                    address.id,
+                                              ),
+                                        leading: Icon(
+                                          address.id == selectedId
+                                              ? Icons.radio_button_checked
+                                              : Icons.radio_button_unchecked,
+                                          color: address.id == selectedId
+                                              ? AppPalette.of(context).accent
+                                              : AppPalette.of(context)
+                                                    .textMuted,
+                                        ),
+                                        title: Text(
+                                          '${address.label} — ${address.recipientName}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13.5,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          address.oneLine,
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  const Divider(
+                                    height: 1,
+                                    indent: 16,
+                                    endIndent: 16,
+                                  ),
+                                  TextButton.icon(
+                                    onPressed: _processing ? null : _addAddress,
+                                    icon: const Icon(Icons.add, size: 16),
+                                    label: const Text('Add new address'),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                        loading: () => const Padding(
+                          padding: EdgeInsets.all(AppSpacing.lg),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                        error: (e, _) => _InlineRetryError(
+                          message: "Couldn't load your addresses.",
+                          onRetry: () => ref.invalidate(myAddressesProvider),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      Text(
+                        'ORDER SUMMARY',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          letterSpacing: 0.8,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Container(
                         decoration: BoxDecoration(
-                          color: AppColors.white,
+                          color: AppPalette.of(context).surface,
                           borderRadius: BorderRadius.circular(AppRadius.md),
                           boxShadow: AppShadows.card,
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: Column(
                           children: [
-                            if (addresses.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.all(AppSpacing.lg),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'You need a delivery address to check out.',
-                                      style: TextStyle(
-                                        fontSize: 13.5,
-                                        color: AppColors.grey,
-                                      ),
-                                    ),
-                                    const SizedBox(height: AppSpacing.md),
-                                    OutlinedButton.icon(
-                                      onPressed: _addAddress,
-                                      icon: const Icon(Icons.add, size: 18),
-                                      label: const Text('Add Address'),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            else ...[
-                              for (final address in addresses)
-                                ListTile(
-                                  onTap: () => setState(
-                                    () => _selectedAddressId = address.id,
-                                  ),
-                                  leading: Icon(
-                                    address.id == selectedId
-                                        ? Icons.radio_button_checked
-                                        : Icons.radio_button_unchecked,
-                                    color: address.id == selectedId
-                                        ? AppColors.red
-                                        : AppColors.greySoft,
-                                  ),
-                                  title: Text(
-                                    '${address.label} — ${address.recipientName}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13.5,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    address.oneLine,
-                                    style: const TextStyle(fontSize: 12.5),
-                                  ),
-                                ),
-                              const Divider(
-                                height: 1,
-                                indent: 16,
-                                endIndent: 16,
-                              ),
-                              TextButton.icon(
-                                onPressed: _addAddress,
-                                icon: const Icon(Icons.add, size: 16),
-                                label: const Text('Add new address'),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.all(AppSpacing.lg),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                    error: (e, _) => _InlineRetryError(
-                      message: "Couldn't load your addresses.",
-                      onRetry: () => ref.invalidate(myAddressesProvider),
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  const Text(
-                    'ORDER SUMMARY',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 0.8,
-                      color: AppColors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                      boxShadow: AppShadows.card,
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        for (final item in items)
-                          ListTile(
-                            title: Text(
-                              item.product.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
-                            subtitle: Text(
-                              item.optionLabel != null
-                                  ? '${item.optionLabel} · Qty ${item.quantity}'
-                                  : 'Qty ${item.quantity}',
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                color: AppColors.grey,
-                              ),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  formatPrice(item.subtotal),
+                            for (final item in items)
+                              ListTile(
+                                title: Text(
+                                  item.product.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
+                                    fontWeight: FontWeight.w600,
                                     fontSize: 14,
                                   ),
                                 ),
-                                IconButton(
-                                  tooltip: 'Remove',
-                                  visualDensity: VisualDensity.compact,
-                                  icon: const Icon(Icons.close, size: 18, color: AppColors.grey),
-                                  onPressed: () => _removeItem(item),
+                                subtitle: Text(
+                                  item.optionLabel != null
+                                      ? '${item.optionLabel} · Qty ${item.quantity}'
+                                      : 'Qty ${item.quantity}',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: AppPalette.of(context).textMuted,
+                                  ),
                                 ),
-                              ],
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      formatPrice(item.subtotal),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Remove',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: Icon(
+                                        Icons.close,
+                                        size: 18,
+                                        color: AppPalette.of(context).textMuted,
+                                      ),
+                                      onPressed: _processing
+                                          ? null
+                                          : () => _removeItem(item),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      if (ownerValid) ...[
+                        Text(
+                          'ORDER REQUESTS',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            letterSpacing: 0.8,
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Container(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          decoration: BoxDecoration(
+                            color: AppPalette.of(context).surface,
+                            borderRadius: BorderRadius.circular(AppRadius.md),
+                            boxShadow: AppShadows.card,
+                          ),
+                          child: TextField(
+                            key: const ValueKey('order-remarks'),
+                            controller: _remarksCtrl,
+                            enabled: !_processing,
+                            minLines: 3,
+                            maxLines: 5,
+                            maxLength: maxOrderRemarksLength,
+                            maxLengthEnforcement: MaxLengthEnforcement.none,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: InputDecoration(
+                              labelText: 'Order requests / remarks (optional)',
+                              hintText: 'e.g. Please call before delivery.',
+                              helperText: 'Delivery instructions or other requests for the shop.',
+                              helperMaxLines: 3,
+                              errorText: _remarksError,
+                              errorMaxLines: 3,
+                              alignLabelWithHint: true,
                             ),
+                            buildCounter:
+                                (
+                                  context, {
+                                  required currentLength,
+                                  required isFocused,
+                                  required maxLength,
+                                }) => Text(
+                                  '${_remarksCtrl.text.trim().runes.length}/$maxOrderRemarksLength',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: AppPalette.of(context).textMuted,
+                                  ),
+                                ),
+                            onChanged: (value) => setState(() {
+                              _remarksRevision++;
+                              _remarksError = orderRemarksValidationError(
+                                value,
+                              );
+                            }),
                           ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
                       ],
-                    ),
+                      Text(
+                        'PROMO CODE',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          letterSpacing: 0.8,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Container(
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        decoration: BoxDecoration(
+                          color: AppPalette.of(context).surface,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          boxShadow: AppShadows.card,
+                        ),
+                        child: _appliedPromo != null
+                            ? Row(
+                                children: [
+                                  Icon(
+                                    Icons.local_offer_outlined,
+                                    size: 18,
+                                    color: AppPalette.of(context).accent,
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  Expanded(
+                                    child: Text(
+                                      '"${_appliedPromo!.code}" applied',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13.5,
+                                      ),
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: _processing
+                                        ? null
+                                        : _removePromo,
+                                    child: const Text('Remove'),
+                                  ),
+                                ],
+                              )
+                            : Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      key: const ValueKey('promo-code'),
+                                      controller: _promoCtrl,
+                                      enabled: !_processing && !_promoLoading,
+                                      textCapitalization:
+                                          TextCapitalization.characters,
+                                      decoration: InputDecoration(
+                                        hintText: 'Enter code',
+                                        errorText: _promoError,
+                                        isDense: true,
+                                      ),
+                                      onSubmitted: (_) => _applyPromo(),
+                                    ),
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  SizedBox(
+                                    height: 52,
+                                    child: OutlinedButton(
+                                      onPressed: _promoLoading || _processing
+                                          ? null
+                                          : _applyPromo,
+                                      child: _promoLoading
+                                          ? const SizedBox(
+                                              height: 16,
+                                              width: 16,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Text('Apply'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      settingsAsync.when(
+                        data: (settings) {
+                          final gstPercent =
+                              (settings['gst_percent'] as num?)?.toDouble() ??
+                              0;
+                          final gstIncluded =
+                              settings['gst_included_in_price'] as bool? ??
+                              true;
+                          final discountAmount =
+                              _appliedPromo?.discountFor(subtotal) ?? 0;
+                          final netSubtotal = subtotal - discountAmount;
+                          final double gstAmount;
+                          final double payableTotal;
+                          if (gstIncluded) {
+                            gstAmount =
+                                netSubtotal -
+                                (netSubtotal / (1 + gstPercent / 100));
+                            payableTotal = netSubtotal;
+                          } else {
+                            gstAmount = netSubtotal * gstPercent / 100;
+                            payableTotal = netSubtotal + gstAmount;
+                          }
+                          return _TotalsCard(
+                            subtotal: subtotal,
+                            discountAmount: discountAmount,
+                            gstPercent: gstPercent,
+                            gstAmount: gstAmount,
+                            gstIncluded: gstIncluded,
+                            payableTotal: payableTotal,
+                          );
+                        },
+                        loading: () => const Padding(
+                          padding: EdgeInsets.all(AppSpacing.lg),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                        error: (e, _) => _InlineRetryError(
+                          message: "Couldn't load checkout totals.",
+                          onRetry: () => ref.invalidate(shopSettingsProvider),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.lg),
-                  const Text(
-                    'PROMO CODE',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 0.8,
-                      color: AppColors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: AppSpacing.md),
                   Container(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    padding: const EdgeInsets.all(AppSpacing.md),
                     decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                      boxShadow: AppShadows.card,
+                      color: AppPalette.of(context).accentSoft,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
-                    child: _appliedPromo != null
-                        ? Row(
-                            children: [
-                              const Icon(
-                                Icons.local_offer_outlined,
-                                size: 18,
-                                color: AppColors.red,
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Expanded(
-                                child: Text(
-                                  '"${_appliedPromo!.code}" applied',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13.5,
-                                  ),
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: _removePromo,
-                                child: const Text('Remove'),
-                              ),
-                            ],
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _promoCtrl,
-                                  textCapitalization:
-                                      TextCapitalization.characters,
-                                  decoration: InputDecoration(
-                                    hintText: 'Enter code',
-                                    errorText: _promoError,
-                                    isDense: true,
-                                  ),
-                                  onSubmitted: (_) => _applyPromo(),
-                                ),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              SizedBox(
-                                height: 52,
-                                child: OutlinedButton(
-                                  onPressed: _promoLoading ? null : _applyPromo,
-                                  child: _promoLoading
-                                      ? const SizedBox(
-                                          height: 16,
-                                          width: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : const Text('Apply'),
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  settingsAsync.when(
-                    data: (settings) {
-                      final gstPercent =
-                          (settings['gst_percent'] as num?)?.toDouble() ?? 0;
-                      final gstIncluded =
-                          settings['gst_included_in_price'] as bool? ?? true;
-                      final discountAmount =
-                          _appliedPromo?.discountFor(subtotal) ?? 0;
-                      final netSubtotal = subtotal - discountAmount;
-                      final double gstAmount;
-                      final double payableTotal;
-                      if (gstIncluded) {
-                        gstAmount =
-                            netSubtotal -
-                            (netSubtotal / (1 + gstPercent / 100));
-                        payableTotal = netSubtotal;
-                      } else {
-                        gstAmount = netSubtotal * gstPercent / 100;
-                        payableTotal = netSubtotal + gstAmount;
-                      }
-                      return _TotalsCard(
-                        subtotal: subtotal,
-                        discountAmount: discountAmount,
-                        gstPercent: gstPercent,
-                        gstAmount: gstAmount,
-                        gstIncluded: gstIncluded,
-                        payableTotal: payableTotal,
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.all(AppSpacing.lg),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                    error: (e, _) => _InlineRetryError(
-                      message: "Couldn't load checkout totals.",
-                      onRetry: () => ref.invalidate(shopSettingsProvider),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: AppPalette.of(context).accent,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
-              ),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: AppColors.redSoft,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                const SizedBox(height: AppSpacing.lg),
+                _PayButton(
+                  processing: _processing,
+                  totalsReady: totalsReady,
+                  promoLoading: _promoLoading,
+                  payable: payable,
+                  hasItems: items.isNotEmpty,
+                  remarksValid: _remarksError == null,
+                  addressesAsync: addressesAsync,
+                  resolveSelectedId: _resolveSelectedId,
+                  onPayDelivery: (address) => _pay(shippingAddress: address),
                 ),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(
-                    color: AppColors.redDark,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.lg),
-            _PayButton(
-              processing: _processing,
-              hasItems: items.isNotEmpty,
-              addressesAsync: addressesAsync,
-              resolveSelectedId: _resolveSelectedId,
-              onPayDelivery: (address) => _pay(shippingAddress: address),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -633,10 +966,20 @@ class _InlineRetryError extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [
-          const Icon(Icons.wifi_off_outlined, size: 18, color: AppColors.grey),
+          Icon(
+            Icons.wifi_off_outlined,
+            size: 18,
+            color: AppPalette.of(context).textMuted,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: Text(message, style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+            child: Text(
+              message,
+              style: TextStyle(
+                color: AppPalette.of(context).textMuted,
+                fontSize: 13,
+              ),
+            ),
           ),
           TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],
@@ -646,8 +989,12 @@ class _InlineRetryError extends StatelessWidget {
 }
 
 class _PayButton extends StatelessWidget {
+  final bool remarksValid;
   final bool processing;
   final bool hasItems;
+  final bool totalsReady;
+  final bool promoLoading;
+  final double? payable;
   final AsyncValue<List<Address>> addressesAsync;
   final String? Function(List<Address>) resolveSelectedId;
   final void Function(Address) onPayDelivery;
@@ -655,6 +1002,10 @@ class _PayButton extends StatelessWidget {
   const _PayButton({
     required this.processing,
     required this.hasItems,
+    required this.remarksValid,
+    required this.totalsReady,
+    required this.promoLoading,
+    required this.payable,
     required this.addressesAsync,
     required this.resolveSelectedId,
     required this.onPayDelivery,
@@ -667,9 +1018,17 @@ class _PayButton extends StatelessWidget {
         final selectedId = resolveSelectedId(addresses);
         final matching = addresses.where((a) => a.id == selectedId);
         final selectedAddress = matching.isNotEmpty ? matching.first : null;
-        final canPay = selectedAddress != null && !processing && hasItems;
+        final canPay =
+            remarksValid &&
+            checkoutCanPay(
+              hasItems: hasItems,
+              hasAddress: selectedAddress != null,
+              totalsReady: totalsReady,
+              promoLoading: promoLoading,
+              processing: processing,
+            );
         return ElevatedButton(
-          onPressed: canPay ? () => onPayDelivery(selectedAddress) : null,
+          onPressed: canPay ? () => onPayDelivery(selectedAddress!) : null,
           child: processing
               ? const SizedBox(
                   height: 18,
@@ -680,13 +1039,24 @@ class _PayButton extends StatelessWidget {
                   ),
                 )
               : Text(
-                  selectedAddress == null
+                  !hasItems
+                      ? 'No items to check out'
+                      : !remarksValid
+                      ? 'Review your order requests'
+                      : !totalsReady
+                      ? 'Waiting for totals'
+                      : promoLoading
+                      ? 'Checking promo code…'
+                      : selectedAddress == null
                       ? 'Add an address to continue'
-                      : 'Pay with Stripe',
+                      : 'Pay ${formatPrice(payable!)} with Stripe',
                 ),
         );
       },
-      orElse: () => const SizedBox.shrink(),
+      orElse: () => const ElevatedButton(
+        onPressed: null,
+        child: Text('Waiting for delivery address'),
+      ),
     );
   }
 }
@@ -713,90 +1083,87 @@ class _TotalsCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                'Subtotal',
-                style: TextStyle(fontSize: 13.5, color: AppColors.grey),
-              ),
-              Text(
-                formatPrice(subtotal),
-                style: const TextStyle(fontSize: 13.5),
-              ),
-            ],
-          ),
+          _SummaryLine(label: 'Subtotal', amount: formatPrice(subtotal)),
           if (discountAmount > 0) ...[
             const SizedBox(height: 6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Promo discount',
-                  style: TextStyle(fontSize: 13.5, color: AppColors.grey),
-                ),
-                Text(
-                  '-${formatPrice(discountAmount)}',
-                  style: const TextStyle(fontSize: 13.5, color: AppColors.red),
-                ),
-              ],
+            _SummaryLine(
+              label: 'Promo discount',
+              amount: '-${formatPrice(discountAmount)}',
+              amountColor: AppPalette.of(context).accent,
             ),
           ],
           const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'GST (${gstPercent.toStringAsFixed(0)}%)',
-                style: const TextStyle(fontSize: 13.5, color: AppColors.grey),
-              ),
-              Text(
-                formatPrice(gstAmount),
-                style: const TextStyle(fontSize: 13.5),
-              ),
-            ],
+          _SummaryLine(
+            label: 'GST (${gstPercent.toStringAsFixed(0)}%)',
+            amount: formatPrice(gstAmount),
           ),
           const Divider(height: AppSpacing.lg),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Text(
-                    'Total',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                      color: AppColors.grey,
-                    ),
-                  ),
-                  if (gstIncluded) ...[
-                    const SizedBox(width: 4),
-                    const Text(
-                      '(incl. GST)',
-                      style: TextStyle(fontSize: 11, color: AppColors.greySoft),
-                    ),
-                  ],
-                ],
-              ),
-              Text(
-                formatPrice(payableTotal),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.black,
-                  fontSize: 20,
-                ),
-              ),
-            ],
+          _SummaryLine(
+            label: gstIncluded ? 'Total (incl. GST)' : 'Total',
+            amount: formatPrice(payableTotal),
+            isTotal: true,
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SummaryLine extends StatelessWidget {
+  final String label;
+  final String amount;
+  final Color? amountColor;
+  final bool isTotal;
+  const _SummaryLine({
+    required this.label,
+    required this.amount,
+    this.amountColor,
+    this.isTotal = false,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final labelWidget = Text(
+      label,
+      style: TextStyle(
+        fontSize: 13.5,
+        color: AppPalette.of(context).textMuted,
+        fontWeight: isTotal ? FontWeight.w600 : FontWeight.normal,
+      ),
+    );
+    final amountWidget = Text(
+      amount,
+      style: TextStyle(
+        fontSize: isTotal ? 20 : 13.5,
+        color: amountColor ?? AppPalette.of(context).text,
+        fontWeight: isTotal ? FontWeight.w700 : FontWeight.normal,
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 300 ||
+            MediaQuery.textScalerOf(context).scale(14) > 18) {
+          return SizedBox(
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [labelWidget, const SizedBox(height: 4), amountWidget],
+            ),
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: labelWidget),
+            const SizedBox(width: 12),
+            Flexible(child: amountWidget),
+          ],
+        );
+      },
     );
   }
 }

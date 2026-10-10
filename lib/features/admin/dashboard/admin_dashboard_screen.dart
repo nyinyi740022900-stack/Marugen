@@ -22,13 +22,13 @@ class AdminDashboardScreen extends ConsumerWidget {
     final lowStockAsync = ref.watch(lowStockProductsProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: const Text('DASHBOARD'),
         actions: const [NotificationBellButton(), SizedBox(width: 4)],
       ),
       body: RefreshIndicator(
-        color: AppColors.red,
+        color: AppPalette.of(context).accent,
         onRefresh: () async {
           refreshAdminProducts(ref);
           refreshAdminOrders(ref);
@@ -134,26 +134,27 @@ class AdminDashboardScreen extends ConsumerWidget {
             ),
             Row(
               children: [
-                const Text(
+                Text(
                   'TOP PRODUCTS',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 12,
                     letterSpacing: 0.8,
-                    color: AppColors.grey,
+                    color: AppPalette.of(context).textMuted,
                   ),
                 ),
                 const Spacer(),
                 ordersAsync.maybeWhen(
-                  data: (orders) => rankTopProducts(orders).length > _TopProductsCard.maxRows
+                  data: (orders) =>
+                      rankTopProducts(orders).length > _TopProductsCard.maxRows
                       ? GestureDetector(
                           onTap: () => context.push('/admin/top-products'),
-                          child: const Text(
+                          child: Text(
                             'See all',
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 12.5,
-                              color: AppColors.red,
+                              color: AppPalette.of(context).accent,
                             ),
                           ),
                         )
@@ -171,17 +172,17 @@ class AdminDashboardScreen extends ConsumerWidget {
               ),
               error: (e, _) => Text(
                 'Error: $e',
-                style: const TextStyle(color: AppColors.error),
+                style: TextStyle(color: AppPalette.of(context).error),
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            const Text(
+            Text(
               'RECENT ORDERS',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
                 letterSpacing: 0.8,
-                color: AppColors.grey,
+                color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -192,19 +193,19 @@ class AdminDashboardScreen extends ConsumerWidget {
                   return Container(
                     padding: const EdgeInsets.all(AppSpacing.xl),
                     decoration: BoxDecoration(
-                      color: AppColors.white,
+                      color: AppPalette.of(context).surface,
                       borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
                     alignment: Alignment.center,
-                    child: const Text(
+                    child: Text(
                       'No orders yet.',
-                      style: TextStyle(color: AppColors.grey),
+                      style: TextStyle(color: AppPalette.of(context).textMuted),
                     ),
                   );
                 }
                 return Container(
                   decoration: BoxDecoration(
-                    color: AppColors.white,
+                    color: AppPalette.of(context).surface,
                     borderRadius: BorderRadius.circular(AppRadius.md),
                     boxShadow: AppShadows.card,
                   ),
@@ -226,7 +227,7 @@ class AdminDashboardScreen extends ConsumerWidget {
               ),
               error: (e, _) => Text(
                 'Error: $e',
-                style: const TextStyle(color: AppColors.error),
+                style: TextStyle(color: AppPalette.of(context).error),
               ),
             ),
           ],
@@ -280,27 +281,27 @@ class _LowStockSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Text(
+            Text(
               'LOW STOCK',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
                 letterSpacing: 0.8,
-                color: AppColors.grey,
+                color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.error.withValues(alpha: 0.12),
+                color: AppPalette.of(context).error.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AppRadius.pill),
               ),
               child: Text(
                 '${products.length}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10.5,
-                  color: AppColors.error,
+                  color: AppPalette.of(context).error,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -309,12 +310,12 @@ class _LowStockSection extends StatelessWidget {
             if (hasMore)
               GestureDetector(
                 onTap: () => context.push('/admin/low-stock'),
-                child: const Text(
+                child: Text(
                   'See all',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 12.5,
-                    color: AppColors.red,
+                    color: AppPalette.of(context).accent,
                   ),
                 ),
               ),
@@ -323,7 +324,7 @@ class _LowStockSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
@@ -341,16 +342,16 @@ class _LowStockSection extends StatelessWidget {
                   onTap: () => context.push('/admin/low-stock'),
                   title: Text(
                     '+${products.length - shown.length} more',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: AppColors.grey,
+                      color: AppPalette.of(context).textMuted,
                     ),
                   ),
-                  trailing: const Icon(
+                  trailing: Icon(
                     Icons.chevron_right,
                     size: 18,
-                    color: AppColors.grey,
+                    color: AppPalette.of(context).textMuted,
                   ),
                 ),
               ],
@@ -371,10 +372,10 @@ class _LowStockRow extends StatelessWidget {
     return ListTile(
       dense: true,
       onTap: () => context.push('/admin/products/${product.id}'),
-      leading: const Icon(
+      leading: Icon(
         Icons.warning_amber_rounded,
         size: 20,
-        color: AppColors.warning,
+        color: AppPalette.of(context).warning,
       ),
       title: Text(
         product.name,
@@ -384,9 +385,9 @@ class _LowStockRow extends StatelessWidget {
       ),
       trailing: Text(
         '${product.availableStock} left',
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 12.5,
-          color: AppColors.error,
+          color: AppPalette.of(context).error,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -411,33 +412,33 @@ class _StuckPendingSection extends ConsumerWidget {
       children: [
         Row(
           children: [
-            const Icon(
+            Icon(
               Icons.warning_amber_rounded,
               size: 16,
-              color: AppColors.warning,
+              color: AppPalette.of(context).warning,
             ),
             const SizedBox(width: 6),
-            const Text(
+            Text(
               'STUCK PENDING ORDERS',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
                 letterSpacing: 0.8,
-                color: AppColors.grey,
+                color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.error.withValues(alpha: 0.12),
+                color: AppPalette.of(context).error.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AppRadius.pill),
               ),
               child: Text(
                 '${orders.length}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10.5,
-                  color: AppColors.error,
+                  color: AppPalette.of(context).error,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -445,15 +446,19 @@ class _StuckPendingSection extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 4),
-        const Text(
+        Text(
           'Payment was never confirmed — any stock or live fish these hold '
           'is auto-released within ~40 min, or cancel now to free it sooner.',
-          style: TextStyle(fontSize: 12, color: AppColors.grey, height: 1.3),
+          style: TextStyle(
+            fontSize: 12,
+            color: AppPalette.of(context).textMuted,
+            height: 1.3,
+          ),
         ),
         const SizedBox(height: AppSpacing.sm),
         Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
@@ -465,10 +470,10 @@ class _StuckPendingSection extends ConsumerWidget {
                 ListTile(
                   dense: true,
                   onTap: () => context.push('/orders/${orders[i].id}'),
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.hourglass_bottom,
                     size: 20,
-                    color: AppColors.warning,
+                    color: AppPalette.of(context).warning,
                   ),
                   title: Text(
                     '#${orders[i].displayNumber}',
@@ -533,20 +538,20 @@ class _TopProductsCard extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(AppSpacing.xl),
         decoration: BoxDecoration(
-          color: AppColors.white,
+          color: AppPalette.of(context).surface,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         alignment: Alignment.center,
-        child: const Text(
+        child: Text(
           'Not enough order data yet.',
-          style: TextStyle(color: AppColors.grey),
+          style: TextStyle(color: AppPalette.of(context).textMuted),
         ),
       );
     }
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -559,11 +564,11 @@ class _TopProductsCard extends StatelessWidget {
               dense: true,
               leading: CircleAvatar(
                 radius: 14,
-                backgroundColor: AppColors.redSoft,
+                backgroundColor: AppPalette.of(context).accentSoft,
                 child: Text(
                   '${i + 1}',
-                  style: const TextStyle(
-                    color: AppColors.redDark,
+                  style: TextStyle(
+                    color: AppPalette.of(context).accent,
                     fontWeight: FontWeight.w700,
                     fontSize: 12,
                   ),
@@ -580,7 +585,10 @@ class _TopProductsCard extends StatelessWidget {
               ),
               trailing: Text(
                 '${top[i].value} sold',
-                style: const TextStyle(fontSize: 12.5, color: AppColors.grey),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: AppPalette.of(context).textMuted,
+                ),
               ),
             ),
           ],
@@ -591,13 +599,17 @@ class _TopProductsCard extends StatelessWidget {
               onTap: () => context.push('/admin/top-products'),
               title: Text(
                 '+${ranked.length - top.length} more',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 13,
-                  color: AppColors.grey,
+                  color: AppPalette.of(context).textMuted,
                 ),
               ),
-              trailing: const Icon(Icons.chevron_right, size: 18, color: AppColors.grey),
+              trailing: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: AppPalette.of(context).textMuted,
+              ),
             ),
           ],
         ],
@@ -614,7 +626,8 @@ List<MapEntry<String, int>> rankTopProducts(List<Order> orders) {
   for (final order in orders) {
     if (order.status == OrderStatus.cancelled) continue;
     for (final item in order.items) {
-      qtyByName[item.productName] = (qtyByName[item.productName] ?? 0) + item.quantity;
+      qtyByName[item.productName] =
+          (qtyByName[item.productName] ?? 0) + item.quantity;
     }
   }
   final ranked = qtyByName.entries.toList()
@@ -639,7 +652,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: accent ? AppColors.black : AppColors.white,
+      color: accent ? AppColors.black : AppPalette.of(context).surface,
       borderRadius: BorderRadius.circular(AppRadius.md),
       child: InkWell(
         onTap: onTap,
@@ -657,11 +670,15 @@ class _StatCard extends StatelessWidget {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: accent
-                      ? AppColors.red.withValues(alpha: 0.18)
-                      : AppColors.redSoft,
+                      ? AppPalette.of(context).accent.withValues(alpha: 0.18)
+                      : AppPalette.of(context).accentSoft,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                child: Icon(icon, color: AppColors.red, size: 20),
+                child: Icon(
+                  icon,
+                  color: AppPalette.of(context).accent,
+                  size: 20,
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
@@ -669,7 +686,7 @@ class _StatCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.w700,
-                  color: accent ? AppColors.white : AppColors.black,
+                  color: accent ? AppColors.white : AppPalette.of(context).text,
                 ),
               ),
               const SizedBox(height: 2),
@@ -679,7 +696,7 @@ class _StatCard extends StatelessWidget {
                   fontSize: 12.5,
                   color: accent
                       ? AppColors.white.withValues(alpha: 0.7)
-                      : AppColors.grey,
+                      : AppPalette.of(context).textMuted,
                 ),
               ),
             ],
@@ -708,14 +725,14 @@ class _OrderRow extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.offWhite,
+              color: AppPalette.of(context).surfaceMuted,
               borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
             alignment: Alignment.center,
-            child: const Icon(
+            child: Icon(
               Icons.receipt_long_outlined,
               size: 18,
-              color: AppColors.grey,
+              color: AppPalette.of(context).textMuted,
             ),
           ),
           const SizedBox(width: AppSpacing.md),
@@ -733,7 +750,10 @@ class _OrderRow extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   formatPrice(order.total),
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.grey),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: AppPalette.of(context).textMuted,
+                  ),
                 ),
               ],
             ),
@@ -741,14 +761,14 @@ class _OrderRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: AppColors.redSoft,
+              color: AppPalette.of(context).accentSoft,
               borderRadius: BorderRadius.circular(AppRadius.pill),
             ),
             child: Text(
               status.toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10.5,
-                color: AppColors.redDark,
+                color: AppPalette.of(context).accent,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.3,
               ),

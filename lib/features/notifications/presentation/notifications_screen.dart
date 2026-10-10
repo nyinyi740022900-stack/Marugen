@@ -19,14 +19,16 @@ class NotificationsScreen extends ConsumerWidget {
     final notificationsAsync = ref.watch(myNotificationsProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: const Text('NOTIFICATIONS'),
         actions: [
           notificationsAsync.maybeWhen(
             data: (items) => items.any((n) => !n.read)
                 ? TextButton(
-                    onPressed: () => ref.read(myNotificationsProvider.notifier).markAllRead(),
+                    onPressed: () => ref
+                        .read(myNotificationsProvider.notifier)
+                        .markAllRead(),
                     child: const Text('Mark all read'),
                   )
                 : const SizedBox.shrink(),
@@ -35,7 +37,7 @@ class NotificationsScreen extends ConsumerWidget {
         ],
       ),
       body: RefreshIndicator(
-        color: AppColors.red,
+        color: AppPalette.of(context).accent,
         onRefresh: () async => ref.invalidate(myNotificationsProvider),
         child: notificationsAsync.when(
           data: (items) {
@@ -59,8 +61,14 @@ class NotificationsScreen extends ConsumerWidget {
                   _NotificationTile(notification: items[i]),
             );
           },
-          loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-          error: (e, _) => ErrorState(onRetry: () => ref.invalidate(myNotificationsProvider)),
+          loading: () => Center(
+            child: CircularProgressIndicator(
+              color: AppPalette.of(context).accent,
+            ),
+          ),
+          error: (e, _) => ErrorState(
+            onRetry: () => ref.invalidate(myNotificationsProvider),
+          ),
         ),
       ),
     );
@@ -93,13 +101,15 @@ class _NotificationTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final unread = !notification.read;
     return Material(
-      color: AppColors.white,
+      color: AppPalette.of(context).surface,
       borderRadius: BorderRadius.circular(AppRadius.md),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () async {
           if (unread) {
-            ref.read(myNotificationsProvider.notifier).markRead(notification.id);
+            ref
+                .read(myNotificationsProvider.notifier)
+                .markRead(notification.id);
           }
           if (notification.orderId != null && context.mounted) {
             context.push('/orders/${notification.orderId}');
@@ -115,14 +125,18 @@ class _NotificationTile extends ConsumerWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: unread ? AppColors.redSoft : AppColors.offWhite,
+                  color: unread
+                      ? AppPalette.of(context).accentSoft
+                      : AppPalette.of(context).background,
                   shape: BoxShape.circle,
                 ),
                 alignment: Alignment.center,
                 child: Icon(
                   _icon,
                   size: 18,
-                  color: unread ? AppColors.red : AppColors.grey,
+                  color: unread
+                      ? AppPalette.of(context).accent
+                      : AppPalette.of(context).textMuted,
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -140,9 +154,9 @@ class _NotificationTile extends ConsumerWidget {
                     const SizedBox(height: 2),
                     Text(
                       notification.body,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
-                        color: AppColors.grey,
+                        color: AppPalette.of(context).textMuted,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -150,9 +164,9 @@ class _NotificationTile extends ConsumerWidget {
                       DateFormat.yMMMd().add_jm().format(
                         notification.createdAt,
                       ),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
-                        color: AppColors.greySoft,
+                        color: AppPalette.of(context).textMuted,
                       ),
                     ),
                   ],
@@ -163,8 +177,8 @@ class _NotificationTile extends ConsumerWidget {
                   width: 8,
                   height: 8,
                   margin: const EdgeInsets.only(top: 4),
-                  decoration: const BoxDecoration(
-                    color: AppColors.red,
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).accent,
                     shape: BoxShape.circle,
                   ),
                 ),

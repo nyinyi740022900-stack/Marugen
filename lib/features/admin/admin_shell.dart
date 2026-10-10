@@ -21,7 +21,11 @@ class _MoreItem {
   final IconData icon;
   final String label;
   final int index;
-  const _MoreItem({required this.icon, required this.label, required this.index});
+  const _MoreItem({
+    required this.icon,
+    required this.label,
+    required this.index,
+  });
 }
 
 /// Bottom-nav shell for staff/owner.
@@ -44,8 +48,14 @@ class AdminShell extends ConsumerWidget {
 
   static const _primaryDestinations = [
     NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Home'),
-    NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Products'),
-    NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Orders'),
+    NavigationDestination(
+      icon: Icon(Icons.inventory_2_outlined),
+      label: 'Products',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.receipt_long_outlined),
+      label: 'Orders',
+    ),
   ];
 
   // Settings kept last — it's the least-used item, so the more frequently
@@ -70,7 +80,11 @@ class AdminShell extends ConsumerWidget {
     return _moreItems.firstWhere((m) => m.index == index).label;
   }
 
-  Future<void> _openMoreSheet(BuildContext context, WidgetRef ref, int index) async {
+  Future<void> _openMoreSheet(
+    BuildContext context,
+    WidgetRef ref,
+    int index,
+  ) async {
     final selected = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
@@ -78,33 +92,50 @@ class AdminShell extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(
-                  AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                AppSpacing.sm,
+              ),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Text('More',
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.8,
-                        color: AppColors.grey)),
+                child: Text(
+                  'More',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppPalette.of(context).textMuted,
+                  ),
+                ),
               ),
             ),
             for (final item in _moreItems)
               ListTile(
-                leading: Icon(item.icon,
-                    color: index == item.index ? AppColors.red : AppColors.black),
+                leading: Icon(
+                  item.icon,
+                  color: index == item.index
+                      ? AppPalette.of(sheetContext).accent
+                      : AppPalette.of(sheetContext).text,
+                ),
                 title: Text(
                   item.label,
                   style: TextStyle(
-                    fontWeight:
-                        index == item.index ? FontWeight.w700 : FontWeight.w500,
-                    color: index == item.index ? AppColors.red : AppColors.black,
+                    fontWeight: index == item.index
+                        ? FontWeight.w700
+                        : FontWeight.w500,
+                    color: index == item.index
+                        ? AppPalette.of(sheetContext).accent
+                        : AppPalette.of(sheetContext).text,
                   ),
                 ),
                 trailing: index == item.index
-                    ? const Icon(Icons.check, color: AppColors.red)
+                    ? Icon(
+                        Icons.check,
+                        color: AppPalette.of(sheetContext).accent,
+                      )
                     : null,
                 onTap: () => Navigator.of(sheetContext).pop(item.index),
               ),
@@ -113,7 +144,9 @@ class AdminShell extends ConsumerWidget {
         ),
       ),
     );
-    if (selected != null) ref.read(adminTabIndexProvider.notifier).state = selected;
+    if (selected != null) {
+      ref.read(adminTabIndexProvider.notifier).state = selected;
+    }
   }
 
   @override

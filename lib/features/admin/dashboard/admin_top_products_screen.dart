@@ -15,7 +15,7 @@ class AdminTopProductsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ordersAsync = ref.watch(adminOrdersProvider);
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('Top Products')),
       body: ordersAsync.when(
         data: (orders) {
@@ -24,7 +24,8 @@ class AdminTopProductsScreen extends ConsumerWidget {
             return const EmptyState(
               icon: Icons.bar_chart_outlined,
               title: 'Not enough order data yet',
-              subtitle: 'Product rankings will show up here once orders come in.',
+              subtitle:
+                  'Product rankings will show up here once orders come in.',
             );
           }
           return ListView.separated(
@@ -35,27 +36,38 @@ class AdminTopProductsScreen extends ConsumerWidget {
               return ListTile(
                 leading: CircleAvatar(
                   radius: 14,
-                  backgroundColor: AppColors.redSoft,
+                  backgroundColor: AppPalette.of(context).accentSoft,
                   child: Text(
                     '${i + 1}',
-                    style: const TextStyle(
-                      color: AppColors.redDark,
+                    style: TextStyle(
+                      color: AppPalette.of(context).accent,
                       fontWeight: FontWeight.w700,
                       fontSize: 12,
                     ),
                   ),
                 ),
-                title: Text(ranked[i].key, style: const TextStyle(fontWeight: FontWeight.w600)),
+                title: Text(
+                  ranked[i].key,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
                 trailing: Text(
                   '${ranked[i].value} sold',
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.grey),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: AppPalette.of(context).textMuted,
+                  ),
                 ),
               );
             },
           );
         },
-        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
+        ),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
       ),
     );
   }

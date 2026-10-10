@@ -1,7 +1,7 @@
 name: marugen_app
-description: "Marugen Koi Farm — e-commerce app for Koi, Arowana, fish food & accessories."
+description: "Marugen Fish Farm — e-commerce app for Koi, Arowana, fish food & accessories."
 publish_to: 'none'
-version: 0.1.0+1
+version: 1.0.0+5
 
 environment:
   sdk: ^3.13.2
@@ -35,6 +35,9 @@ dependencies:
   firebase_messaging: ^15.2.1
   app_badge_plus: ^1.2.4
 
+  # Crash reporting
+  firebase_crashlytics: ^4.3.5
+
   # Utilities
   intl: ^0.19.0
   flutter_dotenv: ^5.2.1
@@ -52,8 +55,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  http: ^1.6.0
   build_runner: ^2.4.15
   flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.6
 
 flutter:
   uses-material-design: true
@@ -74,3 +79,24 @@ flutter_launcher_icons:
   background_color_ios: "#FFFFFF"
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/images/logo.png"
+
+# Generates the native launch splash (legacy windowBackground AND Android
+# 12+'s own icon-based splash) — run with:
+#   dart run flutter_native_splash:create
+# Android 12+ always shows *some* icon in its own fixed-size circular
+# reveal, with no way to turn that off — even correctly safe-zoned artwork
+# (previous splash_icon.png) read as "too big" next to the small brand
+# mark + wordmark the Flutter SplashScreen shows a moment later
+# (lib/core/router/splash_screen.dart). Using a transparent 1x1 image here
+# makes that OS-enforced circle render empty, so the launch is just the
+# white brand background until the real (smaller, deliberate) splash
+# screen draws.
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/images/splash_blank.png
+  android_12:
+    image: assets/images/splash_blank.png
+    color: "#FFFFFF"
+  android: true
+  ios: true
+  web: false

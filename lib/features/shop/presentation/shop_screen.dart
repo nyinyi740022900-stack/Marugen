@@ -1,3 +1,5 @@
+import '../../../shared/widgets/product_grid.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -29,7 +31,13 @@ class ShopScreen extends ConsumerWidget {
           children: [
             const BrandLogo(size: 26),
             const SizedBox(width: 8),
-            const Text('MARUGEN KOI FARM'),
+            const Flexible(
+              child: Text(
+                'MARUGEN FISH FARM',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -42,7 +50,7 @@ class ShopScreen extends ConsumerWidget {
       body: Column(
         children: [
           Container(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.md,
               AppSpacing.sm,
@@ -62,9 +70,9 @@ class ShopScreen extends ConsumerWidget {
             ),
           ),
           Container(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             child: SizedBox(
-              height: 56,
+              height: 32 + MediaQuery.textScalerOf(context).scale(24),
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(
@@ -95,16 +103,22 @@ class ShopScreen extends ConsumerWidget {
             child: productsAsync.when(
               data: (products) {
                 if (products.isEmpty) {
-                  return const _EmptyState();
+                  return ref.watch(searchQueryProvider).trim().isNotEmpty ||
+                          selectedCategory != null
+                      ? EmptyState(
+                          icon: Icons.search_off,
+                          title: 'No matching products',
+                          subtitle: 'Try another search or clear your filters.',
+                          actionLabel: 'Clear filters',
+                          onAction: () {
+                            ref.read(searchQueryProvider.notifier).state = '';
+                            ref.read(selectedCategoryProvider.notifier).state =
+                                null;
+                          },
+                        )
+                      : const _EmptyState();
                 }
-                return GridView.builder(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    mainAxisSpacing: AppSpacing.md,
-                    crossAxisSpacing: AppSpacing.md,
-                    childAspectRatio: 0.6,
-                  ),
+                return ProductGrid(
                   itemCount: products.length,
                   itemBuilder: (context, i) => ProductCard(
                     product: products[i],
@@ -148,14 +162,11 @@ class _CartBadgeButton extends ConsumerWidget {
             top: 8,
             child: Container(
               padding: const EdgeInsets.all(3),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppColors.red,
                 shape: BoxShape.circle,
               ),
-              constraints: const BoxConstraints(
-                minWidth: 16,
-                minHeight: 16,
-              ),
+              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
               child: Text(
                 '$cartCount',
                 textAlign: TextAlign.center,
@@ -242,13 +253,14 @@ class _SearchFieldState extends ConsumerState<_SearchField> {
         suffixIcon: query.isEmpty
             ? null
             : IconButton(
+                tooltip: 'Clear search',
                 icon: const Icon(Icons.close, size: 18),
                 onPressed: () =>
                     ref.read(searchQueryProvider.notifier).state = '',
               ),
         contentPadding: const EdgeInsets.symmetric(vertical: 10),
         filled: true,
-        fillColor: AppColors.offWhite,
+        fillColor: AppPalette.of(context).background,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
           borderSide: BorderSide.none,
@@ -277,7 +289,11 @@ class _SortButton extends StatelessWidget {
             child: Row(
               children: [
                 if (s == sort)
-                  const Icon(Icons.check, size: 16, color: AppColors.red)
+                  Icon(
+                    Icons.check,
+                    size: 16,
+                    color: AppPalette.of(context).accent,
+                  )
                 else
                   const SizedBox(width: 16),
                 const SizedBox(width: 8),
@@ -287,13 +303,13 @@ class _SortButton extends StatelessWidget {
           ),
       ],
       child: Container(
-        height: 44,
-        width: 44,
+        height: 48,
+        width: 48,
         decoration: BoxDecoration(
-          color: AppColors.offWhite,
+          color: AppPalette.of(context).background,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
-        child: const Icon(Icons.sort, size: 20, color: AppColors.black),
+        child: Icon(Icons.sort, size: 20, color: AppPalette.of(context).text),
       ),
     );
   }

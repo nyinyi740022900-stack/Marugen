@@ -31,7 +31,9 @@ class _ArticleFormSheet extends ConsumerStatefulWidget {
 
 class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
   late final _titleCtrl = TextEditingController(text: widget.existing?.title);
-  late final _bodyCtrl = TextEditingController(text: widget.existing?.bodyMarkdown);
+  late final _bodyCtrl = TextEditingController(
+    text: widget.existing?.bodyMarkdown,
+  );
   String? _existingCoverUrl;
   XFile? _newCoverImage;
   bool _saving = false;
@@ -50,7 +52,10 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
   }
 
   Future<void> _pickCoverImage() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked != null) setState(() => _newCoverImage = picked);
   }
 
@@ -80,7 +85,8 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -101,8 +107,10 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'Add Guide' : 'Edit Guide',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              widget.existing == null ? 'Add Guide' : 'Edit Guide',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: AppSpacing.lg),
             GestureDetector(
               onTap: _pickCoverImage,
@@ -111,18 +119,26 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
                 child: Container(
                   height: 140,
                   width: double.infinity,
-                  color: AppColors.offWhite,
+                  color: AppPalette.of(context).surfaceMuted,
                   child: _newCoverImage != null
                       ? _PickedImageThumb(file: _newCoverImage!)
                       : (_existingCoverUrl != null
-                          ? Image.network(_existingCoverUrl!, fit: BoxFit.cover)
-                          : const Icon(Icons.add_a_photo_outlined, color: AppColors.grey)),
+                            ? Image.network(
+                                _existingCoverUrl!,
+                                fit: BoxFit.cover,
+                              )
+                            : Icon(
+                                Icons.add_a_photo_outlined,
+                                color: AppPalette.of(context).textMuted,
+                              )),
                 ),
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
             TextField(
-                controller: _titleCtrl, decoration: const InputDecoration(labelText: 'Title')),
+              controller: _titleCtrl,
+              decoration: const InputDecoration(labelText: 'Title'),
+            ),
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _bodyCtrl,
@@ -136,7 +152,11 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
                   ? const SizedBox(
                       height: 18,
                       width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
                   : const Text('Publish'),
             ),
           ],

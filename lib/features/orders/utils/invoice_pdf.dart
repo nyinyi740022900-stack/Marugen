@@ -23,7 +23,7 @@ Future<Uint8List> buildInvoicePdf({
   required Order order,
   required Map<String, dynamic> settings,
 }) async {
-  final shopName = settings['shop_name'] as String? ?? 'Marugen Koi Farm';
+  final shopName = settings['shop_name'] as String? ?? 'Marugen Fish Farm';
   final shopPhone = settings['shop_phone'] as String?;
   final shopAddress = settings['shop_address'] as String?;
   final gstPercent = (settings['gst_percent'] as num?)?.toDouble() ?? 0;

@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../../orders/utils/packing_slip_pdf.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
+import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../orders/presentation/orders_providers.dart';
@@ -42,36 +49,44 @@ class AdminDeliveryPane extends ConsumerWidget {
     final easyParcelConnected =
         ref.watch(easyParcelConnectedProvider).valueOrNull ?? false;
 
-    return ordersAsync.when(
-      data: (orders) {
-        final readyToShip = orders
-            .where(
-              (o) =>
-                  o.status == OrderStatus.paid ||
-                  o.status == OrderStatus.packing,
-            )
-            .toList();
-        if (readyToShip.isEmpty) {
-          return const EmptyState(
-            icon: Icons.local_shipping_outlined,
-            title: 'Nothing to fulfil',
-            subtitle: 'No orders are ready for delivery right now.',
+    return ContentWidth(
+      maxWidth: 800,
+      child: ordersAsync.when(
+        data: (orders) {
+          final readyToShip = orders
+              .where(
+                (o) =>
+                    o.status == OrderStatus.paid ||
+                    o.status == OrderStatus.packing ||
+                    (o.status == OrderStatus.shipped &&
+                        o.trackingProvider == 'easyparcel'),
+              )
+              .toList();
+          if (readyToShip.isEmpty) {
+            return const EmptyState(
+              icon: Icons.local_shipping_outlined,
+              title: 'Nothing to fulfil',
+              subtitle: 'No orders are ready for delivery right now.',
+            );
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            itemCount: readyToShip.length,
+            separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
+            itemBuilder: (context, i) => _FulfillmentCard(
+              order: readyToShip[i],
+              easyParcelConnected: easyParcelConnected,
+            ),
           );
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          itemCount: readyToShip.length,
-          separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-          itemBuilder: (context, i) => _FulfillmentCard(
-            order: readyToShip[i],
-            easyParcelConnected: easyParcelConnected,
+        },
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
           ),
-        );
-      },
-      loading: () => const Center(
-        child: CircularProgressIndicator(color: AppColors.red),
+        ),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
       ),
-      error: (e, _) => ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
     );
   }
 }
@@ -79,7 +94,10 @@ class AdminDeliveryPane extends ConsumerWidget {
 class _FulfillmentCard extends ConsumerStatefulWidget {
   final Order order;
   final bool easyParcelConnected;
-  const _FulfillmentCard({required this.order, required this.easyParcelConnected});
+  const _FulfillmentCard({
+    required this.order,
+    required this.easyParcelConnected,
+  });
 
   @override
   ConsumerState<_FulfillmentCard> createState() => _FulfillmentCardState();
@@ -121,7 +139,11 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
           ..showSnackBar(
-            SnackBar(content: Text('Booked with ${selected.courierName} — tracking is automatic')),
+            SnackBar(
+              content: Text(
+                'Booked with ${selected.courierName} — tracking is automatic',
+              ),
+            ),
           );
       }
     } catch (e) {
@@ -160,9 +182,8 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
       refreshAdminOrders(ref);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update status: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not update status: $e')));
     } finally {
       if (mounted) setState(() => _markingDelivered = false);
     }
@@ -181,7 +202,11 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
       refreshAdminOrders(ref);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registered with 17TRACK — tracking is now automatic')),
+          const SnackBar(
+            content: Text(
+              'Registered with 17TRACK — tracking is now automatic',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -211,7 +236,10 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                 decoration: const InputDecoration(labelText: 'Courier'),
                 items: [
                   for (final entry in _carrierOptions.entries)
-                    DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value),
+                    ),
                 ],
                 onChanged: (v) => setState(() => carrierCode = v),
               ),
@@ -219,7 +247,9 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
               TextField(
                 controller: controller,
                 autofocus: true,
-                decoration: const InputDecoration(hintText: 'e.g. SG1234567890'),
+                decoration: const InputDecoration(
+                  hintText: 'e.g. SG1234567890',
+                ),
               ),
             ],
           ),
@@ -243,13 +273,55 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
     await _registerTracking(result.$1, result.$2);
   }
 
+  Future<void> _openLabel() async {
+    final uri = Uri.tryParse(widget.order.easyparcelAwbUrl ?? '');
+    try {
+      if (uri == null ||
+          !['http', 'https'].contains(uri.scheme) ||
+          uri.host.isEmpty ||
+          !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw Exception('Could not open shipping label');
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open shipping label. Please try EasyParcel dashboard.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _printPackingSlip() async {
+    try {
+      final settings = await ref.read(shopSettingsProvider.future);
+      if (!mounted) return;
+      await printPackingSlip(
+        widget.order,
+        context: context,
+        settings: settings,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not print packing slip. Please try again.'),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -263,14 +335,45 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
           const SizedBox(height: 2),
           Text(
             DateFormat.yMMMd().format(order.createdAt),
-            style: const TextStyle(color: AppColors.grey, fontSize: 12),
+            style: TextStyle(
+              color: AppPalette.of(context).textMuted,
+              fontSize: 12,
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
+          TextButton.icon(
+            onPressed: _printPackingSlip,
+            icon: const Icon(Icons.print_outlined, size: 18),
+            label: const Text('Print Packing Slip'),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (order.trackingProvider == 'easyparcel') ...[
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: order.easyparcelAwbUrl?.isNotEmpty == true
+                      ? _openLabel
+                      : null,
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('Open Shipping Label'),
+                ),
+              ],
+            ),
+            Text(
+              order.easyparcelAwbUrl?.isNotEmpty == true
+                  ? 'Print the courier label and attach it before pickup.'
+                  : 'Shipping label is not available yet. Check EasyParcel dashboard.',
+              style: const TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+          ],
           if (order.qxpressTrackingNo != null) ...[
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
-                color: AppColors.success.withValues(alpha: 0.08),
+                color: AppPalette.of(context).success.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
               child: Column(
@@ -278,17 +381,17 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                 children: [
                   Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.local_shipping_outlined,
                         size: 15,
-                        color: AppColors.success,
+                        color: AppPalette.of(context).success,
                       ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           'Tracking: ${order.qxpressTrackingNo}',
-                          style: const TextStyle(
-                            color: AppColors.success,
+                          style: TextStyle(
+                            color: AppPalette.of(context).success,
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
                           ),
@@ -296,17 +399,21 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                       ),
                       if (order.trackingProvider == 'easyparcel')
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
-                            color: AppColors.success.withValues(alpha: 0.15),
+                            color: AppPalette.of(context).success
+                                .withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(AppRadius.pill),
                           ),
-                          child: const Text(
+                          child: Text(
                             'via EasyParcel',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w700,
-                              color: AppColors.success,
+                              color: AppPalette.of(context).success,
                             ),
                           ),
                         ),
@@ -316,21 +423,21 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                     const SizedBox(height: 4),
                     Text(
                       order.trackingStatusDetail ?? order.trackingStatus!,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppColors.grey,
+                        color: AppPalette.of(context).textMuted,
                       ),
                     ),
                   ] else if (order.trackingRegistered) ...[
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       'Waiting for first carrier update…',
                       style: TextStyle(
                         fontSize: 12,
                         // Was greySoft (#9A9490, ~2.7:1 on white — fails
                         // WCAG AA) — this is a status an admin needs to
                         // actually read, not decorative fine print.
-                        color: AppColors.grey,
+                        color: AppPalette.of(context).textMuted,
                       ),
                     ),
                   ] else if (order.trackingProvider != 'easyparcel') ...[
@@ -343,8 +450,9 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () =>
-                            _enterTracking(initialNumber: order.qxpressTrackingNo!),
+                        onPressed: () => _enterTracking(
+                          initialNumber: order.qxpressTrackingNo!,
+                        ),
                         icon: const Icon(Icons.track_changes, size: 16),
                         label: const Text('Retry / pick a courier'),
                       ),
@@ -372,22 +480,27 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                         ? const SizedBox(
                             height: 16,
                             width: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.white,
+                            ),
                           )
                         : const Icon(Icons.local_shipping_outlined, size: 17),
-                    label: Text(_bookingShipment ? 'Booking…' : 'Ship with EasyParcel'),
+                    label: Text(
+                      _bookingShipment ? 'Booking…' : 'Ship with EasyParcel',
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  OutlinedButton.icon(
+                  TextButton.icon(
                     onPressed: () => _enterTracking(),
                     icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Enter Tracking Number Manually'),
+                    label: const Text('Add tracking number'),
                   ),
                 ] else
                   ElevatedButton.icon(
                     onPressed: () => _enterTracking(),
                     icon: const Icon(Icons.local_shipping_outlined, size: 17),
-                    label: const Text('Enter Tracking Number'),
+                    label: const Text('Add tracking number'),
                   ),
                 const SizedBox(height: AppSpacing.sm),
                 // For orders the shop hand-delivers itself — live fish
@@ -402,7 +515,7 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                           width: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Delivered by shop'),
+                      : const Text('Mark as delivered'),
                 ),
               ],
             ),
@@ -436,9 +549,9 @@ class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
   }
 
   void _retry() => setState(() {
-        _selected = null;
-        _ratesFuture = _fetchRates();
-      });
+    _selected = null;
+    _ratesFuture = _fetchRates();
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -451,7 +564,12 @@ class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: maxHeight),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.sm,
+            AppSpacing.lg,
+            AppSpacing.lg,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -467,16 +585,22 @@ class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
                     future: _ratesFuture,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState != ConnectionState.done) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-                          child: Center(child: CircularProgressIndicator(color: AppColors.red)),
+                        return Padding(
+                          padding: EdgeInsets.symmetric(
+                            vertical: AppSpacing.xl,
+                          ),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: AppPalette.of(context).accent,
+                            ),
+                          ),
                         );
                       }
                       if (snapshot.hasError) {
                         return _RateSheetMessage(
                           icon: Icons.error_outline,
                           message: 'Could not fetch rates: ${snapshot.error}',
-                          color: AppColors.error,
+                          color: AppPalette.of(context).error,
                           onRetry: _retry,
                         );
                       }
@@ -484,27 +608,32 @@ class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
                       if (rates.isEmpty) {
                         return _RateSheetMessage(
                           icon: Icons.local_shipping_outlined,
-                          message: 'No courier rates available for this address.',
-                          color: AppColors.grey,
+                          message:
+                              'No courier rates available for this address.',
+                          color: AppPalette.of(context).textMuted,
                           onRetry: _retry,
                         );
                       }
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          for (final rate in rates)
-                            RadioListTile<EasyParcelRate>(
-                              contentPadding: EdgeInsets.zero,
-                              value: rate,
-                              groupValue: _selected,
-                              onChanged: (v) => setState(() => _selected = v),
-                              title: Text(rate.courierName),
-                              secondary: Text(
-                                '${rate.currency ?? 'S\$'} ${rate.price.toStringAsFixed(2)}',
-                                style: const TextStyle(fontWeight: FontWeight.w700),
+                      return RadioGroup<EasyParcelRate>(
+                        groupValue: _selected,
+                        onChanged: (value) => setState(() => _selected = value),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final rate in rates)
+                              RadioListTile<EasyParcelRate>(
+                                contentPadding: EdgeInsets.zero,
+                                value: rate,
+                                title: Text(rate.courierName),
+                                secondary: Text(
+                                  '${rate.currency ?? 'S\$'} ${rate.price.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       );
                     },
                   ),

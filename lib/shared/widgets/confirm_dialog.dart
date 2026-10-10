@@ -25,7 +25,10 @@ Future<bool> confirmDestructiveAction(
         ),
         TextButton(
           onPressed: () => Navigator.pop(dialogContext, true),
-          child: Text(confirmLabel, style: const TextStyle(color: AppColors.error)),
+          child: Text(
+            confirmLabel,
+            style: TextStyle(color: AppPalette.of(context).error),
+          ),
         ),
       ],
     ),
@@ -77,8 +80,10 @@ Future<bool> confirmLogout(BuildContext context) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => Dialog(
-      backgroundColor: AppColors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+      backgroundColor: AppPalette.of(context).surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.xl,
@@ -94,11 +99,18 @@ Future<bool> confirmLogout(BuildContext context) async {
               height: 72,
               decoration: BoxDecoration(
                 gradient: RadialGradient(
-                  colors: [AppColors.redSoft, AppColors.redSoft.withValues(alpha: 0.35)],
+                  colors: [
+                    AppPalette.of(context).accentSoft,
+                    AppPalette.of(context).accentSoft.withValues(alpha: 0.35),
+                  ],
                 ),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.logout, size: 30, color: AppColors.error),
+              child: Icon(
+                Icons.logout,
+                size: 30,
+                color: AppPalette.of(context).error,
+              ),
             ),
             const SizedBox(height: AppSpacing.lg),
             const Text(
@@ -106,10 +118,13 @@ Future<bool> confirmLogout(BuildContext context) async {
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'You can log back in anytime.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.grey, fontSize: 13.5),
+              style: TextStyle(
+                color: AppPalette.of(context).textMuted,
+                fontSize: 13.5,
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
             SizedBox(

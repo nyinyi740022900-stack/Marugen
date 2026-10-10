@@ -25,7 +25,7 @@ class OrderSuccessScreen extends ConsumerWidget {
     final shortId = orderId.length >= 8 ? orderId.substring(0, 8) : orderId;
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xl),
@@ -36,25 +36,36 @@ class OrderSuccessScreen extends ConsumerWidget {
                 width: 88,
                 height: 88,
                 decoration: BoxDecoration(
-                  color: AppColors.success.withValues(alpha: 0.12),
+                  color: AppPalette.of(context).success.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check_rounded, size: 48, color: AppColors.success),
+                child: Icon(
+                  Icons.check_rounded,
+                  size: 48,
+                  color: AppPalette.of(context).success,
+                ),
               ),
               const SizedBox(height: AppSpacing.xl),
-              Text('Order placed!', style: Theme.of(context).textTheme.headlineMedium),
+              Text(
+                'Order placed!',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
               const SizedBox(height: AppSpacing.sm),
-              const Text(
-                'Thank you for shopping with Marugen Koi Farm.\nWe will notify you as your order moves through each stage.',
+              Text(
+                'Thank you for shopping with Marugen Fish Farm.\nWe will notify you as your order moves through each stage.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.grey, fontSize: 14, height: 1.45),
+                style: TextStyle(
+                  color: AppPalette.of(context).textMuted,
+                  fontSize: 14,
+                  height: 1.45,
+                ),
               ),
               const SizedBox(height: AppSpacing.xl),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 decoration: BoxDecoration(
-                  color: AppColors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(AppRadius.md),
                   boxShadow: AppShadows.card,
                 ),
@@ -69,7 +80,8 @@ class OrderSuccessScreen extends ConsumerWidget {
                               children: [
                                 _SummaryRow(
                                   label: 'Items',
-                                  value: '${order.items.fold<int>(0, (s, i) => s + i.quantity)}',
+                                  value:
+                                      '${order.items.fold<int>(0, (s, i) => s + i.quantity)}',
                                 ),
                                 const SizedBox(height: AppSpacing.sm),
                                 _SummaryRow(
@@ -78,7 +90,10 @@ class OrderSuccessScreen extends ConsumerWidget {
                                   emphasize: true,
                                 ),
                                 const SizedBox(height: AppSpacing.sm),
-                                _SummaryRow(label: 'Status', value: orderStatusLabel(order.status)),
+                                _SummaryRow(
+                                  label: 'Status',
+                                  value: orderStatusLabel(order.status),
+                                ),
                               ],
                             ),
                       orElse: () => const Padding(
@@ -96,7 +111,8 @@ class OrderSuccessScreen extends ConsumerWidget {
               const Spacer(),
               ElevatedButton(
                 onPressed: () {
-                  ref.read(customerTabIndexProvider.notifier).state = 2; // Orders tab
+                  ref.read(customerTabIndexProvider.notifier).state =
+                      2; // Orders tab
                   context.go('/');
                   context.push('/orders/$orderId');
                 },
@@ -105,7 +121,8 @@ class OrderSuccessScreen extends ConsumerWidget {
               const SizedBox(height: AppSpacing.sm),
               OutlinedButton(
                 onPressed: () {
-                  ref.read(customerTabIndexProvider.notifier).state = 0; // Shop tab
+                  ref.read(customerTabIndexProvider.notifier).state =
+                      0; // Shop tab
                   context.go('/');
                 },
                 child: const Text('Continue Shopping'),
@@ -122,20 +139,32 @@ class _SummaryRow extends StatelessWidget {
   final String label;
   final String value;
   final bool emphasize;
-  const _SummaryRow({required this.label, required this.value, this.emphasize = false});
+  const _SummaryRow({
+    required this.label,
+    required this.value,
+    this.emphasize = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontSize: 13.5, color: AppColors.grey)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13.5,
+            color: AppPalette.of(context).textMuted,
+          ),
+        ),
         Text(
           value,
           style: TextStyle(
             fontSize: emphasize ? 17 : 13.5,
             fontWeight: FontWeight.w700,
-            color: emphasize ? AppColors.red : AppColors.black,
+            color: emphasize
+                ? AppPalette.of(context).accent
+                : AppPalette.of(context).text,
           ),
         ),
       ],

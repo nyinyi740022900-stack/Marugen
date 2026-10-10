@@ -19,9 +19,13 @@ class AdminKnowledgeScreen extends ConsumerWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Knowledge'),
-          bottom: const TabBar(
-            indicatorColor: AppColors.red,
-            tabs: [Tab(text: 'Varieties'), Tab(text: 'Guides'), Tab(text: 'Services')],
+          bottom: TabBar(
+            indicatorColor: AppPalette.of(context).accent,
+            tabs: [
+              Tab(text: 'Varieties'),
+              Tab(text: 'Guides'),
+              Tab(text: 'Services'),
+            ],
           ),
         ),
         body: const TabBarView(
@@ -53,28 +57,45 @@ class _AdminVarieties extends ConsumerWidget {
             return Card(
               child: ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: AppColors.offWhite,
-                  backgroundImage: v.imageUrl != null ? NetworkImage(v.imageUrl!) : null,
+                  backgroundColor: AppPalette.of(context).surfaceMuted,
+                  backgroundImage: v.imageUrl != null
+                      ? NetworkImage(v.imageUrl!)
+                      : null,
                   child: v.imageUrl == null
-                      ? const Icon(Icons.water, color: AppColors.grey)
+                      ? Icon(
+                          Icons.water,
+                          color: AppPalette.of(context).textMuted,
+                        )
                       : null,
                 ),
-                title: Text(v.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Text(
+                  v.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 subtitle: Text(
                   v.active
                       ? '${v.category.toUpperCase()}'
-                          '${v.stages.isNotEmpty ? ' · ${v.stages.length} stages' : ''}'
+                            '${v.stages.isNotEmpty ? ' · ${v.stages.length} stages' : ''}'
                       : 'Hidden from customers',
-                  style: TextStyle(color: v.active ? null : AppColors.error),
+                  style: TextStyle(
+                    color: v.active ? null : AppPalette.of(context).error,
+                  ),
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      tooltip: v.active ? 'Hide from customers' : 'Show to customers',
+                      tooltip: v.active
+                          ? 'Hide from customers'
+                          : 'Show to customers',
                       icon: Icon(
-                        v.active ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                        color: v.active ? AppColors.grey : AppColors.error,
+                        v.active
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: v.active
+                            ? AppPalette.of(context).textMuted
+                            : AppPalette.of(context).error,
                       ),
                       onPressed: () async {
                         await ref
@@ -85,15 +106,21 @@ class _AdminVarieties extends ConsumerWidget {
                     ),
                     IconButton(
                       tooltip: 'Delete',
-                      icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: AppPalette.of(context).error,
+                      ),
                       onPressed: () async {
                         final confirmed = await confirmDestructiveAction(
                           context,
                           title: 'Delete variety?',
-                          message: 'This permanently removes "${v.name}". This cannot be undone.',
+                          message:
+                              'This permanently removes "${v.name}". This cannot be undone.',
                         );
                         if (!confirmed) return;
-                        await ref.read(knowledgeRepositoryProvider).deleteVariety(v.id);
+                        await ref
+                            .read(knowledgeRepositoryProvider)
+                            .deleteVariety(v.id);
                         ref.invalidate(varietiesProvider);
                       },
                     ),
@@ -104,10 +131,13 @@ class _AdminVarieties extends ConsumerWidget {
             );
           },
         ),
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.red),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(varietiesProvider)),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(varietiesProvider)),
       ),
     );
   }
@@ -134,28 +164,44 @@ class _AdminArticles extends ConsumerWidget {
             return Card(
               child: ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: AppColors.offWhite,
-                  backgroundImage:
-                      a.coverImageUrl != null ? NetworkImage(a.coverImageUrl!) : null,
+                  backgroundColor: AppPalette.of(context).surfaceMuted,
+                  backgroundImage: a.coverImageUrl != null
+                      ? NetworkImage(a.coverImageUrl!)
+                      : null,
                   child: a.coverImageUrl == null
-                      ? const Icon(Icons.menu_book_outlined, color: AppColors.grey)
+                      ? Icon(
+                          Icons.menu_book_outlined,
+                          color: AppPalette.of(context).textMuted,
+                        )
                       : null,
                 ),
-                title: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: Text(
+                  a.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 subtitle: Text(
                   a.active ? a.bodyMarkdown : 'Hidden from customers',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: a.active ? null : AppColors.error),
+                  style: TextStyle(
+                    color: a.active ? null : AppPalette.of(context).error,
+                  ),
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      tooltip: a.active ? 'Hide from customers' : 'Show to customers',
+                      tooltip: a.active
+                          ? 'Hide from customers'
+                          : 'Show to customers',
                       icon: Icon(
-                        a.active ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                        color: a.active ? AppColors.grey : AppColors.error,
+                        a.active
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: a.active
+                            ? AppPalette.of(context).textMuted
+                            : AppPalette.of(context).error,
                       ),
                       onPressed: () async {
                         await ref
@@ -166,15 +212,21 @@ class _AdminArticles extends ConsumerWidget {
                     ),
                     IconButton(
                       tooltip: 'Delete',
-                      icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: AppPalette.of(context).error,
+                      ),
                       onPressed: () async {
                         final confirmed = await confirmDestructiveAction(
                           context,
                           title: 'Delete article?',
-                          message: 'This permanently removes "${a.title}". This cannot be undone.',
+                          message:
+                              'This permanently removes "${a.title}". This cannot be undone.',
                         );
                         if (!confirmed) return;
-                        await ref.read(knowledgeRepositoryProvider).deleteArticle(a.id);
+                        await ref
+                            .read(knowledgeRepositoryProvider)
+                            .deleteArticle(a.id);
                         ref.invalidate(articlesProvider);
                       },
                     ),
@@ -185,10 +237,13 @@ class _AdminArticles extends ConsumerWidget {
             );
           },
         ),
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.red),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(articlesProvider)),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(articlesProvider)),
       ),
     );
   }

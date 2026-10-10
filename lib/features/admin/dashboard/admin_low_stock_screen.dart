@@ -16,7 +16,7 @@ class AdminLowStockScreen extends ConsumerWidget {
     final lowStockAsync = ref.watch(lowStockProductsProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('LOW STOCK')),
       body: lowStockAsync.when(
         data: (products) {
@@ -35,16 +35,16 @@ class AdminLowStockScreen extends ConsumerWidget {
               final product = products[i];
               return Container(
                 decoration: BoxDecoration(
-                  color: AppColors.white,
+                  color: AppPalette.of(context).surface,
                   borderRadius: BorderRadius.circular(AppRadius.md),
                   boxShadow: AppShadows.card,
                 ),
                 clipBehavior: Clip.antiAlias,
                 child: ListTile(
                   onTap: () => context.push('/admin/products/${product.id}'),
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.warning_amber_rounded,
-                    color: AppColors.warning,
+                    color: AppPalette.of(context).warning,
                   ),
                   title: Text(
                     product.name,
@@ -54,9 +54,9 @@ class AdminLowStockScreen extends ConsumerWidget {
                   ),
                   trailing: Text(
                     '${product.availableStock} left',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AppColors.error,
+                      color: AppPalette.of(context).error,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -65,10 +65,13 @@ class AdminLowStockScreen extends ConsumerWidget {
             },
           );
         },
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.red),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(lowStockProductsProvider)),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(lowStockProductsProvider)),
       ),
     );
   }

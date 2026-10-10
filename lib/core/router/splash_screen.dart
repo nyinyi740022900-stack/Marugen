@@ -8,8 +8,8 @@ class SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: AppColors.white,
+    return Scaffold(
+      backgroundColor: AppPalette.of(context).surface,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -17,15 +17,15 @@ class SplashScreen extends StatelessWidget {
             BrandLogo(size: 120),
             SizedBox(height: 20),
             Text(
-              'MARUGEN KOI FARM',
+              'MARUGEN FISH FARM',
               style: TextStyle(
-                color: AppColors.black,
+                color: AppPalette.of(context).text,
                 letterSpacing: 1.5,
                 fontWeight: FontWeight.w600,
               ),
             ),
             SizedBox(height: 28),
-            CircularProgressIndicator(color: AppColors.red),
+            CircularProgressIndicator(color: AppPalette.of(context).accent),
           ],
         ),
       ),

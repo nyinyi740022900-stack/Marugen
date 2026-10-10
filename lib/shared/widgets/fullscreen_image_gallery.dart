@@ -16,13 +16,19 @@ class FullscreenImageGallery extends StatefulWidget {
     this.initialIndex = 0,
   });
 
-  static void open(BuildContext context, {required List<String> imageUrls, int initialIndex = 0}) {
+  static void open(
+    BuildContext context, {
+    required List<String> imageUrls,
+    int initialIndex = 0,
+  }) {
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: true,
         barrierColor: AppColors.black,
-        pageBuilder: (_, _, _) =>
-            FullscreenImageGallery(imageUrls: imageUrls, initialIndex: initialIndex),
+        pageBuilder: (_, _, _) => FullscreenImageGallery(
+          imageUrls: imageUrls,
+          initialIndex: initialIndex,
+        ),
         transitionsBuilder: (_, animation, _, child) =>
             FadeTransition(opacity: animation, child: child),
       ),
@@ -67,8 +73,9 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery> {
                 child: CachedNetworkImage(
                   imageUrl: widget.imageUrls[i],
                   fit: BoxFit.contain,
-                  placeholder: (_, _) =>
-                      const Center(child: CircularProgressIndicator(color: AppColors.white)),
+                  placeholder: (_, _) => const Center(
+                    child: CircularProgressIndicator(color: AppColors.white),
+                  ),
                   errorWidget: (_, _, _) => const Icon(
                     Icons.image_not_supported_outlined,
                     color: AppColors.greySoft,
@@ -91,14 +98,20 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery> {
                   ),
                   if (widget.imageUrls.length > 1)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.black.withValues(alpha: 0.55),
                         borderRadius: BorderRadius.circular(AppRadius.pill),
                       ),
                       child: Text(
                         '${_index + 1} / ${widget.imageUrls.length}',
-                        style: const TextStyle(color: AppColors.white, fontSize: 13),
+                        style: const TextStyle(
+                          color: AppColors.white,
+                          fontSize: 13,
+                        ),
                       ),
                     )
                   else
@@ -141,10 +154,9 @@ class CircleIconButton extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          // 11px padding + 22px icon = 44px, the recommended minimum tap
-          // target (was 8px padding = 38px total).
+          // 13px padding + 22px icon = a 48px native touch target.
           child: Padding(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(13),
             child: Icon(icon, color: AppColors.white, size: 22),
           ),
         ),

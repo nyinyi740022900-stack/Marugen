@@ -19,7 +19,8 @@ class AdminProductsScreen extends ConsumerStatefulWidget {
   const AdminProductsScreen({super.key});
 
   @override
-  ConsumerState<AdminProductsScreen> createState() => _AdminProductsScreenState();
+  ConsumerState<AdminProductsScreen> createState() =>
+      _AdminProductsScreenState();
 }
 
 class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
@@ -41,7 +42,10 @@ class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final query = ref.watch(adminProductSearchQueryProvider).trim().toLowerCase();
+    final query = ref
+        .watch(adminProductSearchQueryProvider)
+        .trim()
+        .toLowerCase();
     final selectedCategory = ref.watch(selectedCategoryProvider);
     // Pagination only applies to the default (no search) view — same
     // reasoning as the admin Orders list (see AdminOrdersPagedNotifier).
@@ -58,7 +62,11 @@ class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              0,
+            ),
             child: _AdminSearchField(),
           ),
           SizedBox(
@@ -66,7 +74,9 @@ class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
               children: [
                 _CategoryChip(
                   label: 'All',
@@ -78,59 +88,75 @@ class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
                   _CategoryChip(
                     label: categoryLabel(category),
                     selected: selectedCategory == category,
-                    onSelected: () => ref
-                        .read(selectedCategoryProvider.notifier)
-                        .state = category,
+                    onSelected: () =>
+                        ref.read(selectedCategoryProvider.notifier).state =
+                            category,
                   ),
               ],
             ),
           ),
           Expanded(
             child: searching
-                ? ref.watch(productListProvider).when(
-                    data: (products) {
-                      final filtered = products.where((p) {
-                        if (p.name.toLowerCase().contains(query)) return true;
-                        final variety = p.fishDetails?.variety;
-                        return variety != null && variety.toLowerCase().contains(query);
-                      }).toList();
+                ? ref
+                      .watch(productListProvider)
+                      .when(
+                        data: (products) {
+                          final filtered = products.where((p) {
+                            if (p.name.toLowerCase().contains(query)) {
+                              return true;
+                            }
+                            final variety = p.fishDetails?.variety;
+                            return variety != null &&
+                                variety.toLowerCase().contains(query);
+                          }).toList();
 
-                      if (filtered.isEmpty) {
-                        return const EmptyState(
-                          icon: Icons.inventory_2_outlined,
-                          title: 'No matches',
-                          subtitle: 'Try a different search or category.',
-                        );
-                      }
-                      return _ProductGrid(products: filtered);
-                    },
-                    loading: () => const Center(
-                      child: CircularProgressIndicator(color: AppColors.red),
-                    ),
-                    error: (e, _) => ErrorState(onRetry: () => ref.invalidate(productListProvider)),
-                  )
-                : ref.watch(adminProductsPagedProvider).when(
-                    data: (paged) {
-                      if (paged.items.isEmpty) {
-                        return const EmptyState(
-                          icon: Icons.inventory_2_outlined,
-                          title: 'No products yet',
-                          subtitle: 'Tap the + button to add your first product.',
-                        );
-                      }
-                      return _ProductGrid(
-                        products: paged.items,
-                        scrollController: _scrollController,
-                        trailingLoader: paged.hasMore,
-                      );
-                    },
-                    loading: () => const Center(
-                      child: CircularProgressIndicator(color: AppColors.red),
-                    ),
-                    error: (e, _) => ErrorState(
-                      onRetry: () => ref.read(adminProductsPagedProvider.notifier).refresh(),
-                    ),
-                  ),
+                          if (filtered.isEmpty) {
+                            return const EmptyState(
+                              icon: Icons.inventory_2_outlined,
+                              title: 'No matches',
+                              subtitle: 'Try a different search or category.',
+                            );
+                          }
+                          return _ProductGrid(products: filtered);
+                        },
+                        loading: () => Center(
+                          child: CircularProgressIndicator(
+                            color: AppPalette.of(context).accent,
+                          ),
+                        ),
+                        error: (e, _) => ErrorState(
+                          onRetry: () => ref.invalidate(productListProvider),
+                        ),
+                      )
+                : ref
+                      .watch(adminProductsPagedProvider)
+                      .when(
+                        data: (paged) {
+                          if (paged.items.isEmpty) {
+                            return const EmptyState(
+                              icon: Icons.inventory_2_outlined,
+                              title: 'No products yet',
+                              subtitle:
+                                  'Tap the + button to add your first product.',
+                            );
+                          }
+                          return _ProductGrid(
+                            products: paged.items,
+                            scrollController: _scrollController,
+                            trailingLoader: paged.hasMore,
+                          );
+                        },
+                        loading: () => Center(
+                          child: CircularProgressIndicator(
+                            color: AppPalette.of(context).accent,
+                          ),
+                        ),
+                        error: (e, _) => ErrorState(
+                          onRetry: () => ref
+                              .read(adminProductsPagedProvider.notifier)
+                              .refresh(),
+                        ),
+                      ),
           ),
         ],
       ),
@@ -174,40 +200,37 @@ class _ProductGrid extends ConsumerWidget {
               crossAxisSpacing: AppSpacing.md,
               childAspectRatio: 0.6,
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) {
-                final product = products[i];
-                return Stack(
-                  children: [
-                    ProductCard(
-                      product: product,
-                      onTap: () => context.push('/admin/products/${product.id}'),
-                      // Favoriting is a customer affordance — admin has no
-                      // use for it, and it collides with the sold-toggle
-                      // below in the same corner.
-                      showFavoriteToggle: false,
+            delegate: SliverChildBuilderDelegate((context, i) {
+              final product = products[i];
+              return Stack(
+                children: [
+                  ProductCard(
+                    product: product,
+                    onTap: () => context.push('/admin/products/${product.id}'),
+                    // Favoriting is a customer affordance — admin has no
+                    // use for it, and it collides with the sold-toggle
+                    // below in the same corner.
+                    showFavoriteToggle: false,
+                  ),
+                  // One-tap "mark sold/unavailable" for a single live
+                  // fish — a farm admin selling a koi/arowana in
+                  // person (at a show, or a walk-in) needs to pull it
+                  // from the app immediately without opening the full
+                  // edit form. Not shown for a batch listing with fish
+                  // options: each option's own stock field is the
+                  // right place to mark that one sold. Regular
+                  // restockable goods don't get this either: their
+                  // "how many are left" question is better answered by
+                  // the numeric stock field in the edit form.
+                  if (product.isLiveFish && !product.hasVariants)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: _AvailabilityToggle(product: product, ref: ref),
                     ),
-                    // One-tap "mark sold/unavailable" for a single live
-                    // fish — a farm admin selling a koi/arowana in
-                    // person (at a show, or a walk-in) needs to pull it
-                    // from the app immediately without opening the full
-                    // edit form. Not shown for a batch listing with fish
-                    // options: each option's own stock field is the
-                    // right place to mark that one sold. Regular
-                    // restockable goods don't get this either: their
-                    // "how many are left" question is better answered by
-                    // the numeric stock field in the edit form.
-                    if (product.isLiveFish && !product.hasVariants)
-                      Positioned(
-                        top: 6,
-                        right: 6,
-                        child: _AvailabilityToggle(product: product, ref: ref),
-                      ),
-                  ],
-                );
-              },
-              childCount: products.length,
-            ),
+                ],
+              );
+            }, childCount: products.length),
           ),
         ),
         if (trailingLoader)
@@ -215,12 +238,17 @@ class _ProductGrid extends ConsumerWidget {
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
               child: Center(
-                child: CircularProgressIndicator(color: AppColors.red, strokeWidth: 2),
+                child: CircularProgressIndicator(
+                  color: AppColors.red,
+                  strokeWidth: 2,
+                ),
               ),
             ),
           )
         else
-          const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.xxxl + AppSpacing.xl)),
+          const SliverToBoxAdapter(
+            child: SizedBox(height: AppSpacing.xxxl + AppSpacing.xl),
+          ),
       ],
     );
   }
@@ -265,7 +293,9 @@ class _AdminSearchFieldState extends ConsumerState<_AdminSearchField> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: ref.read(adminProductSearchQueryProvider));
+    _controller = TextEditingController(
+      text: ref.read(adminProductSearchQueryProvider),
+    );
   }
 
   @override
@@ -285,7 +315,8 @@ class _AdminSearchFieldState extends ConsumerState<_AdminSearchField> {
     }
     return TextField(
       controller: _controller,
-      onChanged: (v) => ref.read(adminProductSearchQueryProvider.notifier).state = v,
+      onChanged: (v) =>
+          ref.read(adminProductSearchQueryProvider.notifier).state = v,
       decoration: InputDecoration(
         hintText: 'Search products…',
         isDense: true,
@@ -295,11 +326,12 @@ class _AdminSearchFieldState extends ConsumerState<_AdminSearchField> {
             : IconButton(
                 icon: const Icon(Icons.close, size: 18),
                 onPressed: () =>
-                    ref.read(adminProductSearchQueryProvider.notifier).state = '',
+                    ref.read(adminProductSearchQueryProvider.notifier).state =
+                        '',
               ),
         contentPadding: const EdgeInsets.symmetric(vertical: 10),
         filled: true,
-        fillColor: AppColors.offWhite,
+        fillColor: AppPalette.of(context).surfaceMuted,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
           borderSide: BorderSide.none,

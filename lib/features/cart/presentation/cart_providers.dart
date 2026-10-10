@@ -95,6 +95,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
   Future<void> _hydrate() async {
     final userId = _userId;
+    final initialState = state;
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_cartPrefsKey(userId));
@@ -112,8 +113,15 @@ class CartNotifier extends Notifier<List<CartItem>> {
         final quantity = entry['quantity'] as int? ?? 1;
         if (productId == null) continue;
         final product = await repo.fetchProductById(productId);
-        // Skip items that were deleted, sold out, or hidden since saving.
-        if (product == null || product.isSold) continue;
+        // Skip items that were deleted, sold out, or went out of stock while
+        // the app was closed — mirrors the check in refreshFromServer() so a
+        // restored cart never briefly shows a phantom in-stock line.
+        if (product == null ||
+            product.isSold ||
+            !product.isPurchasable ||
+            product.isOutOfStock) {
+          continue;
+        }
         ProductVariant? variant;
         if (variantId != null) {
           final match = product.variants.where((v) => v.id == variantId);
@@ -127,19 +135,23 @@ class CartNotifier extends Notifier<List<CartItem>> {
             continue;
           }
         }
-        items.add(CartItem(
-          product: product,
-          quantity: quantity,
-          selectedVariant: variant,
-          selectedSize: product.hasSizeOptions ? sizeLabel : null,
-        ));
+        items.add(
+          CartItem(
+            product: product,
+            quantity: quantity,
+            selectedVariant: variant,
+            selectedSize: product.hasSizeOptions ? sizeLabel : null,
+          ),
+        );
       }
       // Only apply if the user hasn't already started shopping while
       // hydration was in flight, and — since fetching each product is
       // several awaits deep — the signed-in user hasn't changed again in
       // the meantime (a fast logout/login during hydration would otherwise
       // let the previous account's items land in the new account's state).
-      if (state.isEmpty && _userId == userId) {
+      if (state.isEmpty &&
+          _userId == userId &&
+          identical(state, initialState)) {
         state = items;
       }
     } catch (_) {
@@ -149,17 +161,18 @@ class CartNotifier extends Notifier<List<CartItem>> {
 
   Future<void> _persist() async {
     final userId = _userId;
+    // Capture the matching account and lines before any asynchronous work.
+    final payload = [
+      for (final item in state)
+        {
+          'product_id': item.product.id,
+          'variant_id': item.selectedVariant?.id,
+          'size_label': item.selectedSize,
+          'quantity': item.quantity,
+        },
+    ];
     try {
       final prefs = await SharedPreferences.getInstance();
-      final payload = [
-        for (final item in state)
-          {
-            'product_id': item.product.id,
-            'variant_id': item.selectedVariant?.id,
-            'size_label': item.selectedSize,
-            'quantity': item.quantity,
-          },
-      ];
       await prefs.setString(_cartPrefsKey(userId), jsonEncode(payload));
     } catch (_) {
       // Non-fatal — cart just won't survive a restart this time.
@@ -220,18 +233,40 @@ class CartNotifier extends Notifier<List<CartItem>> {
       ),
     ];
     _persist();
-    return quantity > available ? CartAddResult.stockLimit : CartAddResult.added;
+    return quantity > available
+        ? CartAddResult.stockLimit
+        : CartAddResult.added;
   }
 
   void remove(String productId, {String? variantId, String? size}) {
     state = state
         .where(
-          (i) => !(i.product.id == productId &&
-              i.selectedVariant?.id == variantId &&
-              i.selectedSize == size),
+          (i) =>
+              !(i.product.id == productId &&
+                  i.selectedVariant?.id == variantId &&
+                  i.selectedSize == size),
         )
         .toList();
     _persist();
+  }
+
+  /// Undo a removal without touching newer edits or a different account.
+  bool restoreRemoved(CartItem item, {required String? ownerId}) {
+    if (_userId != ownerId || state.any((i) => i.lineKey == item.lineKey)) {
+      return false;
+    }
+    final available = availableFor(
+      item.product,
+      item.selectedVariant,
+      size: item.selectedSize,
+    );
+    if (available <= 0) return false;
+    state = [
+      ...state,
+      item.copyWith(quantity: item.quantity.clamp(1, available)),
+    ];
+    _persist();
+    return true;
   }
 
   void updateQuantity(
@@ -278,12 +313,14 @@ class CartNotifier extends Notifier<List<CartItem>> {
     if (state.isEmpty) {
       return const CartRefreshResult(removed: 0, adjusted: 0, isEmpty: true);
     }
+    final userId = _userId;
+    final startingItems = state;
     final repo = ref.read(productRepositoryProvider);
     final kept = <CartItem>[];
     var removed = 0;
     var adjusted = 0;
 
-    for (final item in state) {
+    for (final item in startingItems) {
       final product = await repo.fetchProductById(item.product.id);
       if (product == null ||
           product.isSold ||
@@ -339,6 +376,12 @@ class CartNotifier extends Notifier<List<CartItem>> {
       kept.add(refreshed);
     }
 
+    // A late stock response must never undo newer edits or cross accounts.
+    if (_userId != userId ||
+        ref.read(currentUserIdProvider) != userId ||
+        !identical(state, startingItems)) {
+      return CartRefreshResult(removed: 0, adjusted: 0, isEmpty: state.isEmpty);
+    }
     state = kept;
     await _persist();
     return CartRefreshResult(
@@ -364,7 +407,9 @@ class CartRefreshResult {
   bool get changed => removed > 0 || adjusted > 0;
 }
 
-final cartProvider = NotifierProvider<CartNotifier, List<CartItem>>(CartNotifier.new);
+final cartProvider = NotifierProvider<CartNotifier, List<CartItem>>(
+  CartNotifier.new,
+);
 
 final cartTotalProvider = Provider<double>((ref) {
   final items = ref.watch(cartProvider);
@@ -372,5 +417,7 @@ final cartTotalProvider = Provider<double>((ref) {
 });
 
 final cartCountProvider = Provider<int>((ref) {
-  return ref.watch(cartProvider).fold<int>(0, (sum, item) => sum + item.quantity);
+  return ref
+      .watch(cartProvider)
+      .fold<int>(0, (sum, item) => sum + item.quantity);
 });

@@ -1,3 +1,5 @@
+import 'product_grid.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -21,7 +23,8 @@ class Skeleton extends StatefulWidget {
   State<Skeleton> createState() => _SkeletonState();
 }
 
-class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin {
+class _SkeletonState extends State<Skeleton>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
@@ -30,7 +33,17 @@ class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else {
+      _controller.repeat(reverse: true);
+    }
   }
 
   @override
@@ -49,7 +62,11 @@ class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin
           width: widget.width,
           height: widget.height,
           decoration: BoxDecoration(
-            color: Color.lerp(AppColors.lightGrey, AppColors.offWhite, t),
+            color: Color.lerp(
+              AppPalette.of(context).border,
+              AppPalette.of(context).surfaceMuted,
+              t,
+            ),
             borderRadius: widget.borderRadius,
           ),
         );
@@ -67,7 +84,7 @@ class ProductCardSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -75,10 +92,17 @@ class ProductCardSkeleton extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AspectRatio(aspectRatio: 1, child: Skeleton(borderRadius: BorderRadius.zero)),
+          const AspectRatio(
+            aspectRatio: 1,
+            child: Skeleton(borderRadius: BorderRadius.zero),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.md),
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              AppSpacing.md,
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -101,14 +125,7 @@ class ProductGridSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: AppSpacing.md,
-        crossAxisSpacing: AppSpacing.md,
-        childAspectRatio: 0.66,
-      ),
+    return ProductGrid(
       itemCount: count,
       itemBuilder: (context, i) => const ProductCardSkeleton(),
     );
@@ -124,7 +141,7 @@ class ListRowSkeleton extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -135,7 +152,11 @@ class ListRowSkeleton extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Skeleton(width: 120, height: 14),
-              Skeleton(width: 56, height: 18, borderRadius: BorderRadius.circular(AppRadius.pill)),
+              Skeleton(
+                width: 56,
+                height: 18,
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -159,7 +180,9 @@ class ProductDetailSkeleton extends StatelessWidget {
       children: [
         const AspectRatio(
           aspectRatio: 1.1,
-          child: Skeleton(borderRadius: BorderRadius.all(Radius.circular(AppRadius.md))),
+          child: Skeleton(
+            borderRadius: BorderRadius.all(Radius.circular(AppRadius.md)),
+          ),
         ),
         const SizedBox(height: AppSpacing.xl),
         const Skeleton(width: 220, height: 20),

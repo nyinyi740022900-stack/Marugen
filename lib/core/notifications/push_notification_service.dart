@@ -55,7 +55,13 @@ class PushNotificationService {
       // native callback (e.g. APNs device-token registration) that never
       // arrives, rather than throwing — a timeout turns that into the same
       // "not available yet" outcome as a normal failure.
-      await Firebase.initializeApp().timeout(const Duration(seconds: 8));
+      //
+      // Firebase may already be initialized by `CrashReporting.initialize()`
+      // earlier in `main()` — re-initializing the same default app throws a
+      // duplicate-app exception, so only do it if nothing has claimed it yet.
+      if (Firebase.apps.isEmpty) {
+        await Firebase.initializeApp().timeout(const Duration(seconds: 8));
+      }
       _initialized = true;
 
       final messaging = FirebaseMessaging.instance;
@@ -93,7 +99,7 @@ class PushNotificationService {
   }
 
   static void _showForegroundMessage(RemoteMessage message) {
-    final title = message.notification?.title ?? 'Marugen Koi Farm';
+    final title = message.notification?.title ?? 'Marugen Fish Farm';
     final body = message.notification?.body ?? '';
     final context = messengerKey.currentState;
     if (context == null) return;

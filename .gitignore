@@ -50,6 +50,8 @@ app.*.map.json
 # Local secrets
 .env
 ios/Flutter/Secrets.xcconfig
+env/*.json
+!env/*.json.example
 
 # Supabase CLI local state
 supabase/.temp/
@@ -57,3 +59,7 @@ supabase/.temp/
 # Editor-local
 .cursor/
 
+
+# Generated Android reports and local document previews
+/android/build/
+/output/

@@ -66,7 +66,7 @@ class FaqScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('FAQ & Support')),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -75,22 +75,38 @@ class FaqScreen extends ConsumerWidget {
             Container(
               margin: const EdgeInsets.only(bottom: AppSpacing.sm),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppPalette.of(context).surface,
                 borderRadius: BorderRadius.circular(AppRadius.md),
                 boxShadow: AppShadows.card,
               ),
               clipBehavior: Clip.antiAlias,
               child: Theme(
-                data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                data: Theme.of(context)
+                    .copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
-                  title: Text(faq.question,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-                  childrenPadding:
-                      const EdgeInsets.fromLTRB(AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
+                  title: Text(
+                    faq.question,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13.5,
+                    ),
+                  ),
+                  childrenPadding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                  ),
                   expandedCrossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(faq.answer,
-                        style: const TextStyle(fontSize: 13, height: 1.5, color: AppColors.grey)),
+                    Text(
+                      faq.answer,
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.5,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -99,23 +115,38 @@ class FaqScreen extends ConsumerWidget {
           Container(
             padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
-              color: AppColors.white,
+              color: AppPalette.of(context).surface,
               borderRadius: BorderRadius.circular(AppRadius.md),
               boxShadow: AppShadows.card,
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Expanded(
-                  child: Text(
-                    'Still need help? Message the shop directly.',
-                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
-                  ),
+                const Text(
+                  'Still need help? Message the shop directly.',
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
                 ),
+                const SizedBox(height: AppSpacing.md),
                 ElevatedButton.icon(
                   onPressed: () async {
-                    final settings = await ref.read(shopSettingsProvider.future);
-                    final phone = settings['shop_phone'] as String? ?? '';
-                    await launchShopContact(phone);
+                    try {
+                      final settings = await ref.read(
+                        shopSettingsProvider.future,
+                      );
+                      if (!context.mounted) return;
+                      final phone = settings['shop_phone'] as String? ?? '';
+                      await contactShop(context, phone);
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Could not load shop contact. Check your connection and try again.',
+                            ),
+                          ),
+                        );
+                      }
+                    }
                   },
                   icon: const Icon(Icons.chat_bubble_outline, size: 16),
                   label: const Text('Contact Us'),

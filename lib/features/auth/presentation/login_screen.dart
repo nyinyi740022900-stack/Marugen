@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import 'auth_providers.dart';
+import '../../orders/presentation/purchase_intent.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -66,245 +70,286 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Brand hero — white panel so the black seal logo stays visible.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.xl,
-                AppSpacing.xl,
-                AppSpacing.xl,
-                AppSpacing.lg,
-              ),
-              child: Column(
-                children: [
-                  const BrandLogo(size: 96),
-                  const SizedBox(height: AppSpacing.md),
-                  const Text(
-                    'MARUGEN KOI FARM',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.black,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 3,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Premium Koi & Arowana — Singapore',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppColors.grey,
-                      fontSize: 12.5,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Form sheet
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  color: AppColors.offWhite,
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(AppRadius.lg),
-                  ),
+      backgroundColor: AppPalette.of(context).surface,
+      body: ContentWidth(
+        maxWidth: 560,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Brand hero — white panel so the black seal logo stays visible.
+              // Sized to shrink on short screens (small phones, or a phone in
+              // split-screen) rather than push the form sheet below it out of
+              // the fixed viewport: the form sheet is the one thing below that
+              // scrolls, so on a short screen the user could scroll it and
+              // still never see "Welcome back" (scrolled up, under this fixed
+              // hero) and the "Sign up" link (scrolled down, past the visible
+              // area) at the same time. Shrinking this hero on short screens
+              // keeps the whole form sheet on screen without scrolling.
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  AppSpacing.xl,
+                  MediaQuery.of(context).size.height < 700
+                      ? AppSpacing.md
+                      : AppSpacing.xl,
+                  AppSpacing.xl,
+                  AppSpacing.md,
                 ),
-                child: SingleChildScrollView(
-                  padding: EdgeInsets.fromLTRB(
-                    AppSpacing.xl,
-                    AppSpacing.xxl,
-                    AppSpacing.xl,
-                    MediaQuery.of(context).padding.bottom + AppSpacing.xl,
+                child: Column(
+                  children: [
+                    BrandLogo(
+                      size: MediaQuery.of(context).size.height < 700 ? 64 : 88,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'MARUGEN FISH FARM',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppPalette.of(context).text,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 3,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Premium Koi & Arowana — Singapore',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppPalette.of(context).textMuted,
+                        fontSize: 12.5,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Form sheet
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).background,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(AppRadius.lg),
+                    ),
                   ),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text(
-                          'Welcome back',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Log in to continue shopping',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            color: AppColors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.xl),
-                        TextFormField(
-                          controller: _emailCtrl,
-                          keyboardType: TextInputType.emailAddress,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Email',
-                            prefixIcon: Icon(Icons.mail_outline, size: 20),
-                          ),
-                          validator: (v) => (v == null || !v.contains('@'))
-                              ? 'Enter a valid email'
-                              : null,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        TextFormField(
-                          controller: _passwordCtrl,
-                          obscureText: _obscure,
-                          textInputAction: TextInputAction.done,
-                          onFieldSubmitted: (_) => _submit(),
-                          decoration: InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: const Icon(
-                              Icons.lock_outline,
-                              size: 20,
-                            ),
-                            suffixIcon: IconButton(
-                              tooltip: _obscure ? 'Show password' : 'Hide password',
-                              icon: Icon(
-                                _obscure
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                                size: 20,
-                                color: AppColors.grey,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscure = !_obscure),
+                  child: SingleChildScrollView(
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.xl,
+                      MediaQuery.of(context).size.height < 700
+                          ? AppSpacing.lg
+                          : AppSpacing.xxl,
+                      AppSpacing.xl,
+                      MediaQuery.of(context).padding.bottom + AppSpacing.xl,
+                    ),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            'Welcome back',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
-                          validator: (v) => (v == null || v.length < 6)
-                              ? 'Minimum 6 characters'
-                              : null,
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          // Was shrunk to text-bounds via
-                          // tapTargetSize.shrinkWrap/minimumSize.zero — well
-                          // under the ~44px tap-target guideline. A normal
-                          // TextButton already has a sane default hit area;
-                          // removing that override is the whole fix.
-                          child: TextButton(
-                            onPressed: () => context.push('/forgot-password'),
-                            child: const Text(
-                              'Forgot password?',
-                              style: TextStyle(color: AppColors.grey, fontSize: 12.5),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Log in to continue shopping',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              color: AppPalette.of(context).textMuted,
                             ),
                           ),
-                        ),
-                        if (_error != null) ...[
+                          const SizedBox(height: AppSpacing.xl),
+                          TextFormField(
+                            controller: _emailCtrl,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            decoration: const InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: Icon(Icons.mail_outline, size: 20),
+                            ),
+                            validator: (v) => (v == null || !v.contains('@'))
+                                ? 'Enter a valid email'
+                                : null,
+                          ),
                           const SizedBox(height: AppSpacing.md),
-                          Container(
-                            padding: const EdgeInsets.all(AppSpacing.md),
-                            decoration: BoxDecoration(
-                              color: AppColors.redSoft,
-                              borderRadius: BorderRadius.circular(AppRadius.sm),
-                            ),
-                            child: Text(
-                              _error!,
-                              style: const TextStyle(
-                                color: AppColors.redDark,
-                                fontSize: 13,
+                          TextFormField(
+                            controller: _passwordCtrl,
+                            obscureText: _obscure,
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => _submit(),
+                            decoration: InputDecoration(
+                              labelText: 'Password',
+                              prefixIcon: const Icon(
+                                Icons.lock_outline,
+                                size: 20,
+                              ),
+                              suffixIcon: IconButton(
+                                tooltip: _obscure
+                                    ? 'Show password'
+                                    : 'Hide password',
+                                icon: Icon(
+                                  _obscure
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                  size: 20,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
+                                onPressed: () =>
+                                    setState(() => _obscure = !_obscure),
                               ),
                             ),
+                            validator: (v) => (v == null || v.length < 6)
+                                ? 'Minimum 6 characters'
+                                : null,
                           ),
-                        ],
-                        const SizedBox(height: AppSpacing.xl),
-                        ElevatedButton(
-                          onPressed: _loading ? null : _submit,
-                          child: _loading
-                              ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.white,
-                                  ),
-                                )
-                              : const Text('Log In'),
-                        ),
-                        const SizedBox(height: AppSpacing.xl),
-                        Row(
-                          children: [
-                            const Expanded(child: Divider()),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                          const SizedBox(height: AppSpacing.xs),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            // Was shrunk to text-bounds via
+                            // tapTargetSize.shrinkWrap/minimumSize.zero — well
+                            // under the ~44px tap-target guideline. A normal
+                            // TextButton already has a sane default hit area;
+                            // removing that override is the whole fix.
+                            child: TextButton(
+                              onPressed: () => context.push('/forgot-password'),
                               child: Text(
-                                'OR',
+                                'Forgot password?',
                                 style: TextStyle(
-                                  color: AppColors.greySoft,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.6,
+                                  color: AppPalette.of(context).textMuted,
+                                  fontSize: 12.5,
                                 ),
                               ),
                             ),
-                            const Expanded(child: Divider()),
-                          ],
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        OutlinedButton.icon(
-                          onPressed: _oauthLoading
-                              ? null
-                              : () => _oauthSignIn(
-                                  () => ref.read(authRepositoryProvider).signInWithGoogle()),
-                          icon: const Icon(Icons.g_mobiledata, size: 24),
-                          label: const Text('Continue with Google'),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        OutlinedButton.icon(
-                          onPressed: _oauthLoading
-                              ? null
-                              : () => _oauthSignIn(
-                                  () => ref.read(authRepositoryProvider).signInWithApple()),
-                          icon: const Icon(Icons.apple, size: 20),
-                          label: const Text('Continue with Apple'),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              "Don't have an account? ",
-                              style: TextStyle(
-                                color: AppColors.grey,
-                                fontSize: 13.5,
+                          ),
+                          if (_error != null) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            Container(
+                              padding: const EdgeInsets.all(AppSpacing.md),
+                              decoration: BoxDecoration(
+                                color: AppPalette.of(context).accentSoft,
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.sm,
+                                ),
+                              ),
+                              child: Text(
+                                _error!,
+                                style: TextStyle(
+                                  color: AppPalette.of(context).accent,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
-                            // TextButton (not a bare GestureDetector) so
-                            // this gets a real ~44px tap target and a
-                            // splash/highlight, not just the glyph bounds.
-                            TextButton(
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                          ],
+                          const SizedBox(height: AppSpacing.xl),
+                          ElevatedButton(
+                            onPressed: _loading ? null : _submit,
+                            child: _loading
+                                ? const SizedBox(
+                                    height: 18,
+                                    width: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.white,
+                                    ),
+                                  )
+                                : const Text('Log In'),
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                          Row(
+                            children: [
+                              const Expanded(child: Divider()),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.md,
+                                ),
+                                child: Text(
+                                  'OR',
+                                  style: TextStyle(
+                                    color: AppPalette.of(context).textMuted,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
                               ),
-                              onPressed: () => context.push('/signup'),
-                              child: const Text(
-                                'Sign up',
+                              const Expanded(child: Divider()),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          OutlinedButton.icon(
+                            onPressed: _oauthLoading
+                                ? null
+                                : () => _oauthSignIn(
+                                    () => ref
+                                        .read(authRepositoryProvider)
+                                        .signInWithGoogle(),
+                                  ),
+                            icon: const Icon(Icons.g_mobiledata, size: 24),
+                            label: const Text('Continue with Google'),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          OutlinedButton.icon(
+                            onPressed: _oauthLoading
+                                ? null
+                                : () => _oauthSignIn(
+                                    () => ref
+                                        .read(authRepositoryProvider)
+                                        .signInWithApple(),
+                                  ),
+                            icon: const Icon(Icons.apple, size: 20),
+                            label: const Text('Continue with Apple'),
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                "Don't have an account? ",
                                 style: TextStyle(
-                                  color: AppColors.red,
-                                  fontWeight: FontWeight.w700,
+                                  color: AppPalette.of(context).textMuted,
                                   fontSize: 13.5,
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                              // TextButton (not a bare GestureDetector) so
+                              // this gets a real ~44px tap target and a
+                              // splash/highlight, not just the glyph bounds.
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                  ),
+                                ),
+                                onPressed: () => context.push(
+                                  authRouteWithRedirect(
+                                    '/signup',
+                                    GoRouterState.of(context)
+                                        .uri
+                                        .queryParameters['redirect'],
+                                  ),
+                                ),
+                                child: Text(
+                                  'Sign up',
+                                  style: TextStyle(
+                                    color: AppPalette.of(context).accent,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -327,7 +372,8 @@ String friendlyAuthError(Object e) {
   if (raw.contains('already registered') || raw.contains('already exists')) {
     return 'An account with this email already exists. Try logging in instead.';
   }
-  if (raw.contains('password') && (raw.contains('weak') || raw.contains('short'))) {
+  if (raw.contains('password') &&
+      (raw.contains('weak') || raw.contains('short'))) {
     return 'Please choose a stronger password (at least 6 characters).';
   }
   if (raw.contains('google sign-in is not configured') ||

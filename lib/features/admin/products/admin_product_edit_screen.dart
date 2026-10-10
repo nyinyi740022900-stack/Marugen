@@ -228,8 +228,7 @@ class _AdminProductEditScreenState
       }
       if (useMatrix) {
         for (final size in sizes) {
-          final qty =
-              int.tryParse(_sizeStockCtrl(i, size).text.trim()) ?? 0;
+          final qty = int.tryParse(_sizeStockCtrl(i, size).text.trim()) ?? 0;
           await repo.upsertVariantSizeStock(
             variantId: variantId,
             sizeLabel: size,
@@ -238,10 +237,7 @@ class _AdminProductEditScreenState
         }
       }
     }
-    await repo.deleteOrphanSizeStocks(
-      productId: productId,
-      keepSizes: sizes,
-    );
+    await repo.deleteOrphanSizeStocks(productId: productId, keepSizes: sizes);
   }
 
   Future<void> _pickImages() async {
@@ -276,8 +272,9 @@ class _AdminProductEditScreenState
         'show_price': _showPrice,
         'stock_quantity': int.tryParse(_stockCtrl.text.trim()) ?? 0,
         // Clear size list when switching a restockable product to live fish.
-        'size_options':
-            supportsSizeMatrix ? _collectedSizeOptions() : <String>[],
+        'size_options': supportsSizeMatrix
+            ? _collectedSizeOptions()
+            : <String>[],
         if (isLiveFish)
           'fish_details': {
             'variety': _varietyCtrl.text.trim().isEmpty
@@ -338,7 +335,7 @@ class _AdminProductEditScreenState
       if (mounted) {
         if (variantSaveFailed) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
                 'Product saved, but weight/size variants failed to save — please edit and try again.',
               ),
@@ -376,9 +373,9 @@ class _AdminProductEditScreenState
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text(
+            child: Text(
               'Delete',
-              style: TextStyle(color: AppColors.error),
+              style: TextStyle(color: AppPalette.of(context).error),
             ),
           ),
         ],
@@ -452,22 +449,25 @@ class _AdminProductEditScreenState
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      color: AppColors.offWhite,
+                      color: AppPalette.of(context).surfaceMuted,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppColors.lightGrey),
+                      border: Border.all(color: AppPalette.of(context).border),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.add_a_photo_outlined,
-                      color: AppColors.grey,
+                      color: AppPalette.of(context).textMuted,
                     ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Tap a photo\'s × to remove it. First photo is the cover image.',
-              style: TextStyle(fontSize: 11.5, color: AppColors.grey),
+              style: TextStyle(
+                fontSize: 11.5,
+                color: AppPalette.of(context).textMuted,
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
             const _SectionLabel('BASIC INFO'),
@@ -502,16 +502,16 @@ class _AdminProductEditScreenState
               Container(
                 padding: const EdgeInsets.all(AppSpacing.sm),
                 decoration: BoxDecoration(
-                  color: AppColors.offWhite,
+                  color: AppPalette.of(context).surfaceMuted,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                child: const Text(
+                child: Text(
                   'This product has variants below — their price & stock are used '
                   'instead of the fields here. The price/stock below are ignored '
                   'once at least one variant exists.',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppColors.grey,
+                    color: AppPalette.of(context).textMuted,
                     height: 1.4,
                   ),
                 ),
@@ -602,12 +602,15 @@ class _AdminProductEditScreenState
               Text(
                 isLiveFish
                     ? 'For a batch photo (e.g. "Japan Imported Koi Selection") — list each '
-                        'fish/variety separately so shoppers can pick which one. Leave empty '
-                        'for a single fish with no picks.'
+                          'fish/variety separately so shoppers can pick which one. Leave empty '
+                          'for a single fish with no picks.'
                     : (_usesSizeStockMatrix
-                        ? 'Add weight options (e.g. 2kg, 5kg) with price. Stock is set in the size matrix below.'
-                        : 'Add weight options (e.g. 2kg, 5kg) each with their own price & stock.'),
-                style: const TextStyle(fontSize: 11.5, color: AppColors.grey),
+                          ? 'Add weight options (e.g. 2kg, 5kg) with price. Stock is set in the size matrix below.'
+                          : 'Add weight options (e.g. 2kg, 5kg) each with their own price & stock.'),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppPalette.of(context).textMuted,
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
               for (var i = 0; i < _variants.length; i++)
@@ -631,10 +634,13 @@ class _AdminProductEditScreenState
               const SizedBox(height: AppSpacing.xl),
               const _SectionLabel('SIZE OPTIONS'),
               const SizedBox(height: AppSpacing.sm),
-              const Text(
+              Text(
                 'Pellet/size labels (e.g. Small, Medium, Large). Price stays on weight; '
                 'each weight×size cell has its own stock.',
-                style: TextStyle(fontSize: 11.5, color: AppColors.grey),
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppPalette.of(context).textMuted,
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
               for (var i = 0; i < _sizeOptionCtrls.length; i++)
@@ -656,9 +662,12 @@ class _AdminProductEditScreenState
                 const SizedBox(height: AppSpacing.xl),
                 const _SectionLabel('STOCK BY WEIGHT × SIZE'),
                 const SizedBox(height: AppSpacing.sm),
-                const Text(
+                Text(
                   'Enter how many bags you have for each combination, or fill all at once.',
-                  style: TextStyle(fontSize: 11.5, color: AppColors.grey),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: AppPalette.of(context).textMuted,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Row(
@@ -761,11 +770,11 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         fontWeight: FontWeight.w700,
         fontSize: 12,
         letterSpacing: 0.8,
-        color: AppColors.grey,
+        color: AppPalette.of(context).textMuted,
       ),
     );
   }
@@ -860,7 +869,7 @@ class _VariantEditRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.sm),
         boxShadow: AppShadows.card,
       ),
@@ -908,7 +917,11 @@ class _VariantEditRow extends StatelessWidget {
             ),
           ],
           IconButton(
-            icon: const Icon(Icons.close, size: 18, color: AppColors.grey),
+            icon: Icon(
+              Icons.close,
+              size: 18,
+              color: AppPalette.of(context).textMuted,
+            ),
             onPressed: onRemove,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -935,7 +948,7 @@ class _SizeOptionEditRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.sm),
         boxShadow: AppShadows.card,
       ),
@@ -953,7 +966,11 @@ class _SizeOptionEditRow extends StatelessWidget {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 18, color: AppColors.grey),
+            icon: Icon(
+              Icons.close,
+              size: 18,
+              color: AppPalette.of(context).textMuted,
+            ),
             onPressed: onRemove,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -970,7 +987,7 @@ class _SizeStockMatrix extends StatelessWidget {
   final List<int> variantIndexes;
   final List<String> sizes;
   final TextEditingController Function(int variantIndex, String size)
-      controllerFor;
+  controllerFor;
 
   const _SizeStockMatrix({
     required this.variantLabels,
@@ -984,7 +1001,7 @@ class _SizeStockMatrix extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.sm),
         boxShadow: AppShadows.card,
       ),
@@ -995,14 +1012,14 @@ class _SizeStockMatrix extends StatelessWidget {
           children: [
             Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 72,
                   child: Text(
                     'Weight',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: AppColors.grey,
+                      color: AppPalette.of(context).textMuted,
                     ),
                   ),
                 ),
@@ -1012,10 +1029,10 @@ class _SizeStockMatrix extends StatelessWidget {
                     child: Text(
                       size,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.grey,
+                        color: AppPalette.of(context).textMuted,
                       ),
                     ),
                   ),

@@ -1,9 +1,13 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/utils/password_validator.dart';
 import 'auth_providers.dart';
 import 'login_screen.dart' show friendlyAuthError;
 
@@ -41,7 +45,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       _info = null;
     });
     try {
-      await ref.read(authRepositoryProvider).signUpWithEmail(
+      await ref
+          .read(authRepositoryProvider)
+          .signUpWithEmail(
             _emailCtrl.text.trim(),
             _passwordCtrl.text,
             fullName: _nameCtrl.text.trim(),
@@ -73,169 +79,215 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.white,
+      backgroundColor: AppPalette.of(context).surface,
       appBar: AppBar(
         title: const Text('Create Account'),
         backgroundColor: AppColors.black,
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(
-              AppSpacing.xl, AppSpacing.xl, AppSpacing.xl, AppSpacing.xl),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Join Marugen',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 4),
-                const Text('Create an account to order and track deliveries',
-                    style: TextStyle(fontSize: 13.5, color: AppColors.grey)),
-                const SizedBox(height: AppSpacing.xl),
-                TextFormField(
-                  controller: _nameCtrl,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Full name',
-                    prefixIcon: Icon(Icons.person_outline, size: 20),
+      body: ContentWidth(
+        maxWidth: 560,
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.xl,
+              AppSpacing.xl,
+              AppSpacing.xl,
+              AppSpacing.xl,
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Join Marugen',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
                   ),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: _emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  textInputAction: TextInputAction.next,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.mail_outline, size: 20),
-                  ),
-                  validator: (v) =>
-                      (v == null || !v.contains('@')) ? 'Enter a valid email' : null,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: _passwordCtrl,
-                  obscureText: _obscure,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => _submit(),
-                  decoration: InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline, size: 20),
-                    suffixIcon: IconButton(
-                      tooltip: _obscure ? 'Show password' : 'Hide password',
-                      icon: Icon(
-                        _obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                        size: 20,
-                        color: AppColors.grey,
-                      ),
-                      onPressed: () => setState(() => _obscure = !_obscure),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Create an account to order and track deliveries',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: AppPalette.of(context).textMuted,
                     ),
                   ),
-                  validator: (v) =>
-                      (v == null || v.length < 6) ? 'Minimum 6 characters' : null,
-                ),
-                if (_error != null) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  TextFormField(
+                    controller: _nameCtrl,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Full name',
+                      prefixIcon: Icon(Icons.person_outline, size: 20),
+                    ),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                  ),
                   const SizedBox(height: AppSpacing.md),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppColors.redSoft,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                  TextFormField(
+                    controller: _emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: 'Email',
+                      prefixIcon: Icon(Icons.mail_outline, size: 20),
                     ),
-                    child: Text(_error!,
-                        style: const TextStyle(color: AppColors.redDark, fontSize: 13)),
+                    validator: (v) => (v == null || !v.contains('@'))
+                        ? 'Enter a valid email'
+                        : null,
                   ),
-                ],
-                if (_info != null) ...[
                   const SizedBox(height: AppSpacing.md),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppColors.success.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                  TextFormField(
+                    controller: _passwordCtrl,
+                    obscureText: _obscure,
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) => _submit(),
+                    decoration: InputDecoration(
+                      labelText: 'Password',
+                      prefixIcon: const Icon(Icons.lock_outline, size: 20),
+                      suffixIcon: IconButton(
+                        tooltip: _obscure ? 'Show password' : 'Hide password',
+                        icon: Icon(
+                          _obscure
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 20,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                        onPressed: () => setState(() => _obscure = !_obscure),
+                      ),
                     ),
-                    child: Text(_info!,
-                        style: const TextStyle(color: AppColors.success, fontSize: 13)),
+                    validator: validateNewPassword,
                   ),
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                RichText(
-                  textAlign: TextAlign.center,
-                  text: TextSpan(
-                    style: const TextStyle(fontSize: 12, color: AppColors.grey, height: 1.4),
-                    children: [
-                      const TextSpan(text: 'By signing up you agree to our '),
-                      TextSpan(
-                        text: 'Terms of Service',
-                        style: const TextStyle(
-                            color: AppColors.red, fontWeight: FontWeight.w600),
-                        recognizer: TapGestureRecognizer()
-                          ..onTap = () => context.push('/terms'),
+                  if (_error != null) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).accentSoft,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
                       ),
-                      const TextSpan(text: ' and '),
-                      TextSpan(
-                        text: 'Privacy Policy',
-                        style: const TextStyle(
-                            color: AppColors.red, fontWeight: FontWeight.w600),
-                        recognizer: TapGestureRecognizer()
-                          ..onTap = () => context.push('/privacy'),
-                      ),
-                      const TextSpan(text: '.'),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                ElevatedButton(
-                  onPressed: _loading ? null : _submit,
-                  child: _loading
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: AppColors.white),
-                        )
-                      : const Text('Sign Up'),
-                ),
-                const SizedBox(height: AppSpacing.xl),
-                Row(
-                  children: [
-                    const Expanded(child: Divider()),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                       child: Text(
-                        'OR',
+                        _error!,
                         style: TextStyle(
-                          color: AppColors.greySoft,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.6,
+                          color: AppPalette.of(context).accent,
+                          fontSize: 13,
                         ),
                       ),
                     ),
-                    const Expanded(child: Divider()),
                   ],
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                OutlinedButton.icon(
-                  onPressed: _oauthLoading
-                      ? null
-                      : () =>
-                          _oauthSignIn(() => ref.read(authRepositoryProvider).signInWithGoogle()),
-                  icon: const Icon(Icons.g_mobiledata, size: 24),
-                  label: const Text('Continue with Google'),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                OutlinedButton.icon(
-                  onPressed: _oauthLoading
-                      ? null
-                      : () =>
-                          _oauthSignIn(() => ref.read(authRepositoryProvider).signInWithApple()),
-                  icon: const Icon(Icons.apple, size: 20),
-                  label: const Text('Continue with Apple'),
-                ),
-              ],
+                  if (_info != null) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).success
+                            .withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: Text(
+                        _info!,
+                        style: TextStyle(
+                          color: AppPalette.of(context).success,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  RichText(
+                    textAlign: TextAlign.center,
+                    text: TextSpan(
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppPalette.of(context).textMuted,
+                        height: 1.4,
+                      ),
+                      children: [
+                        const TextSpan(text: 'By signing up you agree to our '),
+                        TextSpan(
+                          text: 'Terms of Service',
+                          style: TextStyle(
+                            color: AppPalette.of(context).accent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () => context.push('/terms'),
+                        ),
+                        const TextSpan(text: ' and '),
+                        TextSpan(
+                          text: 'Privacy Policy',
+                          style: TextStyle(
+                            color: AppPalette.of(context).accent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () => context.push('/privacy'),
+                        ),
+                        const TextSpan(text: '.'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  ElevatedButton(
+                    onPressed: _loading ? null : _submit,
+                    child: _loading
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.white,
+                            ),
+                          )
+                        : const Text('Sign Up'),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  Row(
+                    children: [
+                      const Expanded(child: Divider()),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                        ),
+                        child: Text(
+                          'OR',
+                          style: TextStyle(
+                            color: AppPalette.of(context).textMuted,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                      ),
+                      const Expanded(child: Divider()),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  OutlinedButton.icon(
+                    onPressed: _oauthLoading
+                        ? null
+                        : () => _oauthSignIn(
+                            () => ref
+                                .read(authRepositoryProvider)
+                                .signInWithGoogle(),
+                          ),
+                    icon: const Icon(Icons.g_mobiledata, size: 24),
+                    label: const Text('Continue with Google'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  OutlinedButton.icon(
+                    onPressed: _oauthLoading
+                        ? null
+                        : () => _oauthSignIn(
+                            () => ref
+                                .read(authRepositoryProvider)
+                                .signInWithApple(),
+                          ),
+                    icon: const Icon(Icons.apple, size: 20),
+                    label: const Text('Continue with Apple'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

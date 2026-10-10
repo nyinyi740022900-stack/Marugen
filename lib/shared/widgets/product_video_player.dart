@@ -146,12 +146,16 @@ class _DirectFileVideoPlayerState extends State<_DirectFileVideoPlayer> {
     );
   }
 
-  Widget _placeholder({required IconData icon, required String message, bool loading = false}) {
+  Widget _placeholder({
+    required IconData icon,
+    required String message,
+    bool loading = false,
+  }) {
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: Container(
         decoration: BoxDecoration(
-          color: AppColors.offWhite,
+          color: AppPalette.of(context).surfaceMuted,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Center(
@@ -165,9 +169,15 @@ class _DirectFileVideoPlayerState extends State<_DirectFileVideoPlayer> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               else
-                Icon(icon, size: 32, color: AppColors.grey),
+                Icon(icon, size: 32, color: AppPalette.of(context).textMuted),
               const SizedBox(height: AppSpacing.sm),
-              Text(message, style: const TextStyle(color: AppColors.grey, fontSize: 12.5)),
+              Text(
+                message,
+                style: TextStyle(
+                  color: AppPalette.of(context).textMuted,
+                  fontSize: 12.5,
+                ),
+              ),
             ],
           ),
         ),

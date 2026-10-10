@@ -1,5 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -54,12 +57,14 @@ class OrderDetailScreen extends ConsumerWidget {
 
     final orderAsync = ref.watch(orderByIdProvider(orderId));
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: const Text('Order Detail'),
         actions: [
           orderAsync.maybeWhen(
-            data: (o) => o == null ? const SizedBox.shrink() : _OrderAppBarActions(order: o),
+            data: (o) => o == null
+                ? const SizedBox.shrink()
+                : _OrderAppBarActions(order: o),
             orElse: () => const SizedBox.shrink(),
           ),
         ],
@@ -70,9 +75,11 @@ class OrderDetailScreen extends ConsumerWidget {
             return EmptyState(
               icon: Icons.receipt_long_outlined,
               title: 'Order not found',
-              subtitle: "It may have been removed, or you don't have access to it.",
+              subtitle:
+                  "It may have been removed, or you don't have access to it.",
               actionLabel: 'Back to Orders',
-              onAction: () => context.canPop() ? context.pop() : context.go('/'),
+              onAction: () =>
+                  context.canPop() ? context.pop() : context.go('/'),
             );
           }
           return _OrderDetailBody(order: o, justPlaced: justPlaced);
@@ -85,7 +92,9 @@ class OrderDetailScreen extends ConsumerWidget {
             ListRowSkeleton(),
           ],
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(orderByIdProvider(orderId))),
+        error: (e, _) => ErrorState(
+          onRetry: () => ref.invalidate(orderByIdProvider(orderId)),
+        ),
       ),
     );
   }
@@ -99,13 +108,18 @@ class _OrderDetailScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
-        title: Text(justPlaced ? 'Order Placed' : 'Order #${order.displayNumber}'),
+        title: Text(
+          justPlaced ? 'Order Placed' : 'Order #${order.displayNumber}',
+        ),
         automaticallyImplyLeading: !justPlaced,
         actions: [_OrderAppBarActions(order: order)],
       ),
-      body: _OrderDetailBody(order: order, justPlaced: justPlaced),
+      body: ContentWidth(
+        maxWidth: 760,
+        child: _OrderDetailBody(order: order, justPlaced: justPlaced),
+      ),
     );
   }
 }
@@ -127,9 +141,8 @@ class _OrderDetailBody extends ConsumerWidget {
       shipping['postal_code'],
     ].whereType<String>().where((s) => s.isNotEmpty).join('\n');
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Address copied')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Address copied')));
   }
 
   @override
@@ -143,24 +156,39 @@ class _OrderDetailBody extends ConsumerWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.10),
+              color: AppPalette.of(context).success.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(AppRadius.md),
-              border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
+              border: Border.all(
+                color: AppPalette.of(context).success.withValues(alpha: 0.35),
+              ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.check_circle, color: AppColors.success, size: 28),
+                Icon(
+                  Icons.check_circle,
+                  color: AppPalette.of(context).success,
+                  size: 28,
+                ),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Thank you — order placed!',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      const Text(
+                        'Thank you — order placed!',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         "We'll notify you as your order is packed and shipped.",
-                        style: TextStyle(fontSize: 12.5, color: AppColors.grey.withValues(alpha: 0.9)),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppPalette.of(context).textMuted
+                              .withValues(alpha: 0.9),
+                        ),
                       ),
                     ],
                   ),
@@ -173,7 +201,7 @@ class _OrderDetailBody extends ConsumerWidget {
         Container(
           padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
@@ -183,30 +211,52 @@ class _OrderDetailBody extends ConsumerWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Order #${order.displayNumber}',
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  Text(
+                    'Order #${order.displayNumber}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
                   _StatusBadge(status: order.status),
                 ],
               ),
               const SizedBox(height: 6),
-              Text(DateFormat.yMMMd().add_jm().format(order.createdAt),
-                  style: const TextStyle(color: AppColors.grey, fontSize: 12.5)),
+              Text(
+                DateFormat.yMMMd().add_jm().format(order.createdAt),
+                style: TextStyle(
+                  color: AppPalette.of(context).textMuted,
+                  fontSize: 12.5,
+                ),
+              ),
               if (order.stripePaymentIntentId != null &&
                   order.stripePaymentIntentId!.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
                   'Payment: ${_shortId(order.stripePaymentIntentId!)}',
-                  style: const TextStyle(color: AppColors.grey, fontSize: 12.5),
+                  style: TextStyle(
+                    color: AppPalette.of(context).textMuted,
+                    fontSize: 12.5,
+                  ),
                 ),
               ],
               if (order.qxpressTrackingNo != null) ...[
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.local_shipping_outlined, size: 15, color: AppColors.red),
+                    Icon(
+                      Icons.local_shipping_outlined,
+                      size: 15,
+                      color: AppPalette.of(context).accent,
+                    ),
                     const SizedBox(width: 4),
-                    Text('Tracking: ${order.qxpressTrackingNo}',
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    Text(
+                      'Tracking: ${order.qxpressTrackingNo}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -222,8 +272,13 @@ class _OrderDetailBody extends ConsumerWidget {
                 await shareReceipt(ref, order);
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content: Text('Could not open invoice: $e')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        'Could not open the invoice. Please try again.',
+                      ),
+                    ),
+                  );
                 }
               }
             },
@@ -246,28 +301,41 @@ class _OrderDetailBody extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('SHIPPING ADDRESS',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 0.8,
-                      color: AppColors.grey)),
+              Text(
+                'SHIPPING ADDRESS',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  letterSpacing: 0.8,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
               // Admin-only: staff copying an address to paste into a
               // courier's own app/label almost always needs it as one
               // block of text, not retyped field-by-field from the screen.
-              if (ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ?? false)
+              if (ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ??
+                  false)
                 InkWell(
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                   onTap: () => _copyAddress(context, shipping),
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.all(4),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.copy_rounded, size: 13, color: AppColors.greySoft),
+                        Icon(
+                          Icons.copy_rounded,
+                          size: 13,
+                          color: AppPalette.of(context).textMuted,
+                        ),
                         SizedBox(width: 4),
-                        Text('Copy',
-                            style: TextStyle(fontSize: 11.5, color: AppColors.greySoft)),
+                        Text(
+                          'Copy',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -279,26 +347,38 @@ class _OrderDetailBody extends ConsumerWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
-              color: AppColors.white,
+              color: AppPalette.of(context).surface,
               borderRadius: BorderRadius.circular(AppRadius.md),
               boxShadow: AppShadows.card,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(shipping['recipient_name'] as String? ?? '',
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text(
+                  shipping['recipient_name'] as String? ?? '',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(shipping['phone'] as String? ?? '',
-                    style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+                Text(
+                  shipping['phone'] as String? ?? '',
+                  style: TextStyle(
+                    color: AppPalette.of(context).textMuted,
+                    fontSize: 13,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Text(
                   [
-                    shipping['line1'],
-                    shipping['line2'],
-                    shipping['city'],
-                    shipping['postal_code'],
-                  ].where((e) => e != null && (e as String).isNotEmpty).join(', '),
+                        shipping['line1'],
+                        shipping['line2'],
+                        shipping['city'],
+                        shipping['postal_code'],
+                      ]
+                      .where((e) => e != null && (e as String).isNotEmpty)
+                      .join(', '),
                   style: const TextStyle(fontSize: 13.5, height: 1.4),
                 ),
               ],
@@ -306,13 +386,49 @@ class _OrderDetailBody extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
         ],
-        const Text('ITEMS',
+        if (order.customerRemarks?.trim().isNotEmpty ?? false) ...[
+          Text(
+            'CUSTOMER REQUESTS / REMARKS',
             style: TextStyle(
-                fontWeight: FontWeight.w700, fontSize: 12, letterSpacing: 0.8, color: AppColors.grey)),
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              letterSpacing: 0.8,
+              color: AppPalette.of(context).textMuted,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              color: AppPalette.of(context).surface,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              boxShadow: AppShadows.card,
+            ),
+            child: SelectableText(
+              order.customerRemarks!,
+              style: TextStyle(
+                fontSize: 14,
+                height: 1.4,
+                color: AppPalette.of(context).text,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+        Text(
+          'ITEMS',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+            letterSpacing: 0.8,
+            color: AppPalette.of(context).textMuted,
+          ),
+        ),
         const SizedBox(height: AppSpacing.sm),
         Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
@@ -332,14 +448,18 @@ class _OrderDetailBody extends ConsumerWidget {
                   // (upsertMyReview / RLS both key off auth.uid()), but
                   // the prompt itself shouldn't even appear unless this
                   // is genuinely the viewer's own order.
-                  canReview: order.status == OrderStatus.delivered &&
-                      order.userId == ref.watch(currentAppUserProvider).valueOrNull?.id,
+                  canReview:
+                      order.status == OrderStatus.delivered &&
+                      order.userId ==
+                          ref.watch(currentAppUserProvider).valueOrNull?.id,
                 ),
               const Divider(height: 1, indent: 16, endIndent: 16),
               if (order.discountAmount != null && order.discountAmount! > 0)
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
+                    horizontal: AppSpacing.lg,
+                    vertical: AppSpacing.xs,
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -347,10 +467,18 @@ class _OrderDetailBody extends ConsumerWidget {
                         order.promoCode != null
                             ? 'Promo discount (${order.promoCode})'
                             : 'Promo discount',
-                        style: const TextStyle(fontSize: 12.5, color: AppColors.grey),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppPalette.of(context).textMuted,
+                        ),
                       ),
-                      Text('-${formatPrice(order.discountAmount!)}',
-                          style: const TextStyle(fontSize: 12.5, color: AppColors.red)),
+                      Text(
+                        '-${formatPrice(order.discountAmount!)}',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: AppPalette.of(context).accent,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -359,11 +487,22 @@ class _OrderDetailBody extends ConsumerWidget {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total',
-                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: AppColors.grey)),
-                    Text(formatPrice(order.total),
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, color: AppColors.black, fontSize: 18)),
+                    Text(
+                      'Total',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                    Text(
+                      formatPrice(order.total),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppPalette.of(context).text,
+                        fontSize: 18,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -374,21 +513,25 @@ class _OrderDetailBody extends ConsumerWidget {
         // Cancel/Reorder are shopper actions on their own order — an admin
         // viewing any customer's order manages its lifecycle from the
         // Orders status dropdown instead, not from these buttons.
-        Builder(builder: (context) {
-          final isAdmin =
-              ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ?? false;
-          if (isAdmin) return const SizedBox.shrink();
-          if (justPlaced) return const _ContinueShoppingButton();
-          return Column(
-            children: [
-              if (order.status == OrderStatus.pending || order.status == OrderStatus.paid) ...[
-                _CancelOrderButton(order: order),
-                const SizedBox(height: AppSpacing.lg),
+        Builder(
+          builder: (context) {
+            final isAdmin =
+                ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ??
+                false;
+            if (isAdmin) return const SizedBox.shrink();
+            if (justPlaced) return const _ContinueShoppingButton();
+            return Column(
+              children: [
+                if (order.status == OrderStatus.pending ||
+                    order.status == OrderStatus.paid) ...[
+                  _CancelOrderButton(order: order),
+                  const SizedBox(height: AppSpacing.lg),
+                ],
+                _ReorderButton(order: order),
               ],
-              _ReorderButton(order: order),
-            ],
-          );
-        }),
+            );
+          },
+        ),
       ],
     );
   }
@@ -409,7 +552,10 @@ class _OrderItemTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -425,17 +571,25 @@ class _OrderItemTile extends ConsumerWidget {
                       ? CachedNetworkImage(
                           imageUrl: item.imageUrl!,
                           fit: BoxFit.cover,
-                          placeholder: (_, _) => Container(color: AppColors.offWhite),
-                          errorWidget: (_, _, _) => const ColoredBox(
-                            color: AppColors.offWhite,
-                            child: Icon(Icons.image_not_supported_outlined,
-                                size: 20, color: AppColors.greySoft),
+                          placeholder: (_, _) => Container(
+                            color: AppPalette.of(context).background,
+                          ),
+                          errorWidget: (_, _, _) => ColoredBox(
+                            color: AppPalette.of(context).background,
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              size: 20,
+                              color: AppPalette.of(context).textMuted,
+                            ),
                           ),
                         )
-                      : const ColoredBox(
-                          color: AppColors.offWhite,
-                          child: Icon(Icons.inventory_2_outlined,
-                              size: 20, color: AppColors.greySoft),
+                      : ColoredBox(
+                          color: AppPalette.of(context).background,
+                          child: Icon(
+                            Icons.inventory_2_outlined,
+                            size: 20,
+                            color: AppPalette.of(context).textMuted,
+                          ),
                         ),
                 ),
               ),
@@ -444,31 +598,54 @@ class _OrderItemTile extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(item.productName,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                    Text(
+                      item.productName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14.5,
+                      ),
+                    ),
                     if (item.optionLabel != null) ...[
                       const SizedBox(height: 3),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color: AppColors.offWhite,
+                          color: AppPalette.of(context).background,
                           borderRadius: BorderRadius.circular(AppRadius.pill),
                         ),
-                        child: Text(item.optionLabel!,
-                            style: const TextStyle(fontSize: 11.5, color: AppColors.grey)),
+                        child: Text(
+                          item.optionLabel!,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
                       ),
                     ],
                     const SizedBox(height: 4),
-                    Text('Qty ${item.quantity} × ${formatPrice(item.unitPrice)}',
-                        style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
+                    Text(
+                      'Qty ${item.quantity} × ${formatPrice(item.unitPrice)}',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
                   ],
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
-              Text(formatPrice(item.subtotal),
-                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+              Text(
+                formatPrice(item.subtotal),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
             ],
           ),
           if (canReview) ...[
@@ -501,20 +678,32 @@ class _ReviewAffordance extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             ),
             icon: const Icon(Icons.star_border, size: 15),
-            label: const Text('Write a review', style: TextStyle(fontSize: 12.5)),
+            label: const Text(
+              'Write a review',
+              style: TextStyle(fontSize: 12.5),
+            ),
           );
         }
         return InkWell(
-          onTap: () => openReviewForm(context, ref, productId, existing: myReview),
+          onTap: () =>
+              openReviewForm(context, ref, productId, existing: myReview),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               for (var i = 1; i <= 5; i++)
-                Icon(i <= myReview.rating ? Icons.star : Icons.star_border,
-                    size: 14, color: AppColors.warning),
+                Icon(
+                  i <= myReview.rating ? Icons.star : Icons.star_border,
+                  size: 14,
+                  color: AppPalette.of(context).warning,
+                ),
               const SizedBox(width: 6),
-              const Text('Edit your review',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.grey)),
+              Text(
+                'Edit your review',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
             ],
           ),
         );
@@ -592,8 +781,11 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
       final matchingVariants = item.variantLabel == null
           ? const <ProductVariant>[]
           : product.variants.where((v) => v.label == item.variantLabel);
-      final variant = matchingVariants.isNotEmpty ? matchingVariants.first : null;
-      final size = item.sizeLabel != null &&
+      final variant = matchingVariants.isNotEmpty
+          ? matchingVariants.first
+          : null;
+      final size =
+          item.sizeLabel != null &&
               product.hasSizeOptions &&
               product.sizeOptions.contains(item.sizeLabel)
           ? item.sizeLabel
@@ -622,7 +814,8 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
     final message = skipped == 0
         ? 'Added $added item${added == 1 ? '' : 's'} to cart'
         : 'Added $added item${added == 1 ? '' : 's'} — $skipped no longer available';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
     if (added > 0) context.push('/cart');
   }
 
@@ -633,10 +826,13 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
       child: OutlinedButton.icon(
         onPressed: _loading ? null : _reorder,
         icon: _loading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.black),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppPalette.of(context).text,
+                ),
               )
             : const Icon(Icons.replay, size: 18),
         label: const Text('Reorder'),
@@ -666,12 +862,19 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
       builder: (ctx) => AlertDialog(
         title: const Text('Cancel this order?'),
         content: const Text(
-            'This cannot be undone. Refunds (if already paid) are handled by the shop.'),
+          'This cannot be undone. Refunds (if already paid) are handled by the shop.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep Order')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep Order'),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cancel Order', style: TextStyle(color: AppColors.error)),
+            child: Text(
+              'Cancel Order',
+              style: TextStyle(color: AppPalette.of(context).error),
+            ),
           ),
         ],
       ),
@@ -690,8 +893,13 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not cancel order: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'The order was not cancelled. Refresh its status and try again, or contact the shop.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -705,14 +913,17 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
       child: OutlinedButton.icon(
         onPressed: _loading ? null : _cancel,
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.error,
-          side: const BorderSide(color: AppColors.error, width: 1.2),
+          foregroundColor: AppPalette.of(context).error,
+          side: BorderSide(color: AppPalette.of(context).error, width: 1.2),
         ),
         icon: _loading
-            ? const SizedBox(
+            ? SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppPalette.of(context).error,
+                ),
               )
             : const Icon(Icons.cancel_outlined, size: 18),
         label: const Text('Cancel Order'),
@@ -763,8 +974,13 @@ class _ShareReceiptButton extends ConsumerWidget {
           await shareReceipt(ref, order);
         } catch (e) {
           if (context.mounted) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text('Could not share receipt: $e')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Could not share your receipt. Please try again.',
+                ),
+              ),
+            );
           }
         }
       },
@@ -784,7 +1000,8 @@ class _TrackingStatusCard extends ConsumerStatefulWidget {
   const _TrackingStatusCard({required this.order});
 
   @override
-  ConsumerState<_TrackingStatusCard> createState() => _TrackingStatusCardState();
+  ConsumerState<_TrackingStatusCard> createState() =>
+      _TrackingStatusCardState();
 }
 
 class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
@@ -801,8 +1018,13 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
       ref.invalidate(orderByIdProvider(widget.order.id));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not refresh: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Could not refresh the order. Check your connection and try again.',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _refreshing = false);
@@ -819,33 +1041,36 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
       case 2: // To Be Collected
       case 7: // Schedule In Arrangement
       case 8: // On Hold
-        return (Icons.schedule, AppColors.warning);
+        return (Icons.schedule, AppPalette.of(context).warning);
       case 3: // Collected — courier has picked it up from the shop
-        return (Icons.inventory_2_outlined, AppColors.red);
+        return (Icons.inventory_2_outlined, AppPalette.of(context).accent);
       case 11: // Drop Off — shop dropped it at a courier point itself
-        return (Icons.storefront_outlined, AppColors.red);
+        return (Icons.storefront_outlined, AppPalette.of(context).accent);
       case 4: // Delivery In Transit
-        return (Icons.local_shipping_outlined, AppColors.red);
+        return (Icons.local_shipping_outlined, AppPalette.of(context).accent);
       case 5: // Delivered
-        return (Icons.check_circle_outline, AppColors.success);
+        return (Icons.check_circle_outline, AppPalette.of(context).success);
       case 0: // Cancel
       case 6: // Returned
-        return (Icons.assignment_return_outlined, AppColors.error);
+        return (Icons.assignment_return_outlined, AppPalette.of(context).error);
       default:
-        return (Icons.track_changes, AppColors.red);
+        return (Icons.track_changes, AppPalette.of(context).accent);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
-    final hasStatus = order.trackingStatus != null && order.trackingStatus!.isNotEmpty;
-    final (statusIcon, statusColor) = _iconForStatusCode(order.trackingStatusCode);
+    final hasStatus =
+        order.trackingStatus != null && order.trackingStatus!.isNotEmpty;
+    final (statusIcon, statusColor) = _iconForStatusCode(
+      order.trackingStatusCode,
+    );
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -867,18 +1092,31 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(hasStatus ? order.trackingStatus! : 'Awaiting carrier update',
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                Text(
+                  hasStatus ? order.trackingStatus! : 'Awaiting carrier update',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                ),
                 if (order.trackingStatusDetail != null) ...[
                   const SizedBox(height: 2),
-                  Text(order.trackingStatusDetail!,
-                      style: const TextStyle(fontSize: 12.5, color: AppColors.grey)),
+                  Text(
+                    order.trackingStatusDetail!,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppPalette.of(context).textMuted,
+                    ),
+                  ),
                 ],
                 if (order.trackingUpdatedAt != null) ...[
                   const SizedBox(height: 4),
                   Text(
                     'Updated ${DateFormat.yMMMd().add_jm().format(order.trackingUpdatedAt!)}',
-                    style: const TextStyle(fontSize: 11, color: AppColors.greySoft),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppPalette.of(context).textMuted,
+                    ),
                   ),
                 ],
               ],
@@ -888,12 +1126,19 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
             tooltip: 'Refresh tracking',
             onPressed: _refreshing ? null : _refresh,
             icon: _refreshing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.red),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppPalette.of(context).accent,
+                    ),
                   )
-                : const Icon(Icons.refresh, size: 20, color: AppColors.grey),
+                : Icon(
+                    Icons.refresh,
+                    size: 20,
+                    color: AppPalette.of(context).textMuted,
+                  ),
           ),
         ],
       ),
@@ -905,17 +1150,17 @@ class _StatusBadge extends StatelessWidget {
   final OrderStatus status;
   const _StatusBadge({required this.status});
 
-  Color get _color {
+  Color _color(BuildContext context) {
     switch (status) {
       case OrderStatus.delivered:
-        return AppColors.success;
+        return AppPalette.of(context).success;
       case OrderStatus.cancelled:
       case OrderStatus.refunded:
-        return AppColors.error;
+        return AppPalette.of(context).error;
       case OrderStatus.pending:
-        return AppColors.warning;
+        return AppPalette.of(context).warning;
       default:
-        return AppColors.red;
+        return AppPalette.of(context).accent;
     }
   }
 
@@ -923,11 +1168,17 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration:
-          BoxDecoration(color: _color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(
+        color: _color(context).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Text(
         orderStatusLabel(status),
-        style: TextStyle(color: _color, fontSize: 11, fontWeight: FontWeight.w600),
+        style: TextStyle(
+          color: _color(context),
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

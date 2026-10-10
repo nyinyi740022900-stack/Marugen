@@ -108,6 +108,27 @@ class OrderRepository {
     }
   }
 
+  /// Admin-only. Issues a real Stripe refund for the order's payment (via
+  /// the `stripe-refund` Edge Function) and flips its status to
+  /// `refunded` — replaces the old behaviour where picking "Refunded" in
+  /// admin_orders_screen.dart's status selector just relabeled the status
+  /// column with no money ever moving. Throws with the server's error
+  /// message on failure (already-refunded, no payment on the order,
+  /// Stripe error, etc.) — the caller shows it as-is.
+  Future<void> refundOrder(String orderId, {String? reason}) async {
+    final res = await _client.functions.invoke(
+      'stripe-refund',
+      body: {'order_id': orderId, 'reason': ?reason},
+    );
+    if (res.status >= 400) {
+      final data = res.data;
+      final message = data is Map && data['error'] != null
+          ? data['error'].toString()
+          : 'Could not process the refund';
+      throw Exception(message);
+    }
+  }
+
   /// Customer-initiated cancellation. RLS (0007_customer_order_cancel.sql)
   /// only allows this when the order is still `pending`/`paid` and only
   /// lets the update land on `status = 'cancelled'` — nothing else.

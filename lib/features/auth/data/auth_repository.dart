@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
@@ -24,6 +25,30 @@ class AuthRepository {
   Stream<AuthState> get authStateChanges => _client.auth.onAuthStateChange;
 
   User? get currentUser => _client.auth.currentUser;
+
+  /// False only for an email/password account that hasn't clicked its
+  /// confirmation link yet. Always true for OAuth accounts (Google/Apple
+  /// verify the email themselves before Supabase ever creates the user) and
+  /// for any account once `email_confirmed_at` is set. If the Supabase
+  /// project's own "Confirm email" setting is enabled, a session can't even
+  /// exist yet for an unconfirmed email/password account — this is a
+  /// client-side belt-and-suspenders check for when that setting is off (or
+  /// changes later), not a replacement for it.
+  bool get isEmailVerified {
+    final user = currentUser;
+    if (user == null) return true;
+    final provider = user.appMetadata['provider'] as String?;
+    if (provider != null && provider != 'email') return true;
+    return user.emailConfirmedAt != null;
+  }
+
+  /// Re-sends the signup confirmation email for the current session's
+  /// address. No-op (throws) if nobody is signed in.
+  Future<void> resendVerificationEmail() async {
+    final email = currentUser?.email;
+    if (email == null) throw Exception('Not signed in');
+    await _client.auth.resend(type: OtpType.signup, email: email);
+  }
 
   Future<AppUser?> fetchCurrentAppUser() async {
     final user = currentUser;
@@ -235,8 +260,30 @@ class AuthRepository {
       if (_googleInitialized) {
         await GoogleSignIn.instance.signOut();
       }
-    } catch (_) {}
+    } catch (e) {
+      // Non-fatal — local Supabase sign-out below still proceeds either
+      // way; logged so a real recurring failure isn't invisible.
+      developer.log('Google sign-out failed', name: 'AuthRepository', error: e);
+    }
     await _client.auth.signOut();
+  }
+
+  /// Deletes (or, if the account has order history, anonymizes) the
+  /// signed-in user's account via the `delete-account` Edge Function —
+  /// required by Google Play's Account Deletion policy. Signs the local
+  /// session out afterwards either way, since the server side already
+  /// removed or permanently banned the account. Throws with the server's
+  /// error message on failure.
+  Future<void> deleteAccount() async {
+    final res = await _client.functions.invoke('delete-account');
+    if (res.status >= 400) {
+      final data = res.data;
+      final message = data is Map && data['error'] != null
+          ? data['error'].toString()
+          : 'Could not delete your account';
+      throw Exception(message);
+    }
+    await signOut();
   }
 
   /// Sends a password-reset email via Supabase Auth. Uses the same deep

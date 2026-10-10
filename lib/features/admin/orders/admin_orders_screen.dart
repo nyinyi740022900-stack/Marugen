@@ -88,7 +88,11 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, 0),
+            AppSpacing.lg,
+            AppSpacing.sm,
+            AppSpacing.lg,
+            0,
+          ),
           child: _AdminOrderSearchField(),
         ),
         SizedBox(
@@ -96,7 +100,9 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
           child: ListView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.sm,
+            ),
             children: [
               Padding(
                 padding: const EdgeInsets.only(right: AppSpacing.sm),
@@ -104,7 +110,8 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
                   label: const Text('All'),
                   selected: filter == null,
                   onSelected: (_) =>
-                      ref.read(adminOrderStatusFilterProvider.notifier).state = null,
+                      ref.read(adminOrderStatusFilterProvider.notifier).state =
+                          null,
                 ),
               ),
               for (final s in OrderStatus.values)
@@ -114,7 +121,10 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
                     label: Text(orderStatusLabel(s)),
                     selected: filter == s,
                     onSelected: (_) =>
-                        ref.read(adminOrderStatusFilterProvider.notifier).state = s,
+                        ref
+                                .read(adminOrderStatusFilterProvider.notifier)
+                                .state =
+                            s,
                   ),
                 ),
             ],
@@ -122,65 +132,118 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
         ),
         Expanded(
           child: searching
-              ? ref.watch(adminOrdersProvider).when(
-                    data: (orders) {
-                      final filtered = orders.where((o) {
-                        if (o.displayNumber.toLowerCase().contains(query)) return true;
-                        final name = o.shippingAddress?['recipient_name'] as String?;
-                        if (name != null && name.toLowerCase().contains(query)) return true;
-                        final phone = o.shippingAddress?['phone'] as String?;
-                        if (phone != null && phone.contains(query)) return true;
-                        return o.items
-                            .any((item) => item.productName.toLowerCase().contains(query));
-                      }).toList();
-
-                      if (filtered.isEmpty) {
-                        return const Center(
-                          child: Text('No matches.', style: TextStyle(color: AppColors.grey)),
-                        );
-                      }
-                      return ListView.separated(
-                        padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
-                        itemCount: filtered.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-                        itemBuilder: (context, i) => _AdminOrderCard(order: filtered[i]),
-                      );
-                    },
-                    loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-                    error: (e, _) => ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
-                  )
-              : ref.watch(adminOrdersPagedProvider).when(
-                    data: (paged) {
-                      if (paged.items.isEmpty) {
-                        return const Center(
-                          child: Text('No orders.', style: TextStyle(color: AppColors.grey)),
-                        );
-                      }
-                      return ListView.separated(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg, 0, AppSpacing.lg, AppSpacing.lg),
-                        itemCount: paged.items.length + (paged.hasMore ? 1 : 0),
-                        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-                        itemBuilder: (context, i) {
-                          if (i >= paged.items.length) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
-                              child: Center(
-                                child: CircularProgressIndicator(color: AppColors.red, strokeWidth: 2),
-                              ),
-                            );
+              ? ref
+                    .watch(adminOrdersProvider)
+                    .when(
+                      data: (orders) {
+                        final filtered = orders.where((o) {
+                          if (o.displayNumber.toLowerCase().contains(query)) {
+                            return true;
                           }
-                          return _AdminOrderCard(order: paged.items[i]);
-                        },
-                      );
-                    },
-                    loading: () => const Center(child: CircularProgressIndicator(color: AppColors.red)),
-                    error: (e, _) => ErrorState(
-                      onRetry: () => ref.read(adminOrdersPagedProvider.notifier).refresh(),
+                          final name =
+                              o.shippingAddress?['recipient_name'] as String?;
+                          if (name != null &&
+                              name.toLowerCase().contains(query)) {
+                            return true;
+                          }
+                          final phone = o.shippingAddress?['phone'] as String?;
+                          if (phone != null && phone.contains(query)) {
+                            return true;
+                          }
+                          return o.items.any(
+                            (item) =>
+                                item.productName.toLowerCase().contains(query),
+                          );
+                        }).toList();
+
+                        if (filtered.isEmpty) {
+                          return Center(
+                            child: Text(
+                              'No matches.',
+                              style: TextStyle(
+                                color: AppPalette.of(context).textMuted,
+                              ),
+                            ),
+                          );
+                        }
+                        return ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg,
+                            0,
+                            AppSpacing.lg,
+                            AppSpacing.lg,
+                          ),
+                          itemCount: filtered.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: AppSpacing.md),
+                          itemBuilder: (context, i) =>
+                              _AdminOrderCard(order: filtered[i]),
+                        );
+                      },
+                      loading: () => Center(
+                        child: CircularProgressIndicator(
+                          color: AppPalette.of(context).accent,
+                        ),
+                      ),
+                      error: (e, _) => ErrorState(
+                        onRetry: () => ref.invalidate(adminOrdersProvider),
+                      ),
+                    )
+              : ref
+                    .watch(adminOrdersPagedProvider)
+                    .when(
+                      data: (paged) {
+                        if (paged.items.isEmpty) {
+                          return Center(
+                            child: Text(
+                              'No orders.',
+                              style: TextStyle(
+                                color: AppPalette.of(context).textMuted,
+                              ),
+                            ),
+                          );
+                        }
+                        return ListView.separated(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.lg,
+                            0,
+                            AppSpacing.lg,
+                            AppSpacing.lg,
+                          ),
+                          itemCount:
+                              paged.items.length + (paged.hasMore ? 1 : 0),
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: AppSpacing.md),
+                          itemBuilder: (context, i) {
+                            if (i >= paged.items.length) {
+                              return Padding(
+                                padding: EdgeInsets.symmetric(
+                                  vertical: AppSpacing.lg,
+                                ),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                    color: AppPalette.of(context).accent,
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              );
+                            }
+                            return _AdminOrderCard(order: paged.items[i]);
+                          },
+                        );
+                      },
+                      loading: () => Center(
+                        child: CircularProgressIndicator(
+                          color: AppPalette.of(context).accent,
+                        ),
+                      ),
+                      error: (e, _) => ErrorState(
+                        onRetry: () => ref
+                            .read(adminOrdersPagedProvider.notifier)
+                            .refresh(),
+                      ),
                     ),
-                  ),
         ),
       ],
     );
@@ -192,16 +255,20 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
 /// Products search bar.
 class _AdminOrderSearchField extends ConsumerStatefulWidget {
   @override
-  ConsumerState<_AdminOrderSearchField> createState() => _AdminOrderSearchFieldState();
+  ConsumerState<_AdminOrderSearchField> createState() =>
+      _AdminOrderSearchFieldState();
 }
 
-class _AdminOrderSearchFieldState extends ConsumerState<_AdminOrderSearchField> {
+class _AdminOrderSearchFieldState
+    extends ConsumerState<_AdminOrderSearchField> {
   late final TextEditingController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: ref.read(adminOrderSearchQueryProvider));
+    _controller = TextEditingController(
+      text: ref.read(adminOrderSearchQueryProvider),
+    );
   }
 
   @override
@@ -221,7 +288,8 @@ class _AdminOrderSearchFieldState extends ConsumerState<_AdminOrderSearchField> 
     }
     return TextField(
       controller: _controller,
-      onChanged: (v) => ref.read(adminOrderSearchQueryProvider.notifier).state = v,
+      onChanged: (v) =>
+          ref.read(adminOrderSearchQueryProvider.notifier).state = v,
       decoration: InputDecoration(
         hintText: 'Search order #, buyer, or item…',
         isDense: true,
@@ -235,7 +303,7 @@ class _AdminOrderSearchFieldState extends ConsumerState<_AdminOrderSearchField> 
               ),
         contentPadding: const EdgeInsets.symmetric(vertical: 10),
         filled: true,
-        fillColor: AppColors.offWhite,
+        fillColor: AppPalette.of(context).surfaceMuted,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
           borderSide: BorderSide.none,
@@ -275,8 +343,9 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
       await shareReceipt(ref, widget.order);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not share invoice: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Could not share invoice: $e')));
       }
     } finally {
       if (mounted) setState(() => _sharing = false);
@@ -293,7 +362,7 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -314,16 +383,25 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Flexible(
-                            child: Text('Order #${order.displayNumber}',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                            child: Text(
+                              'Order #${order.displayNumber}',
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                              ),
+                            ),
                           ),
                           InkWell(
                             borderRadius: BorderRadius.circular(AppRadius.sm),
                             onTap: () => _copyOrderId(context),
-                            child: const Padding(
+                            child: Padding(
                               padding: EdgeInsets.all(6),
-                              child: Icon(Icons.copy_rounded, size: 15, color: AppColors.greySoft),
+                              child: Icon(
+                                Icons.copy_rounded,
+                                size: 15,
+                                color: AppPalette.of(context).textMuted,
+                              ),
                             ),
                           ),
                         ],
@@ -331,9 +409,36 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                     ),
                   ],
                 ),
-                Text(DateFormat.yMMMd().add_jm().format(order.createdAt),
-                    style: const TextStyle(color: AppColors.grey, fontSize: 12)),
+                Text(
+                  DateFormat.yMMMd().add_jm().format(order.createdAt),
+                  style: TextStyle(
+                    color: AppPalette.of(context).textMuted,
+                    fontSize: 12,
+                  ),
+                ),
                 const SizedBox(height: AppSpacing.md),
+                if (order.customerRemarks?.trim().isNotEmpty ?? false) ...[
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.sticky_note_2_outlined,
+                        size: 18,
+                        color: AppPalette.of(context).accent,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          'Customer requests added',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
                 if (firstItem != null)
                   Row(
                     children: [
@@ -342,35 +447,51 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                         height: 44,
                         clipBehavior: Clip.antiAlias,
                         decoration: BoxDecoration(
-                          color: AppColors.offWhite,
+                          color: AppPalette.of(context).surfaceMuted,
                           borderRadius: BorderRadius.circular(AppRadius.sm),
                         ),
-                        child: firstItem.imageUrl != null && firstItem.imageUrl!.isNotEmpty
+                        child:
+                            firstItem.imageUrl != null &&
+                                firstItem.imageUrl!.isNotEmpty
                             ? CachedNetworkImage(
                                 imageUrl: firstItem.imageUrl!,
                                 fit: BoxFit.cover,
                                 placeholder: (_, _) => const SizedBox.shrink(),
-                                errorWidget: (_, _, _) => const Icon(Icons.inventory_2_outlined,
-                                    size: 18, color: AppColors.greySoft),
+                                errorWidget: (_, _, _) => Icon(
+                                  Icons.inventory_2_outlined,
+                                  size: 18,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
                               )
-                            : const Icon(Icons.inventory_2_outlined,
-                                size: 18, color: AppColors.greySoft),
+                            : Icon(
+                                Icons.inventory_2_outlined,
+                                size: 18,
+                                color: AppPalette.of(context).textMuted,
+                              ),
                       ),
                       const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(firstItem.productName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                            Text(
+                              firstItem.productName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13.5,
+                              ),
+                            ),
                             const SizedBox(height: 2),
                             Text(
                               extraCount > 0
                                   ? 'Qty ${firstItem.quantity} · +$extraCount more'
                                   : 'Qty ${firstItem.quantity}',
-                              style: const TextStyle(fontSize: 12, color: AppColors.grey),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppPalette.of(context).textMuted,
+                              ),
                             ),
                           ],
                         ),
@@ -383,11 +504,21 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total Purchase',
-                        style: TextStyle(fontSize: 12.5, color: AppColors.grey)),
-                    Text('S\$${order.total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 17, color: AppColors.red)),
+                    Text(
+                      'Total Purchase',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                    Text(
+                      'S\$${order.total.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 17,
+                        color: AppPalette.of(context).accent,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -400,9 +531,11 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                         icon: Icons.chat_bubble_outline,
                         label: 'Contact Buyer',
                         onTap: hasPhone
-                            ? () => launchShopContact(phone,
+                            ? () => launchShopContact(
+                                phone,
                                 message:
-                                    "Hi, this is Marugen Koi Farm regarding your order #${order.displayNumber}")
+                                    "Hi, this is Marugen Fish Farm regarding your order #${order.displayNumber}",
+                              )
                             : null,
                       ),
                     ),
@@ -436,8 +569,9 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
 /// terminal order (cancelled/refunded) shows the pill with no buttons at
 /// all, since 0030_order_status_forward_only.sql blocks any further
 /// change server-side anyway. Picking `cancelled`/`refunded` still asks
-/// for confirmation first, since both are final and release stock/trigger
-/// refund side effects.
+/// for confirmation first, since both are final; `refunded` additionally
+/// issues a real Stripe refund (see stripe-refund Edge Function), not just
+/// a status relabel.
 class _StatusSelector extends ConsumerStatefulWidget {
   final Order order;
   const _StatusSelector({required this.order});
@@ -452,14 +586,14 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
   Color _colorFor(OrderStatus s) {
     switch (s) {
       case OrderStatus.delivered:
-        return AppColors.success;
+        return AppPalette.of(context).success;
       case OrderStatus.cancelled:
       case OrderStatus.refunded:
-        return AppColors.error;
+        return AppPalette.of(context).error;
       case OrderStatus.pending:
-        return AppColors.warning;
+        return AppPalette.of(context).warning;
       default:
-        return AppColors.red;
+        return AppPalette.of(context).accent;
     }
   }
 
@@ -467,24 +601,39 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
     if (s == OrderStatus.cancelled || s == OrderStatus.refunded) {
       final confirmed = await confirmDestructiveAction(
         context,
-        title: s == OrderStatus.cancelled ? 'Cancel this order?' : 'Mark as refunded?',
-        message:
-            'Order #${widget.order.displayNumber} will move to "${orderStatusLabel(s)}". '
-            'This is final — the status can never be changed again after this.',
-        confirmLabel: orderStatusLabel(s),
+        title: s == OrderStatus.cancelled
+            ? 'Cancel this order?'
+            : 'Refund this order?',
+        message: s == OrderStatus.refunded
+            ? 'This will issue a real Stripe refund for order '
+                  '#${widget.order.displayNumber} back to the customer\'s original '
+                  'payment method. This is final — the status can never be changed '
+                  'again after this.'
+            : 'Order #${widget.order.displayNumber} will move to "${orderStatusLabel(s)}". '
+                  'This is final — the status can never be changed again after this.',
+        confirmLabel: s == OrderStatus.refunded
+            ? 'Refund'
+            : orderStatusLabel(s),
       );
       if (!confirmed) return;
     }
 
     setState(() => _updating = true);
     try {
-      await ref.read(orderRepositoryProvider).updateOrderStatus(widget.order.id, s);
+      if (s == OrderStatus.refunded) {
+        // Real Stripe refund (see stripe-refund Edge Function) — not just
+        // a status relabel like the plain updateOrderStatus path below.
+        await ref.read(orderRepositoryProvider).refundOrder(widget.order.id);
+      } else {
+        await ref
+            .read(orderRepositoryProvider)
+            .updateOrderStatus(widget.order.id, s);
+      }
       refreshAdminOrders(ref);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update status: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not update status: $e')));
     } finally {
       if (mounted) setState(() => _updating = false);
     }
@@ -499,10 +648,12 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
     // a refund) — kept visually separate and muted from the ordinary
     // forward-progress actions so they read as deliberate, not just
     // another button in the same row an admin might tap by reflex.
-    final progressStatuses =
-        nextStatuses.where((s) => s != OrderStatus.cancelled && s != OrderStatus.refunded);
-    final riskyStatuses =
-        nextStatuses.where((s) => s == OrderStatus.cancelled || s == OrderStatus.refunded);
+    final progressStatuses = nextStatuses.where(
+      (s) => s != OrderStatus.cancelled && s != OrderStatus.refunded,
+    );
+    final riskyStatuses = nextStatuses.where(
+      (s) => s == OrderStatus.cancelled || s == OrderStatus.refunded,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,7 +661,10 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
         Row(
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: 8,
+              ),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -518,7 +672,11 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
               ),
               child: Text(
                 orderStatusLabel(status),
-                style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 13),
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
               ),
             ),
             if (_updating) ...[
@@ -542,11 +700,19 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
                   onPressed: () => _moveTo(s),
                   style: OutlinedButton.styleFrom(
                     visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    side: BorderSide(color: _colorFor(s).withValues(alpha: 0.4)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    side: BorderSide(
+                      color: _colorFor(s).withValues(alpha: 0.4),
+                    ),
                     foregroundColor: _colorFor(s),
                   ),
-                  child: Text(orderStatusLabel(s), style: const TextStyle(fontSize: 12)),
+                  child: Text(
+                    orderStatusLabel(s),
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
             ],
           ),
@@ -561,11 +727,19 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
                   onPressed: () => _moveTo(s),
                   style: TextButton.styleFrom(
                     visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    foregroundColor: AppColors.greySoft,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    foregroundColor: AppPalette.of(context).textMuted,
                   ),
-                  child: Text(orderStatusLabel(s),
-                      style: const TextStyle(fontSize: 11.5, decoration: TextDecoration.underline)),
+                  child: Text(
+                    orderStatusLabel(s),
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -599,9 +773,11 @@ class _PillButton extends StatelessWidget {
     final fg = filled
         ? AppColors.white
         : enabled
-            ? AppColors.black
-            : AppColors.greySoft;
-    final bg = filled ? (enabled ? AppColors.black : AppColors.lightGrey) : Colors.transparent;
+        ? AppPalette.of(context).text
+        : AppPalette.of(context).textMuted;
+    final bg = filled
+        ? (enabled ? AppColors.black : AppPalette.of(context).border)
+        : Colors.transparent;
 
     return Material(
       color: bg,
@@ -614,7 +790,13 @@ class _PillButton extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadius.pill),
-            border: filled ? null : Border.all(color: enabled ? AppColors.lightGrey : AppColors.lightGrey),
+            border: filled
+                ? null
+                : Border.all(
+                    color: enabled
+                        ? AppPalette.of(context).border
+                        : AppPalette.of(context).border,
+                  ),
           ),
           alignment: Alignment.center,
           child: loading
@@ -633,7 +815,11 @@ class _PillButton extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: fg),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: fg,
+                        ),
                       ),
                     ),
                   ],

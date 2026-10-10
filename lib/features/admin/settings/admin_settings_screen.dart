@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../delivery/easyparcel_providers.dart';
@@ -18,7 +19,8 @@ class AdminSettingsScreen extends ConsumerStatefulWidget {
   const AdminSettingsScreen({super.key});
 
   @override
-  ConsumerState<AdminSettingsScreen> createState() => _AdminSettingsScreenState();
+  ConsumerState<AdminSettingsScreen> createState() =>
+      _AdminSettingsScreenState();
 }
 
 class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
@@ -75,15 +77,15 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       state = await EasyParcelRepository().startOAuth();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not start EasyParcel connection: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start EasyParcel connection: $e')),
+        );
       }
       return;
     }
     final uri = Uri.https('api.easyparcel.com', '/oauth/login', {
       'client_id': 'f0e209dd-f3db-4f6f-a74b-c5aa743af87e',
-      'redirect_uri':
-          'https://gexgcwdkbeythrnqmihe.supabase.co/functions/v1/easyparcel-oauth-callback',
+      'redirect_uri': 'https://gexgcwdkbeythrnqmihe.supabase.co/functions/v1/easyparcel-oauth-callback',
       'state': state,
     });
     await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -107,9 +109,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _signingOut = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not log out: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not log out: $e')));
     }
   }
 
@@ -165,8 +166,10 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         'gst_percent': int.tryParse(_gstCtrl.text.trim()) ?? 9,
         'gst_included_in_price': _gstIncluded,
         'show_price_default': _showPriceDefault,
-        'delivery_lead_days_min': int.tryParse(_deliveryMinCtrl.text.trim()) ?? 2,
-        'delivery_lead_days_max': int.tryParse(_deliveryMaxCtrl.text.trim()) ?? 5,
+        'delivery_lead_days_min':
+            int.tryParse(_deliveryMinCtrl.text.trim()) ?? 2,
+        'delivery_lead_days_max':
+            int.tryParse(_deliveryMaxCtrl.text.trim()) ?? 5,
         'low_stock_threshold':
             int.tryParse(_lowStockThresholdCtrl.text.trim()) ?? 5,
         'promo_banner_image_url': bannerImageUrl,
@@ -200,11 +203,27 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.xl),
         children: [
+          const _SectionLabel('THIS DEVICE'),
+          const AppearanceTile(),
+          Text(
+            'Appearance is saved on this device and does not change shop settings.',
+            style: TextStyle(
+              color: AppPalette.of(context).textMuted,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
           const _SectionLabel('SHOP INFO'),
           const SizedBox(height: AppSpacing.sm),
-          TextField(controller: _shopNameCtrl, decoration: const InputDecoration(labelText: 'Shop name')),
+          TextField(
+            controller: _shopNameCtrl,
+            decoration: const InputDecoration(labelText: 'Shop name'),
+          ),
           const SizedBox(height: AppSpacing.md),
-          TextField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'Phone')),
+          TextField(
+            controller: _phoneCtrl,
+            decoration: const InputDecoration(labelText: 'Phone'),
+          ),
           const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _addressCtrl,
@@ -256,24 +275,30 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          const Text(
+          Text(
             'Shown on shop cards as an estimated delivery date range',
-            style: TextStyle(fontSize: 12, color: AppColors.grey),
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
           const SizedBox(height: AppSpacing.xl),
           const _SectionLabel('EASYPARCEL INTEGRATION'),
           const SizedBox(height: AppSpacing.sm),
-          const Text(
+          Text(
             'Connect once to auto-book couriers and auto-track shipments '
             'from the Delivery tab, instead of typing tracking numbers in '
             'by hand.',
-            style: TextStyle(fontSize: 12, color: AppColors.grey),
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
           const SizedBox(height: AppSpacing.sm),
           Container(
             padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: AppColors.offWhite,
+              color: AppPalette.of(context).surfaceMuted,
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
             child: Row(
@@ -283,8 +308,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                       ? Icons.check_circle
                       : Icons.link_off,
                   color: _easyParcelStatus?.connected == true
-                      ? AppColors.success
-                      : AppColors.grey,
+                      ? AppPalette.of(context).success
+                      : AppPalette.of(context).textMuted,
                   size: 20,
                 ),
                 const SizedBox(width: AppSpacing.sm),
@@ -293,14 +318,19 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                     _checkingEasyParcel
                         ? 'Checking connection…'
                         : _easyParcelStatus?.connected == true
-                            ? 'Connected'
-                                '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
-                            : 'Not connected',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
+                        ? 'Connected'
+                              '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
+                        : 'Not connected',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13.5,
+                    ),
                   ),
                 ),
                 TextButton(
-                  onPressed: _checkingEasyParcel ? null : _checkEasyParcelStatus,
+                  onPressed: _checkingEasyParcel
+                      ? null
+                      : _checkEasyParcelStatus,
                   child: const Text('Refresh'),
                 ),
               ],
@@ -317,13 +347,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          const Text(
+          Text(
             'SENDER ADDRESS (used for shipping rate quotes)',
             style: TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 11,
               letterSpacing: 0.6,
-              color: AppColors.grey,
+              color: AppPalette.of(context).textMuted,
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -348,14 +378,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _shopStateCtrl,
-            decoration: const InputDecoration(labelText: 'State (if applicable)'),
+            decoration: const InputDecoration(
+              labelText: 'State (if applicable)',
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _defaultWeightCtrl,
             decoration: const InputDecoration(
               labelText: 'Default parcel weight (kg)',
-              hintText: 'Used for every order — per-item weight isn\'t tracked yet',
+              hintText:
+                  'Used for every order — per-item weight isn\'t tracked yet',
             ),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
           ),
@@ -364,22 +397,30 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
           const SizedBox(height: AppSpacing.sm),
           TextField(
             controller: _lowStockThresholdCtrl,
-            decoration: const InputDecoration(labelText: 'Low stock alert quantity'),
+            decoration: const InputDecoration(
+              labelText: 'Low stock alert quantity',
+            ),
             keyboardType: TextInputType.number,
           ),
           const SizedBox(height: AppSpacing.xs),
-          const Text(
+          Text(
             'Products at or below this quantity appear in the dashboard\'s '
             'Low Stock list',
-            style: TextStyle(fontSize: 12, color: AppColors.grey),
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
           const SizedBox(height: AppSpacing.xl),
           const _SectionLabel('PROMOTION BANNER'),
           const SizedBox(height: AppSpacing.sm),
-          const Text(
+          Text(
             'Shown as a popup once per device per day when a customer '
             'opens the app.',
-            style: TextStyle(fontSize: 12, color: AppColors.grey),
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
           const SizedBox(height: AppSpacing.sm),
           GestureDetector(
@@ -388,30 +429,33 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               height: 140,
               width: double.infinity,
               decoration: BoxDecoration(
-                color: AppColors.offWhite,
+                color: AppPalette.of(context).surfaceMuted,
                 borderRadius: BorderRadius.circular(AppRadius.md),
-                border: Border.all(color: AppColors.lightGrey),
+                border: Border.all(color: AppPalette.of(context).border),
               ),
               clipBehavior: Clip.antiAlias,
               child: _pickedBannerImage != null
-                  ? Image.file(File(_pickedBannerImage!.path), fit: BoxFit.cover)
+                  ? Image.file(
+                      File(_pickedBannerImage!.path),
+                      fit: BoxFit.cover,
+                    )
                   : (_existingBannerImageUrl != null &&
-                          _existingBannerImageUrl!.isNotEmpty)
-                      ? CachedNetworkImage(
-                          imageUrl: _existingBannerImageUrl!,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, _, _) => const Icon(
-                            Icons.image_not_supported_outlined,
-                            color: AppColors.greySoft,
-                          ),
-                        )
-                      : const Center(
-                          child: Icon(
-                            Icons.add_photo_alternate_outlined,
-                            color: AppColors.grey,
-                            size: 32,
-                          ),
-                        ),
+                        _existingBannerImageUrl!.isNotEmpty)
+                  ? CachedNetworkImage(
+                      imageUrl: _existingBannerImageUrl!,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, _, _) => Icon(
+                        Icons.image_not_supported_outlined,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    )
+                  : Center(
+                      child: Icon(
+                        Icons.add_photo_alternate_outlined,
+                        color: AppPalette.of(context).textMuted,
+                        size: 32,
+                      ),
+                    ),
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -436,20 +480,30 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
                 ? const SizedBox(
                     height: 18,
                     width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
+                  )
                 : const Text('Save Settings'),
           ),
           const SizedBox(height: AppSpacing.xl),
           const Divider(),
           ListTile(
             leading: _signingOut
-                ? const SizedBox(
+                ? SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppPalette.of(context).error,
+                    ),
                   )
-                : const Icon(Icons.logout, color: AppColors.error),
-            title: const Text('Log Out', style: TextStyle(color: AppColors.error)),
+                : Icon(Icons.logout, color: AppPalette.of(context).error),
+            title: Text(
+              'Log Out',
+              style: TextStyle(color: AppPalette.of(context).error),
+            ),
             enabled: !_signingOut,
             onTap: _confirmSignOut,
           ),
@@ -467,11 +521,14 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text,
-        style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 0.8,
-            color: AppColors.grey));
+    return Text(
+      text,
+      style: TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 12,
+        letterSpacing: 0.8,
+        color: AppPalette.of(context).textMuted,
+      ),
+    );
   }
 }

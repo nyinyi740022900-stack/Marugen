@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -85,7 +86,15 @@ class ProductRepository {
           reviewCount: s['review_count'] as int? ?? 0,
         );
       }).toList();
-    } catch (_) {
+    } catch (e) {
+      // Logged so a broken get_product_stats RPC (vs. genuinely not being
+      // deployed yet) doesn't silently hide a real regression — the
+      // fallback to zero stats is still intentional either way.
+      developer.log(
+        'get_product_stats RPC failed — showing zero stats',
+        name: 'ProductRepository',
+        error: e,
+      );
       return products;
     }
   }

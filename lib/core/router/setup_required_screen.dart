@@ -12,28 +12,40 @@ class SetupRequiredScreen extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: Scaffold(
-        backgroundColor: AppColors.black,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.settings_suggest_outlined, color: AppColors.red, size: 48),
-                const SizedBox(height: 16),
-                const Text(
-                  'Setup Required',
-                  style: TextStyle(color: AppColors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Copy .env.example to .env and fill in your Supabase URL, '
-                  'anon key, and Stripe publishable key, then restart the app.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.lightGrey),
-                ),
-              ],
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.system,
+      home: Builder(
+        builder: (context) => Scaffold(
+          backgroundColor: AppPalette.of(context).background,
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.settings_suggest_outlined,
+                    color: AppPalette.of(context).accent,
+                    size: 48,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Setup Required',
+                    style: TextStyle(
+                      color: AppPalette.of(context).text,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Copy .env.example to .env and fill in your Supabase URL, '
+                    'anon key, and Stripe publishable key, then restart the app.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppPalette.of(context).textMuted),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

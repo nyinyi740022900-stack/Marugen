@@ -19,6 +19,7 @@ import '../../features/legal/terms_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/cart/domain/cart_item.dart';
 import '../../features/orders/presentation/checkout_screen.dart';
+import '../../features/orders/presentation/purchase_intent.dart';
 import '../../features/orders/presentation/order_detail_screen.dart';
 import '../../features/shop/presentation/customer_shell.dart';
 import '../../features/shop/presentation/product_detail_screen.dart';
@@ -56,7 +57,14 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       // Still resolving auth/session on first load.
       if (authState.isLoading) {
-        return state.matchedLocation == '/splash' ? null : '/splash';
+        return state.matchedLocation == '/splash'
+            ? null
+            : authRouteWithRedirect(
+                '/splash',
+                loggingIn
+                    ? state.uri.queryParameters['redirect']
+                    : state.uri.toString(),
+              );
       }
 
       // Opening the password-reset email link makes Supabase fire this
@@ -65,7 +73,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       // drop the user straight into the shop/admin, skipping the actual
       // "set a new password" step entirely (see ResetPasswordScreen).
       if (authState.valueOrNull?.event == AuthChangeEvent.passwordRecovery) {
-        return state.matchedLocation == '/reset-password' ? null : '/reset-password';
+        return state.matchedLocation == '/reset-password'
+            ? null
+            : '/reset-password';
       }
 
       if (!isLoggedIn) {
@@ -82,12 +92,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       // Route to the right shell once we know the user's role.
       final appUser = appUserAsync.valueOrNull;
       if (appUserAsync.isLoading) {
-        return state.matchedLocation == '/splash' ? null : '/splash';
+        return state.matchedLocation == '/splash'
+            ? null
+            : authRouteWithRedirect(
+                '/splash',
+                loggingIn
+                    ? state.uri.queryParameters['redirect']
+                    : state.uri.toString(),
+              );
       }
       final isAdmin = appUser?.role.isAdmin ?? false;
 
       if (loggingIn || state.matchedLocation == '/splash') {
-        final redirect = state.uri.queryParameters['redirect'];
+        final redirect = safeLocalRedirect(
+          state.uri.queryParameters['redirect'],
+        );
         if (redirect != null && redirect.isNotEmpty) return redirect;
         return isAdmin ? '/admin' : '/';
       }
@@ -119,8 +138,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         // `extra` carries a Buy Now item list (see product_detail_screen
         // .dart's `_buyNow`) when present — null falls back to the
         // persistent cart, same as the Cart screen's own Checkout button.
-        builder: (_, state) =>
-            CheckoutScreen(buyNowItems: state.extra as List<CartItem>?),
+        builder: (_, state) => CheckoutScreen(
+          buyNowItems: state.extra is List<CartItem>
+              ? state.extra as List<CartItem>
+              : null,
+          purchaseIntentId: state.uri.queryParameters['intent'],
+        ),
       ),
       GoRoute(path: '/terms', builder: (_, _) => const TermsScreen()),
       GoRoute(path: '/privacy', builder: (_, _) => const PrivacyScreen()),

@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
 
     const { data: order } = await admin
       .from('orders')
-      .select('id, status, total, shipping_address, tracking_registered, tracking_provider, qxpress_tracking_no')
+      .select('id, status, total, items:order_items(*), shipping_address, tracking_registered, tracking_provider, qxpress_tracking_no')
       .eq('id', order_id)
       .maybeSingle();
     if (!order) return jsonError('Order not found', 404);
@@ -177,7 +177,9 @@ Deno.serve(async (req) => {
               width: 5,
               item: [
                 {
-                  content: `Order ${order_id}`,
+                  content: (order.items ?? []).map((item: { product_name: string; quantity: number; variant_label?: string; size_label?: string }) =>
+                    `${[item.product_name, item.variant_label, item.size_label].filter(Boolean).join(' / ')} x${item.quantity}`
+                  ).join('; ') || `Order ${order_id}`,
                   weight,
                   height: 5,
                   length: 5,

@@ -17,8 +17,8 @@ class _StageDraft {
   XFile? newImage;
 
   _StageDraft({String? label, String? description, this.existingImageUrl})
-      : labelCtrl = TextEditingController(text: label),
-        descCtrl = TextEditingController(text: description);
+    : labelCtrl = TextEditingController(text: label),
+      descCtrl = TextEditingController(text: description);
 
   void dispose() {
     labelCtrl.dispose();
@@ -49,10 +49,12 @@ class _VarietyFormSheet extends ConsumerStatefulWidget {
 
 class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   late final _nameCtrl = TextEditingController(text: widget.existing?.name);
-  late final _descCtrl =
-      TextEditingController(text: widget.existing?.description);
-  late final _traitsCtrl =
-      TextEditingController(text: widget.existing?.traits.join(', '));
+  late final _descCtrl = TextEditingController(
+    text: widget.existing?.description,
+  );
+  late final _traitsCtrl = TextEditingController(
+    text: widget.existing?.traits.join(', '),
+  );
   late String _category = widget.existing?.category ?? 'koi';
 
   String? _existingCoverUrl;
@@ -65,11 +67,13 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
     super.initState();
     _existingCoverUrl = widget.existing?.imageUrl;
     for (final s in widget.existing?.stages ?? const <VarietyStage>[]) {
-      _stages.add(_StageDraft(
-        label: s.label,
-        description: s.description,
-        existingImageUrl: s.imageUrl,
-      ));
+      _stages.add(
+        _StageDraft(
+          label: s.label,
+          description: s.description,
+          existingImageUrl: s.imageUrl,
+        ),
+      );
     }
   }
 
@@ -85,12 +89,18 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   }
 
   Future<void> _pickCoverImage() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked != null) setState(() => _newCoverImage = picked);
   }
 
   Future<void> _pickStageImage(_StageDraft stage) async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked != null) setState(() => stage.newImage = picked);
   }
 
@@ -132,7 +142,9 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
         stagePayload.add({
           'label': s.labelCtrl.text.trim(),
           'image_url': imageUrl,
-          'description': s.descCtrl.text.trim().isEmpty ? null : s.descCtrl.text.trim(),
+          'description': s.descCtrl.text.trim().isEmpty
+              ? null
+              : s.descCtrl.text.trim(),
         });
       }
 
@@ -145,7 +157,8 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -166,8 +179,10 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'Add Variety' : 'Edit Variety',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              widget.existing == null ? 'Add Variety' : 'Edit Variety',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: AppSpacing.lg),
             Center(
               child: GestureDetector(
@@ -176,25 +191,33 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                   width: 96,
                   height: 96,
                   decoration: BoxDecoration(
-                    color: AppColors.offWhite,
+                    color: AppPalette.of(context).surfaceMuted,
                     borderRadius: BorderRadius.circular(AppRadius.md),
                     image: _newCoverImage != null
                         ? null // shown via FutureBuilder below for web/io compat
                         : (_existingCoverUrl != null
-                            ? DecorationImage(
-                                image: NetworkImage(_existingCoverUrl!), fit: BoxFit.cover)
-                            : null),
+                              ? DecorationImage(
+                                  image: NetworkImage(_existingCoverUrl!),
+                                  fit: BoxFit.cover,
+                                )
+                              : null),
                   ),
                   child: _newCoverImage != null
                       ? _PickedImageThumb(file: _newCoverImage!)
                       : (_existingCoverUrl == null
-                          ? const Icon(Icons.add_a_photo_outlined, color: AppColors.grey)
-                          : null),
+                            ? Icon(
+                                Icons.add_a_photo_outlined,
+                                color: AppPalette.of(context).textMuted,
+                              )
+                            : null),
                 ),
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
-            TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'Name')),
+            TextField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
             const SizedBox(height: AppSpacing.md),
             DropdownButtonFormField<String>(
               initialValue: _category,
@@ -215,18 +238,22 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
             TextField(
               controller: _traitsCtrl,
               decoration: const InputDecoration(
-                  labelText: 'Traits (comma-separated)',
-                  hintText: 'e.g. Red & white, Metallic scales'),
+                labelText: 'Traits (comma-separated)',
+                hintText: 'e.g. Red & white, Metallic scales',
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
             Row(
               children: [
-                const Text('GROWTH STAGES',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                        letterSpacing: 0.8,
-                        color: AppColors.grey)),
+                Text(
+                  'GROWTH STAGES',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    letterSpacing: 0.8,
+                    color: AppPalette.of(context).textMuted,
+                  ),
+                ),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: _addStage,
@@ -235,9 +262,12 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                 ),
               ],
             ),
-            const Text(
+            Text(
               'e.g. Tosai (under 1yr) → Nisai (2yr) → Sansai (3yr), one photo each',
-              style: TextStyle(fontSize: 12, color: AppColors.grey),
+              style: TextStyle(
+                fontSize: 12,
+                color: AppPalette.of(context).textMuted,
+              ),
             ),
             const SizedBox(height: AppSpacing.sm),
             for (var i = 0; i < _stages.length; i++)
@@ -245,7 +275,7 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                 margin: const EdgeInsets.only(bottom: AppSpacing.sm),
                 padding: const EdgeInsets.all(AppSpacing.sm),
                 decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.lightGrey),
+                  border: Border.all(color: AppPalette.of(context).border),
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 child: Row(
@@ -257,21 +287,28 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                         width: 56,
                         height: 56,
                         decoration: BoxDecoration(
-                          color: AppColors.offWhite,
+                          color: AppPalette.of(context).surfaceMuted,
                           borderRadius: BorderRadius.circular(AppRadius.sm),
-                          image: _stages[i].newImage == null &&
+                          image:
+                              _stages[i].newImage == null &&
                                   _stages[i].existingImageUrl != null
                               ? DecorationImage(
-                                  image: NetworkImage(_stages[i].existingImageUrl!),
-                                  fit: BoxFit.cover)
+                                  image: NetworkImage(
+                                    _stages[i].existingImageUrl!,
+                                  ),
+                                  fit: BoxFit.cover,
+                                )
                               : null,
                         ),
                         child: _stages[i].newImage != null
                             ? _PickedImageThumb(file: _stages[i].newImage!)
                             : (_stages[i].existingImageUrl == null
-                                ? const Icon(Icons.add_a_photo_outlined,
-                                    size: 18, color: AppColors.grey)
-                                : null),
+                                  ? Icon(
+                                      Icons.add_a_photo_outlined,
+                                      size: 18,
+                                      color: AppPalette.of(context).textMuted,
+                                    )
+                                  : null),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
@@ -280,20 +317,28 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                         children: [
                           TextField(
                             controller: _stages[i].labelCtrl,
-                            decoration:
-                                const InputDecoration(labelText: 'Stage label', isDense: true),
+                            decoration: const InputDecoration(
+                              labelText: 'Stage label',
+                              isDense: true,
+                            ),
                           ),
                           const SizedBox(height: 6),
                           TextField(
                             controller: _stages[i].descCtrl,
                             decoration: const InputDecoration(
-                                labelText: 'Note (optional)', isDense: true),
+                              labelText: 'Note (optional)',
+                              isDense: true,
+                            ),
                           ),
                         ],
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, size: 18, color: AppColors.grey),
+                      icon: Icon(
+                        Icons.close,
+                        size: 18,
+                        color: AppPalette.of(context).textMuted,
+                      ),
                       onPressed: () => _removeStage(i),
                     ),
                   ],
@@ -306,7 +351,11 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                   ? const SizedBox(
                       height: 18,
                       width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
                   : const Text('Save'),
             ),
           ],

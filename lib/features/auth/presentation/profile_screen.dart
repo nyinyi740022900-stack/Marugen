@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/content_width.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 import '../../wishlist/presentation/wishlist_screen.dart';
@@ -31,6 +33,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   // background instead.
   bool? _notificationsOverride;
   bool _signingOut = false;
+  bool _deletingAccount = false;
   bool _uploadingAvatar = false;
   // Optimistic override, same reasoning as _notificationsOverride: avoid
   // ref.invalidate(currentAppUserProvider) (router-rebuild jank) for a
@@ -38,18 +41,29 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   String? _avatarUrlOverride;
 
   Future<void> _pickAvatar() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (picked == null || !mounted) return;
     setState(() => _uploadingAvatar = true);
     try {
       final bytes = await picked.readAsBytes();
-      final ext = picked.name.contains('.') ? picked.name.split('.').last : 'jpg';
-      final url = await ref.read(authRepositoryProvider).uploadAvatar(bytes, ext);
+      final ext = picked.name.contains('.')
+          ? picked.name.split('.').last
+          : 'jpg';
+      final url = await ref
+          .read(authRepositoryProvider)
+          .uploadAvatar(bytes, ext);
       if (mounted) setState(() => _avatarUrlOverride = url);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not update photo: $e')),
+          SnackBar(
+            content: Text(
+              'Your photo was not updated. Check your connection and try again.',
+            ),
+          ),
         );
       }
     } finally {
@@ -69,7 +83,40 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (!mounted) return;
       setState(() => _signingOut = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not log out: $e')),
+        SnackBar(
+          content: Text(
+            'You are still signed in. Check your connection and try logging out again.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await confirmDestructiveAction(
+      context,
+      title: 'Delete your account?',
+      message:
+          'This permanently removes your profile, saved addresses, wishlist, and reviews. '
+          'This cannot be undone. (Past orders are kept for accounting/tax records, with '
+          'your personal details removed from them.)',
+      confirmLabel: 'Delete Account',
+    );
+    if (!confirmed) return;
+
+    setState(() => _deletingAccount = true);
+    try {
+      await ref.read(authRepositoryProvider).deleteAccount();
+      // Router redirect handles navigation once auth state updates.
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deletingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Your account was not deleted. Check your connection and try again, or contact support.',
+          ),
+        ),
       );
     }
   }
@@ -82,7 +129,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       if (!mounted) return;
       setState(() => _notificationsOverride = !value);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update notification setting: $e')),
+        SnackBar(
+          content: Text(
+            'Your notification setting was restored. Check your connection and try again.',
+          ),
+        ),
       );
     }
   }
@@ -94,158 +145,235 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
-      body: !isLoggedIn
-          ? const _GuestProfile()
-          : userAsync.when(
-              data: (user) => ListView(
-                padding: const EdgeInsets.all(20),
-                children: [
-                  Center(
-                    child: GestureDetector(
-                      onTap: _uploadingAvatar ? null : _pickAvatar,
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          Builder(builder: (context) {
-                            final avatarUrl = _avatarUrlOverride ?? user?.avatarUrl;
-                            return CircleAvatar(
-                              radius: 36,
-                              backgroundColor: AppColors.offWhite,
-                              backgroundImage:
-                                  avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                              child: avatarUrl == null
-                                  ? const Icon(Icons.person, size: 36, color: AppColors.grey)
-                                  : null,
-                            );
-                          }),
-                          Positioned(
-                            right: -2,
-                            bottom: -2,
-                            child: Container(
-                              padding: const EdgeInsets.all(5),
-                              decoration: const BoxDecoration(
-                                color: AppColors.red,
-                                shape: BoxShape.circle,
-                                border: Border.fromBorderSide(
-                                  BorderSide(color: AppColors.white, width: 2),
+      body: ContentWidth(
+        child: !isLoggedIn
+            ? const _GuestProfile()
+            : userAsync.when(
+                data: (user) => ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Center(
+                      child: Semantics(
+                        label: 'Change profile photo',
+                        button: true,
+                        child: GestureDetector(
+                          onTap: _uploadingAvatar ? null : _pickAvatar,
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Builder(
+                                builder: (context) {
+                                  final avatarUrl =
+                                      _avatarUrlOverride ?? user?.avatarUrl;
+                                  return CircleAvatar(
+                                    radius: 36,
+                                    backgroundColor: AppPalette.of(context)
+                                        .surfaceMuted,
+                                    backgroundImage: avatarUrl != null
+                                        ? NetworkImage(avatarUrl)
+                                        : null,
+                                    child: avatarUrl == null
+                                        ? Icon(
+                                            Icons.person,
+                                            size: 36,
+                                            color: AppPalette.of(context)
+                                                .textMuted,
+                                          )
+                                        : null,
+                                  );
+                                },
+                              ),
+                              Positioned(
+                                right: -2,
+                                bottom: -2,
+                                child: Container(
+                                  padding: const EdgeInsets.all(5),
+                                  decoration: const BoxDecoration(
+                                    color: AppColors.red,
+                                    shape: BoxShape.circle,
+                                    border: Border.fromBorderSide(
+                                      BorderSide(
+                                        color: AppColors.white,
+                                        width: 2,
+                                      ),
+                                    ),
+                                  ),
+                                  child: _uploadingAvatar
+                                      ? const SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 1.5,
+                                            color: AppColors.white,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.camera_alt,
+                                          size: 12,
+                                          color: AppColors.white,
+                                        ),
                                 ),
                               ),
-                              child: _uploadingAvatar
-                                  ? const SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 1.5, color: AppColors.white),
-                                    )
-                                  : const Icon(Icons.camera_alt,
-                                      size: 12, color: AppColors.white),
-                            ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: Text(
-                      user?.fullName ?? user?.email ?? 'Guest',
-                      textAlign: TextAlign.center,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  if (user?.email != null)
+                    const SizedBox(height: 12),
                     Center(
-                      child: Text(user!.email!,
+                      child: Text(
+                        user?.fullName ?? user?.email ?? 'Guest',
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (user?.email != null)
+                      Center(
+                        child: Text(
+                          user!.email!,
                           textAlign: TextAlign.center,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.grey)),
-                    ),
-                  const SizedBox(height: 24),
-                  const Divider(),
-                  ListTile(
-                    leading: const Icon(Icons.location_on_outlined),
-                    title: const Text('Delivery Addresses'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AddressBookScreen()),
-                    ),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.favorite_border),
-                    title: const Text('Wishlist'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const WishlistScreen()),
-                    ),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.receipt_long_outlined),
-                    title: const Text('Order History'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => ref.read(customerTabIndexProvider.notifier).state = 2,
-                  ),
-                  Builder(builder: (context) {
-                    final notificationsEnabled =
-                        _notificationsOverride ?? user?.notificationsEnabled ?? true;
-                    return SwitchListTile(
-                      secondary: const Icon(Icons.notifications_outlined),
-                      title: const Text('Notifications'),
-                      subtitle: Text(
-                        notificationsEnabled
-                            ? 'Push alerts for order updates are on'
-                            : 'Push alerts are off — order status still shows in-app',
-                        style: const TextStyle(fontSize: 12, color: AppColors.grey),
+                          style: TextStyle(
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
                       ),
-                      value: notificationsEnabled,
-                      onChanged: _toggleNotifications,
-                    );
-                  }),
-                  const Divider(),
-                  ListTile(
-                    leading: const Icon(Icons.help_outline),
-                    title: const Text('FAQ & Support'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/faq'),
+                    const SizedBox(height: 24),
+                    const Divider(),
+                    const AppearanceTile(),
+                    ListTile(
+                      leading: const Icon(Icons.location_on_outlined),
+                      title: const Text('Delivery Addresses'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const AddressBookScreen(),
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.favorite_border),
+                      title: const Text('Wishlist'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const WishlistScreen(),
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.receipt_long_outlined),
+                      title: const Text('Order History'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () =>
+                          ref.read(customerTabIndexProvider.notifier).state = 2,
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final notificationsEnabled =
+                            _notificationsOverride ??
+                            user?.notificationsEnabled ??
+                            true;
+                        return SwitchListTile(
+                          secondary: const Icon(Icons.notifications_outlined),
+                          title: const Text('Notifications'),
+                          subtitle: Text(
+                            notificationsEnabled
+                                ? 'Push alerts for order updates are on'
+                                : 'Push alerts are off — order status still shows in-app',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                          value: notificationsEnabled,
+                          onChanged: _toggleNotifications,
+                        );
+                      },
+                    ),
+                    const Divider(),
+                    ListTile(
+                      leading: const Icon(Icons.help_outline),
+                      title: const Text('FAQ & Support'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/faq'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.description_outlined),
+                      title: const Text('Terms of Service'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/terms'),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.privacy_tip_outlined),
+                      title: const Text('Privacy Policy'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => context.push('/privacy'),
+                    ),
+                    const Divider(),
+                    ListTile(
+                      leading: _signingOut
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppPalette.of(context).error,
+                              ),
+                            )
+                          : Icon(
+                              Icons.logout,
+                              color: AppPalette.of(context).error,
+                            ),
+                      title: Text(
+                        'Log Out',
+                        style: TextStyle(color: AppPalette.of(context).error),
+                      ),
+                      enabled: !_signingOut,
+                      onTap: _confirmSignOut,
+                    ),
+                    ListTile(
+                      leading: _deletingAccount
+                          ? SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppPalette.of(context).error,
+                              ),
+                            )
+                          : Icon(
+                              Icons.delete_forever_outlined,
+                              color: AppPalette.of(context).error,
+                            ),
+                      title: Text(
+                        'Delete My Account',
+                        style: TextStyle(color: AppPalette.of(context).error),
+                      ),
+                      enabled: !_deletingAccount,
+                      onTap: _confirmDeleteAccount,
+                    ),
+                  ],
+                ),
+                loading: () => const Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
                   ),
-                  ListTile(
-                    leading: const Icon(Icons.description_outlined),
-                    title: const Text('Terms of Service'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/terms'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.privacy_tip_outlined),
-                    title: const Text('Privacy Policy'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => context.push('/privacy'),
-                  ),
-                  const Divider(),
-                  ListTile(
-                    leading: _signingOut
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
-                          )
-                        : const Icon(Icons.logout, color: AppColors.error),
-                    title: const Text('Log Out', style: TextStyle(color: AppColors.error)),
-                    enabled: !_signingOut,
-                    onTap: _confirmSignOut,
-                  ),
-                ],
-              ),
-              loading: () => const Center(
-                child: SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+                error: (e, _) => ErrorState(
+                  subtitle: "We couldn't load your profile. Check your connection and retry.",
+                  onRetry: () => ref.invalidate(currentAppUserProvider),
                 ),
               ),
-              error: (e, _) => Center(child: Text('Error: $e')),
-            ),
+      ),
     );
   }
 }
@@ -257,12 +385,46 @@ class _GuestProfile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return EmptyState(
-      icon: Icons.person_outline,
-      title: 'You are not logged in',
-      subtitle: 'Log in to see your profile, saved addresses and order history.',
-      actionLabel: 'Log In',
-      onAction: () => context.push('/login'),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: AppPalette.of(context).surface,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: EmptyState(
+                  icon: Icons.person_outline,
+                  title: 'Log in to your account',
+                  subtitle: 'View your orders, saved addresses and profile.',
+                  actionLabel: 'Log In',
+                  onAction: () => context.push('/login'),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              Text(
+                'THIS DEVICE',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Card(
+                margin: EdgeInsets.zero,
+                clipBehavior: Clip.antiAlias,
+                child: const AppearanceTile(),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

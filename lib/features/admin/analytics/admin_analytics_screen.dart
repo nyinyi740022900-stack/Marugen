@@ -19,19 +19,37 @@ DateTime _startOfWeek(DateTime d) =>
     DateTime(d.year, d.month, d.day).subtract(Duration(days: d.weekday - 1));
 
 const _monthNames = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /// Builds the last [count] period buckets ending today (oldest first) and
 /// fills each with how many of [timestamps] fall inside it.
-List<_Bucket> _buildBuckets(_Period period, List<DateTime> timestamps, int count) {
+List<_Bucket> _buildBuckets(
+  _Period period,
+  List<DateTime> timestamps,
+  int count,
+) {
   final now = DateTime.now();
   final buckets = <_Bucket>[];
   for (var i = count - 1; i >= 0; i--) {
     switch (period) {
       case _Period.daily:
-        final day = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+        final day = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).subtract(Duration(days: i));
         buckets.add(_Bucket('${day.day}/${day.month}', day));
       case _Period.weekly:
         final weekStart = _startOfWeek(now).subtract(Duration(days: i * 7));
@@ -55,14 +73,19 @@ List<_Bucket> _buildBuckets(_Period period, List<DateTime> timestamps, int count
   return buckets;
 }
 
-Map<String, int> _topProducts(List<ProductViewRow> views, DateTime since, {int take = 10}) {
+Map<String, int> _topProducts(
+  List<ProductViewRow> views,
+  DateTime since, {
+  int take = 10,
+}) {
   final counts = <String, int>{};
   for (final v in views) {
     if (v.viewedAt.isBefore(since)) continue;
     final name = v.productName ?? '(deleted product)';
     counts[name] = (counts[name] ?? 0) + 1;
   }
-  final sorted = counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+  final sorted = counts.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
   return {for (final e in sorted.take(take)) e.key: e.value};
 }
 
@@ -70,23 +93,24 @@ class AdminAnalyticsScreen extends ConsumerStatefulWidget {
   const AdminAnalyticsScreen({super.key});
 
   @override
-  ConsumerState<AdminAnalyticsScreen> createState() => _AdminAnalyticsScreenState();
+  ConsumerState<AdminAnalyticsScreen> createState() =>
+      _AdminAnalyticsScreenState();
 }
 
 class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
   _Period _period = _Period.daily;
 
   int get _bucketCount => switch (_period) {
-        _Period.daily => 14,
-        _Period.weekly => 8,
-        _Period.monthly => 6,
-      };
+    _Period.daily => 14,
+    _Period.weekly => 8,
+    _Period.monthly => 6,
+  };
 
   DateTime get _since => switch (_period) {
-        _Period.daily => DateTime.now().subtract(const Duration(days: 14)),
-        _Period.weekly => DateTime.now().subtract(const Duration(days: 56)),
-        _Period.monthly => DateTime.now().subtract(const Duration(days: 180)),
-      };
+    _Period.daily => DateTime.now().subtract(const Duration(days: 14)),
+    _Period.weekly => DateTime.now().subtract(const Duration(days: 56)),
+    _Period.monthly => DateTime.now().subtract(const Duration(days: 180)),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -94,10 +118,10 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
     final viewsAsync = ref.watch(productViewsProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('ANALYTICS')),
       body: RefreshIndicator(
-        color: AppColors.red,
+        color: AppPalette.of(context).accent,
         onRefresh: () async {
           ref.invalidate(appVisitsProvider);
           ref.invalidate(productViewsProvider);
@@ -115,13 +139,13 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
               onSelectionChanged: (s) => setState(() => _period = s.first),
             ),
             const SizedBox(height: AppSpacing.xl),
-            const Text(
+            Text(
               'APP VISITS',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
                 letterSpacing: 0.8,
-                color: AppColors.grey,
+                color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -132,15 +156,20 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                 return Container(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   decoration: BoxDecoration(
-                    color: AppColors.white,
+                    color: AppPalette.of(context).surface,
                     borderRadius: BorderRadius.circular(AppRadius.md),
                     boxShadow: AppShadows.card,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('$total visits',
-                          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                      Text(
+                        '$total visits',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                       const SizedBox(height: AppSpacing.md),
                       _BarChart(buckets: buckets),
                     ],
@@ -151,17 +180,19 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) =>
-                  Text('Error: $e', style: const TextStyle(color: AppColors.error)),
+              error: (e, _) => Text(
+                'Error: $e',
+                style: TextStyle(color: AppPalette.of(context).error),
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            const Text(
+            Text(
               'TOP VIEWED PRODUCTS',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
                 letterSpacing: 0.8,
-                color: AppColors.grey,
+                color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -172,18 +203,20 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                   return Container(
                     padding: const EdgeInsets.all(AppSpacing.xl),
                     decoration: BoxDecoration(
-                      color: AppColors.white,
+                      color: AppPalette.of(context).surface,
                       borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
                     alignment: Alignment.center,
-                    child: const Text('No product views in this period.',
-                        style: TextStyle(color: AppColors.grey)),
+                    child: Text(
+                      'No product views in this period.',
+                      style: TextStyle(color: AppPalette.of(context).textMuted),
+                    ),
                   );
                 }
                 final maxCount = top.values.first;
                 return Container(
                   decoration: BoxDecoration(
-                    color: AppColors.white,
+                    color: AppPalette.of(context).surface,
                     borderRadius: BorderRadius.circular(AppRadius.md),
                     boxShadow: AppShadows.card,
                   ),
@@ -195,21 +228,31 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                           const Divider(height: 1, indent: 16, endIndent: 16),
                         Padding(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+                            horizontal: AppSpacing.lg,
+                            vertical: AppSpacing.sm,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Text(entry.key,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                                  ),
-                                  Text('${entry.value}',
+                                    child: Text(
+                                      entry.key,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.w700, color: AppColors.red)),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    '${entry.value}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppPalette.of(context).accent,
+                                    ),
+                                  ),
                                 ],
                               ),
                               const SizedBox(height: 4),
@@ -218,8 +261,9 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                                 child: LinearProgressIndicator(
                                   value: entry.value / maxCount,
                                   minHeight: 6,
-                                  backgroundColor: AppColors.offWhite,
-                                  color: AppColors.red,
+                                  backgroundColor: AppPalette.of(context)
+                                      .surfaceMuted,
+                                  color: AppPalette.of(context).accent,
                                 ),
                               ),
                             ],
@@ -234,8 +278,10 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) =>
-                  Text('Error: $e', style: const TextStyle(color: AppColors.error)),
+              error: (e, _) => Text(
+                'Error: $e',
+                style: TextStyle(color: AppPalette.of(context).error),
+              ),
             ),
           ],
         ),
@@ -265,17 +311,29 @@ class _BarChart extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Text('${b.count}', style: const TextStyle(fontSize: 9, color: AppColors.grey)),
+                    Text(
+                      '${b.count}',
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
                     const SizedBox(height: 2),
                     Container(
                       height: 60 * (b.count / maxCount).clamp(0.03, 1.0),
                       decoration: BoxDecoration(
-                        color: AppColors.red,
+                        color: AppPalette.of(context).accent,
                         borderRadius: BorderRadius.circular(3),
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(b.label, style: const TextStyle(fontSize: 9, color: AppColors.grey)),
+                    Text(
+                      b.label,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
                   ],
                 ),
               ),

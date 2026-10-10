@@ -21,7 +21,7 @@ class SettingsRepository {
     final data = await _client.from('settings').select().eq('id', 1).maybeSingle();
     return data ??
         {
-          'shop_name': 'Marugen Koi Farm',
+          'shop_name': 'Marugen Fish Farm',
           'shop_phone': '',
           'shop_address': '',
           'currency': 'SGD',

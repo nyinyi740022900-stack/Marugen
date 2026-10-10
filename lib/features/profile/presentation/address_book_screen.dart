@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/content_width.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -15,32 +18,40 @@ class AddressBookScreen extends ConsumerWidget {
     final addressesAsync = ref.watch(myAddressesProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('Delivery Addresses')),
-      body: addressesAsync.when(
-        data: (addresses) {
-          if (addresses.isEmpty) {
-            return const EmptyState(
-              icon: Icons.location_on_outlined,
-              title: 'No saved addresses yet',
-              subtitle: 'Add one so checkout is faster next time.',
+      body: ContentWidth(
+        maxWidth: 760,
+        child: addressesAsync.when(
+          data: (addresses) {
+            if (addresses.isEmpty) {
+              return const EmptyState(
+                icon: Icons.location_on_outlined,
+                title: 'No saved addresses yet',
+                subtitle: 'Add one so checkout is faster next time.',
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.xxxl + AppSpacing.xl,
+              ),
+              itemCount: addresses.length,
+              separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
+              itemBuilder: (context, i) => _AddressCard(address: addresses[i]),
             );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xxxl + AppSpacing.xl),
-            itemCount: addresses.length,
+          },
+          loading: () => ListView.separated(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            itemCount: 3,
             separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-            itemBuilder: (context, i) => _AddressCard(address: addresses[i]),
-          );
-        },
-        loading: () => ListView.separated(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          itemCount: 3,
-          separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-          itemBuilder: (context, i) => const ListRowSkeleton(),
+            itemBuilder: (context, i) => const ListRowSkeleton(),
+          ),
+          error: (e, _) =>
+              ErrorState(onRetry: () => ref.invalidate(myAddressesProvider)),
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(myAddressesProvider)),
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openForm(context),
@@ -67,7 +78,7 @@ class _AddressCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -89,47 +100,76 @@ class _AddressCard extends ConsumerWidget {
                   children: [
                     Flexible(
                       child: Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
                         decoration: BoxDecoration(
-                          color: AppColors.redSoft,
+                          color: AppPalette.of(context).accentSoft,
                           borderRadius: BorderRadius.circular(AppRadius.pill),
                         ),
                         child: Text(
                           address.label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: AppColors.redDark,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700),
+                          style: TextStyle(
+                            color: AppPalette.of(context).accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
                     if (address.isDefault) ...[
                       const SizedBox(width: 6),
-                      const Icon(Icons.check_circle, size: 15, color: AppColors.success),
+                      Icon(
+                        Icons.check_circle,
+                        size: 15,
+                        color: AppPalette.of(context).success,
+                      ),
                       const SizedBox(width: 2),
-                      const Text('Default',
-                          style: TextStyle(fontSize: 11.5, color: AppColors.success, fontWeight: FontWeight.w600)),
+                      Text(
+                        'Default',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppPalette.of(context).success,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                     const Spacer(),
                     IconButton(
                       visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 20),
+                      icon: Icon(
+                        Icons.delete_outline,
+                        color: AppPalette.of(context).error,
+                        size: 20,
+                      ),
                       onPressed: () => _confirmDelete(context, ref),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text(address.recipientName,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+                Text(
+                  address.recipientName,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14.5,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(address.phone,
-                    style: const TextStyle(color: AppColors.grey, fontSize: 13)),
+                Text(
+                  address.phone,
+                  style: TextStyle(
+                    color: AppPalette.of(context).textMuted,
+                    fontSize: 13,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                Text(address.oneLine,
-                    style: const TextStyle(fontSize: 13.5, height: 1.4)),
+                Text(
+                  address.oneLine,
+                  style: const TextStyle(fontSize: 13.5, height: 1.4),
+                ),
               ],
             ),
           ),
@@ -153,17 +193,26 @@ class _AddressCard extends ConsumerWidget {
             onPressed: () async {
               Navigator.pop(dialogContext);
               try {
-                await ref.read(addressRepositoryProvider).deleteAddress(address.id);
+                await ref
+                    .read(addressRepositoryProvider)
+                    .deleteAddress(address.id);
                 ref.invalidate(myAddressesProvider);
               } catch (_) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Couldn't delete this address. Please try again.")),
+                    const SnackBar(
+                      content: Text(
+                        "Couldn't delete this address. Please try again.",
+                      ),
+                    ),
                   );
                 }
               }
             },
-            child: const Text('Delete', style: TextStyle(color: AppColors.error)),
+            child: Text(
+              'Delete',
+              style: TextStyle(color: AppPalette.of(context).error),
+            ),
           ),
         ],
       ),
@@ -234,7 +283,9 @@ class _AddressFormState extends ConsumerState<AddressForm> {
         phone: _phoneCtrl.text.trim(),
         line1: _line1Ctrl.text.trim(),
         line2: _line2Ctrl.text.trim().isEmpty ? null : _line2Ctrl.text.trim(),
-        city: _cityCtrl.text.trim().isEmpty ? 'Singapore' : _cityCtrl.text.trim(),
+        city: _cityCtrl.text.trim().isEmpty
+            ? 'Singapore'
+            : _cityCtrl.text.trim(),
         postalCode: _postalCtrl.text.trim(),
         isDefault: _isDefault,
       );
@@ -271,36 +322,46 @@ class _AddressFormState extends ConsumerState<AddressForm> {
             children: [
               Text(
                 widget.existing != null ? 'Edit Address' : 'Add Address',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: AppSpacing.lg),
               TextFormField(
                 controller: _labelCtrl,
-                decoration: const InputDecoration(labelText: 'Label (e.g. Home, Office)'),
+                decoration: const InputDecoration(
+                  labelText: 'Label (e.g. Home, Office)',
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _nameCtrl,
                 decoration: const InputDecoration(labelText: 'Recipient name'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _phoneCtrl,
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(labelText: 'Phone'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _line1Ctrl,
                 decoration: const InputDecoration(labelText: 'Address line 1'),
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                validator: (v) =>
+                    (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
               const SizedBox(height: AppSpacing.md),
               TextFormField(
                 controller: _line2Ctrl,
-                decoration: const InputDecoration(labelText: 'Address line 2 (optional)'),
+                decoration: const InputDecoration(
+                  labelText: 'Address line 2 (optional)',
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
               Row(
@@ -309,7 +370,8 @@ class _AddressFormState extends ConsumerState<AddressForm> {
                     child: TextFormField(
                       controller: _cityCtrl,
                       decoration: const InputDecoration(labelText: 'City'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.md),
@@ -317,8 +379,11 @@ class _AddressFormState extends ConsumerState<AddressForm> {
                     child: TextFormField(
                       controller: _postalCtrl,
                       keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Postal code'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Postal code',
+                      ),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
                     ),
                   ),
                 ],
@@ -329,17 +394,23 @@ class _AddressFormState extends ConsumerState<AddressForm> {
                 title: const Text('Set as default address'),
                 value: _isDefault,
                 onChanged: (v) => setState(() => _isDefault = v),
-                activeTrackColor: AppColors.red,
+                activeTrackColor: AppPalette.of(context).accent,
               ),
               if (_error != null) ...[
                 const SizedBox(height: AppSpacing.sm),
                 Container(
                   padding: const EdgeInsets.all(AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: AppColors.redSoft,
+                    color: AppPalette.of(context).accentSoft,
                     borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
-                  child: Text(_error!, style: const TextStyle(color: AppColors.redDark, fontSize: 13)),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(
+                      color: AppPalette.of(context).accent,
+                      fontSize: 13,
+                    ),
+                  ),
                 ),
               ],
               const SizedBox(height: AppSpacing.lg),
@@ -349,7 +420,10 @@ class _AddressFormState extends ConsumerState<AddressForm> {
                     ? const SizedBox(
                         height: 18,
                         width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
                       )
                     : const Text('Save Address'),
               ),

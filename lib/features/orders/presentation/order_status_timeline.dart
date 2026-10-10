@@ -51,17 +51,26 @@ class OrderStatusTimeline extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(AppSpacing.lg),
         decoration: BoxDecoration(
-          color: AppColors.error.withValues(alpha: 0.08),
+          color: AppPalette.of(context).error.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: Row(
           children: [
-            const Icon(Icons.cancel_outlined, color: AppColors.error, size: 20),
+            Icon(
+              Icons.cancel_outlined,
+              color: AppPalette.of(context).error,
+              size: 20,
+            ),
             const SizedBox(width: AppSpacing.sm),
             Text(
-              isCancelled ? 'This order was cancelled.' : 'This order was refunded.',
-              style: const TextStyle(
-                  color: AppColors.error, fontWeight: FontWeight.w600, fontSize: 13.5),
+              isCancelled
+                  ? 'This order was cancelled.'
+                  : 'This order was refunded.',
+              style: TextStyle(
+                color: AppPalette.of(context).error,
+                fontWeight: FontWeight.w600,
+                fontSize: 13.5,
+              ),
             ),
           ],
         ),
@@ -110,7 +119,9 @@ class OrderStatusTimeline extends StatelessWidget {
       // index in _steps.
       _ when baseIndex <= packingIndex => baseIndex,
       _ when baseIndex == shippedIndex =>
-        (showCollected && !collected) ? collectedMergedIndex! : shippedMergedIndex!,
+        (showCollected && !collected)
+            ? collectedMergedIndex!
+            : shippedMergedIndex!,
       _ => labels.length - 1, // delivered — last step
     };
 
@@ -122,16 +133,19 @@ class OrderStatusTimeline extends StatelessWidget {
         i < currentIndex
             ? _StepState.done
             : i == currentIndex
-                ? _StepState.current
-                : _StepState.upcoming,
+            ? _StepState.current
+            : _StepState.upcoming,
       ));
     }
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.lg),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.lg,
+      ),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -139,7 +153,11 @@ class OrderStatusTimeline extends StatelessWidget {
         children: [
           for (var i = 0; i < steps.length; i++) ...[
             Expanded(
-              child: _StepDot(label: steps[i].$1, icon: steps[i].$2, state: steps[i].$3),
+              child: _StepDot(
+                label: steps[i].$1,
+                icon: steps[i].$2,
+                state: steps[i].$3,
+              ),
             ),
             if (i != steps.length - 1)
               Padding(
@@ -147,7 +165,9 @@ class OrderStatusTimeline extends StatelessWidget {
                 child: Container(
                   width: 10,
                   height: 2,
-                  color: steps[i].$3 == _StepState.done ? AppColors.red : AppColors.lightGrey,
+                  color: steps[i].$3 == _StepState.done
+                      ? AppPalette.of(context).accent
+                      : AppPalette.of(context).border,
                 ),
               ),
           ],
@@ -163,12 +183,18 @@ class _StepDot extends StatelessWidget {
   final String label;
   final IconData icon;
   final _StepState state;
-  const _StepDot({required this.label, required this.icon, required this.state});
+  const _StepDot({
+    required this.label,
+    required this.icon,
+    required this.state,
+  });
 
   @override
   Widget build(BuildContext context) {
     final active = state != _StepState.upcoming;
-    final color = active ? AppColors.red : AppColors.greySoft;
+    final color = active
+        ? AppPalette.of(context).accent
+        : AppPalette.of(context).textMuted;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -176,14 +202,16 @@ class _StepDot extends StatelessWidget {
           width: 32,
           height: 32,
           decoration: BoxDecoration(
-            color: active ? AppColors.red : AppColors.offWhite,
+            color: active ? AppColors.red : AppPalette.of(context).background,
             shape: BoxShape.circle,
-            border: active ? null : Border.all(color: AppColors.lightGrey),
+            border: active
+                ? null
+                : Border.all(color: AppPalette.of(context).border),
           ),
           child: Icon(
             state == _StepState.done ? Icons.check : icon,
             size: 16,
-            color: active ? AppColors.white : AppColors.greySoft,
+            color: active ? AppColors.white : AppPalette.of(context).textMuted,
           ),
         ),
         const SizedBox(height: 6),
@@ -192,7 +220,9 @@ class _StepDot extends StatelessWidget {
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 10.5,
-            fontWeight: state == _StepState.current ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: state == _StepState.current
+                ? FontWeight.w700
+                : FontWeight.w500,
             color: color,
           ),
         ),

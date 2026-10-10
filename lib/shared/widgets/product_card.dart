@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/cart/presentation/cart_providers.dart';
+import '../../features/cart/domain/cart_item.dart';
+import '../../features/orders/presentation/purchase_intent.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import '../models/product.dart';
 import '../providers/settings_providers.dart';
@@ -38,7 +40,7 @@ class ProductCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppPalette.of(context).surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
@@ -59,24 +61,30 @@ class ProductCard extends ConsumerWidget {
                         ? CachedNetworkImage(
                             imageUrl: product.imageUrls.first,
                             fit: BoxFit.cover,
-                            placeholder: (_, _) =>
-                                Container(color: AppColors.offWhite),
+                            placeholder: (_, _) => Container(
+                              color: AppPalette.of(context).surfaceMuted,
+                            ),
                             errorWidget: (_, _, _) => Container(
-                              color: AppColors.offWhite,
-                              child: const Icon(Icons.image_not_supported_outlined,
-                                  color: AppColors.greySoft),
+                              color: AppPalette.of(context).surfaceMuted,
+                              child: Icon(
+                                Icons.image_not_supported_outlined,
+                                color: AppPalette.of(context).textMuted,
+                              ),
                             ),
                           )
                         : Container(
-                            color: AppColors.offWhite,
-                            child: const Icon(Icons.water,
-                                color: AppColors.greySoft, size: 40),
+                            color: AppPalette.of(context).surfaceMuted,
+                            child: Icon(
+                              Icons.water,
+                              color: AppPalette.of(context).textMuted,
+                              size: 40,
+                            ),
                           ),
                     if (product.fishDetails?.variety != null)
                       Positioned(
                         left: 8,
                         top: 8,
-                        right: 40,
+                        right: 60,
                         child: _Tag(label: product.fishDetails!.variety!),
                       )
                     else if (product.hasActiveSale)
@@ -92,7 +100,10 @@ class ProductCard extends ConsumerWidget {
                       Positioned(
                         right: 6,
                         top: 6,
-                        child: _FavoriteButton(productId: product.id),
+                        child: _FavoriteButton(
+                          productId: product.id,
+                          name: product.name,
+                        ),
                       ),
                     // Stock signal: a sold fish gets the stamped SOLD
                     // overlay; a restockable item at 0 gets a clear
@@ -106,9 +117,14 @@ class ProductCard extends ConsumerWidget {
                             angle: product.isLiveFish ? -0.12 : 0,
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 6),
+                                horizontal: 14,
+                                vertical: 6,
+                              ),
                               decoration: BoxDecoration(
-                                border: Border.all(color: AppColors.white, width: 1.5),
+                                border: Border.all(
+                                  color: AppColors.white,
+                                  width: 1.5,
+                                ),
                               ),
                               child: Text(
                                 product.unavailableLabel.toUpperCase(),
@@ -139,16 +155,32 @@ class ProductCard extends ConsumerWidget {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.md),
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  AppSpacing.md,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      product.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14, height: 1.2),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight:
+                            (MediaQuery.textScalerOf(context).scale(14) *
+                                    1.2 *
+                                    2)
+                                .ceilToDouble(),
+                      ),
+                      child: Text(
+                        product.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          height: 1.2,
+                        ),
+                      ),
                     ),
                     // Always reserve this line's height (even with nothing
                     // to show) so the price/cart-button row lands at the
@@ -168,9 +200,9 @@ class ProductCard extends ConsumerWidget {
                                       formatPrice(product.price!),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 11.5,
-                                        color: AppColors.grey,
+                                        color: AppPalette.of(context).textMuted,
                                         decoration: TextDecoration.lineThrough,
                                       ),
                                     ),
@@ -178,9 +210,9 @@ class ProductCard extends ConsumerWidget {
                                       formatPrice(product.salePrice!),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontWeight: FontWeight.w700,
-                                        color: AppColors.red,
+                                        color: AppPalette.of(context).accent,
                                         fontSize: 14,
                                       ),
                                     ),
@@ -192,12 +224,17 @@ class ProductCard extends ConsumerWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontWeight: FontWeight.w700,
-                                    color: product.isPurchasable ? AppColors.red : AppColors.grey,
+                                    color: product.isPurchasable
+                                        ? AppPalette.of(context).accent
+                                        : AppPalette.of(context).textMuted,
                                     fontSize: 14,
                                   ),
                                 ),
                         ),
-                        _CardActionButtons(product: product, onOpenDetail: onTap),
+                        _CardActionButtons(
+                          product: product,
+                          onOpenDetail: onTap,
+                        ),
                       ],
                     ),
                     if (product.isPurchasable && !product.isOutOfStock) ...[
@@ -240,8 +277,8 @@ class _CardActionButtons extends ConsumerWidget {
     if (!product.isPurchasable) {
       return _RoundIconButton(
         icon: Icons.chat_bubble_outline,
-        tooltip: 'Chat with seller',
-        onTap: () => _chatAbout(ref, product),
+        tooltip: 'Contact shop about ${product.name}',
+        onTap: () => _chatAbout(context, ref, product),
       );
     }
 
@@ -252,29 +289,40 @@ class _CardActionButtons extends ConsumerWidget {
     if (product.isLiveFish && !product.hasVariants) {
       return _RoundIconButton(
         icon: Icons.add_shopping_cart,
-        tooltip: 'Buy Now',
-        onTap: () {
-          final result = ref.read(cartProvider.notifier).add(product);
-          if (result == CartAddResult.outOfStock) {
-            showCartSnackBar(context, result);
-            return;
-          }
-          // alreadyInCart or added → go checkout with that fish in cart
-          context.push('/checkout');
-        },
+        tooltip: 'Buy ${product.name} now',
+        onTap: () => beginCheckout(
+          context,
+          ref,
+          buyNowItems: [CartItem(product: product)],
+        ),
       );
     }
 
     return _QuickAddButton(product: product, onOpenDetail: onOpenDetail);
   }
 
-  Future<void> _chatAbout(WidgetRef ref, Product product) async {
-    final settings = await ref.read(shopSettingsProvider.future);
-    final phone = settings['shop_phone'] as String? ?? '';
-    await launchShopContact(
-      phone,
-      message: "Hi, I'm interested in ${product.name}",
-    );
+  Future<void> _chatAbout(
+    BuildContext context,
+    WidgetRef ref,
+    Product product,
+  ) async {
+    try {
+      final settings = await ref.read(shopSettingsProvider.future);
+      if (!context.mounted) return;
+      await contactShop(
+        context,
+        settings['shop_phone'] as String? ?? '',
+        message: "Hi, I'm interested in ${product.name}",
+      );
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Shop contact is unavailable. Please try again.'),
+          ),
+        );
+      }
+    }
   }
 }
 
@@ -300,8 +348,8 @@ class _RoundIconButton extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Icon(icon, size: 15, color: AppColors.white),
+            padding: const EdgeInsets.all(14),
+            child: Icon(icon, size: 20, color: AppColors.white),
           ),
         ),
       ),
@@ -319,24 +367,18 @@ class _QuickAddButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Material(
-      color: AppColors.black,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () {
-          if (!product.supportsQuickAdd) {
-            onOpenDetail?.call();
-            return;
-          }
-          final result = ref.read(cartProvider.notifier).add(product);
-          showCartSnackBar(context, result);
-        },
-        child: const Padding(
-          padding: EdgeInsets.all(6),
-          child: Icon(Icons.add_shopping_cart, size: 15, color: AppColors.white),
-        ),
-      ),
+    return _RoundIconButton(
+      icon: Icons.add_shopping_cart,
+      tooltip: product.supportsQuickAdd
+          ? 'Add ${product.name} to cart'
+          : 'Choose options for ${product.name}',
+      onTap: () {
+        if (!product.supportsQuickAdd) {
+          onOpenDetail?.call();
+          return;
+        }
+        showCartSnackBar(context, ref.read(cartProvider.notifier).add(product));
+      },
     );
   }
 }
@@ -346,36 +388,79 @@ class _QuickAddButton extends ConsumerWidget {
 /// uses via the router's `_authRequiredRoutes`).
 class _FavoriteButton extends ConsumerWidget {
   final String productId;
-  const _FavoriteButton({required this.productId});
+  final String name;
+  const _FavoriteButton({required this.productId, required this.name});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isLoggedIn = ref.watch(isLoggedInProvider);
     final idsAsync = ref.watch(wishlistProductIdsProvider);
     final isFavorited = idsAsync.valueOrNull?.contains(productId) ?? false;
+    final busy =
+        idsAsync.isLoading ||
+        ref.read(wishlistProductIdsProvider.notifier).isUpdating(productId);
 
-    return Material(
-      color: Colors.transparent,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () async {
-          if (!isLoggedIn) {
-            context.push('/login');
-            return;
-          }
-          await ref.read(wishlistControllerProvider).toggle(productId, isFavorited);
-        },
-        child: Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: AppColors.black.withValues(alpha: 0.45),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            isFavorited ? Icons.favorite : Icons.favorite_border,
-            size: 16,
-            color: isFavorited ? AppColors.red : AppColors.white,
+    return Semantics(
+      button: true,
+      toggled: isFavorited,
+      enabled: !isLoggedIn || !busy,
+      child: Tooltip(
+        message: isFavorited
+            ? 'Remove $name from wishlist'
+            : 'Save $name to wishlist',
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: isLoggedIn && busy
+                ? null
+                : () async {
+                    if (!isLoggedIn) {
+                      context.push('/login');
+                      return;
+                    }
+                    if (idsAsync.hasError) {
+                      ref.invalidate(wishlistProductIdsProvider);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Reloading your wishlist. Please try again.',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                    try {
+                      await ref
+                          .read(wishlistControllerProvider)
+                          .toggle(productId, isFavorited);
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Could not update your wishlist. Please try again.',
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  },
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.black.withValues(alpha: 0.45),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isFavorited ? Icons.favorite : Icons.favorite_border,
+                size: 16,
+                color: isFavorited
+                    ? AppPalette.of(context).accent
+                    : AppColors.white,
+              ),
+            ),
           ),
         ),
       ),
@@ -400,7 +485,9 @@ class _StatsRow extends StatelessWidget {
       parts.add('${product.soldCount} sold');
     }
     if (product.hasVariants) {
-      parts.add('${product.variantCount} option${product.variantCount == 1 ? '' : 's'}');
+      parts.add(
+        '${product.variantCount} option${product.variantCount == 1 ? '' : 's'}',
+      );
     }
     // Nothing to say — still reserve the line's height so cards without
     // stats don't pull their price/cart row up relative to cards that do.
@@ -415,7 +502,11 @@ class _StatsRow extends StatelessWidget {
           const SizedBox(width: 2),
           Text(
             product.avgRating!.toStringAsFixed(1),
-            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.grey),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
         ],
         if (parts.isNotEmpty) ...[
@@ -425,7 +516,10 @@ class _StatsRow extends StatelessWidget {
               parts.join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppColors.grey),
+              style: TextStyle(
+                fontSize: 11,
+                color: AppPalette.of(context).textMuted,
+              ),
             ),
           ),
         ],
@@ -451,14 +545,21 @@ class _DeliveryEstimateLabel extends ConsumerWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.local_shipping_outlined, size: 12, color: AppColors.greySoft),
+        Icon(
+          Icons.local_shipping_outlined,
+          size: 12,
+          color: AppPalette.of(context).textMuted,
+        ),
         const SizedBox(width: 3),
         Flexible(
           child: Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10.5, color: AppColors.greySoft),
+            style: TextStyle(
+              fontSize: 10.5,
+              color: AppPalette.of(context).textMuted,
+            ),
           ),
         ),
       ],

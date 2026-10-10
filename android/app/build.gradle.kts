@@ -4,6 +4,7 @@ import java.io.FileInputStream
 plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
@@ -25,7 +26,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.marugen.marugen_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -52,11 +52,14 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("release")
+
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 
@@ -82,4 +85,18 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Validate signing only when a release task is requested. The Android DSL
+// configures every build type even for debug builds and IDE sync.
+gradle.taskGraph.whenReady {
+    val requestsRelease = allTasks.any {
+        it.project == project && it.name.contains("release", ignoreCase = true)
+    }
+    if (requestsRelease && !keystorePropertiesFile.exists()) {
+        throw GradleException(
+            "android/key.properties not found — release builds require the " +
+                "upload keystore config. See android/key.properties.example."
+        )
+    }
 }

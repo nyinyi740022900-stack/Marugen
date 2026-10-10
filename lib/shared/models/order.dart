@@ -1,4 +1,12 @@
-enum OrderStatus { pending, paid, packing, shipped, delivered, cancelled, refunded }
+enum OrderStatus {
+  pending,
+  paid,
+  packing,
+  shipped,
+  delivered,
+  cancelled,
+  refunded,
+}
 
 OrderStatus orderStatusFromString(String value) {
   return OrderStatus.values.firstWhere(
@@ -125,6 +133,7 @@ class Order {
   final String? qxpressTrackingNo;
   final String? stripePaymentIntentId;
   final Map<String, dynamic>? shippingAddress;
+  final String? customerRemarks;
   final String? promoCode;
   final double? discountAmount;
 
@@ -148,6 +157,7 @@ class Order {
   /// Number" once EasyParcel owns it); the tracking display itself reads
   /// the same qxpressTrackingNo/trackingStatus* fields regardless.
   final String? trackingProvider;
+  final String? easyparcelAwbUrl;
 
   /// What every screen should actually show — the assigned order number,
   /// or a shortened id fallback for the rare pre-migration row without one.
@@ -164,6 +174,7 @@ class Order {
     this.qxpressTrackingNo,
     this.stripePaymentIntentId,
     this.shippingAddress,
+    this.customerRemarks,
     this.promoCode,
     this.discountAmount,
     this.trackingStatus,
@@ -171,6 +182,7 @@ class Order {
     this.trackingUpdatedAt,
     this.trackingRegistered = false,
     this.trackingProvider,
+    this.easyparcelAwbUrl,
     this.trackingStatusCode,
   });
 
@@ -182,13 +194,16 @@ class Order {
       status: orderStatusFromString(map['status'] as String? ?? 'pending'),
       total: (map['total'] as num?)?.toDouble() ?? 0,
       createdAt: DateTime.parse(map['created_at'] as String),
-      items: (map['items'] as List?)
+      items:
+          (map['items'] as List?)
               ?.map((e) => OrderItem.fromMap(e as Map<String, dynamic>))
               .toList() ??
           const [],
       qxpressTrackingNo: map['qxpress_tracking_no'] as String?,
       stripePaymentIntentId: map['stripe_payment_intent_id'] as String?,
-      shippingAddress: (map['shipping_address'] as Map?)?.cast<String, dynamic>(),
+      shippingAddress: (map['shipping_address'] as Map?)
+          ?.cast<String, dynamic>(),
+      customerRemarks: map['customer_remarks'] as String?,
       promoCode: map['promo_code'] as String?,
       discountAmount: (map['discount_amount'] as num?)?.toDouble(),
       trackingStatus: map['tracking_status'] as String?,
@@ -198,6 +213,7 @@ class Order {
           : null,
       trackingRegistered: map['tracking_registered'] as bool? ?? false,
       trackingProvider: map['tracking_provider'] as String?,
+      easyparcelAwbUrl: map['easyparcel_awb_url'] as String?,
       trackingStatusCode: map['tracking_status_code'] as int?,
     );
   }

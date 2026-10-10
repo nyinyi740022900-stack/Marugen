@@ -1,3 +1,5 @@
+import '../../../shared/widgets/product_grid.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,7 +15,7 @@ import 'wishlist_providers.dart';
 /// "Wishlist" tile. Reuses [ProductCard] (with the heart toggle hidden,
 /// since a dedicated remove button does that job here).
 ///
-/// Keeps its own local copy of the list (seeded from [myWishlistProvider])
+/// Filters pending and completed removals from the backend list
 /// so removing an item can drop it from the grid immediately instead of
 /// waiting for [myWishlistProvider] to refetch over the network —
 /// `wishlistProductIdsProvider` (the heart-toggle source of truth
@@ -26,20 +28,50 @@ class WishlistScreen extends ConsumerStatefulWidget {
 }
 
 class _WishlistScreenState extends ConsumerState<WishlistScreen> {
-  List<WishlistItem>? _localItems;
+  final Set<String> _removedIds = {};
+  final Set<String> _pendingIds = {};
 
   Future<void> _remove(WishlistItem item) async {
-    final previous = _localItems;
-    setState(() => _localItems?.removeWhere((i) => i.id == item.id));
+    if (_removedIds.contains(item.id)) return;
+    final ids = ref.read(wishlistProductIdsProvider);
+    if (ids.isLoading ||
+        ref
+            .read(wishlistProductIdsProvider.notifier)
+            .isUpdating(item.productId)) {
+      return;
+    }
+    if (ids.hasError) {
+      ref.invalidate(wishlistProductIdsProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Reloading your wishlist. Please try removing the item again.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _removedIds.add(item.id);
+      _pendingIds.add(item.id);
+    });
     try {
       await ref.read(wishlistControllerProvider).toggle(item.productId, true);
+      if (mounted) setState(() => _pendingIds.remove(item.id));
     } catch (e) {
       // Revert and let the user know — the network call is the source of
       // truth, the optimistic removal was only a guess.
       if (mounted) {
-        setState(() => _localItems = previous);
+        setState(() {
+          _removedIds.remove(item.id);
+          _pendingIds.remove(item.id);
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not remove from wishlist: $e')),
+          SnackBar(
+            content: const Text(
+              'Could not remove this item. Please try again.',
+            ),
+          ),
         );
       }
     }
@@ -48,20 +80,20 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
   @override
   Widget build(BuildContext context) {
     final wishlistAsync = ref.watch(myWishlistProvider);
+    final idsAsync = ref.watch(wishlistProductIdsProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.offWhite,
+      backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('Wishlist')),
       body: wishlistAsync.when(
         data: (fetched) {
-          // Seed local state once from the first successful fetch, then
-          // never overwrite it from a later background refetch — a
-          // slower-arriving fetch (e.g. still in flight when the user
-          // taps remove) would otherwise silently re-add an item the
-          // user just removed locally.
-          _localItems ??= List.of(fetched);
-
-          final items = _localItems!;
+          final fetchedIds = fetched.map((item) => item.id).toSet();
+          _removedIds.removeWhere(
+            (id) => !_pendingIds.contains(id) && !fetchedIds.contains(id),
+          );
+          final items = fetched
+              .where((item) => !_removedIds.contains(item.id))
+              .toList();
           if (items.isEmpty) {
             return const EmptyState(
               icon: Icons.favorite_border,
@@ -69,14 +101,7 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
               subtitle: 'Tap the heart on any product to save it here.',
             );
           }
-          return GridView.builder(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: AppSpacing.md,
-              crossAxisSpacing: AppSpacing.md,
-              childAspectRatio: 0.6,
-            ),
+          return ProductGrid(
             itemCount: items.length,
             itemBuilder: (context, i) {
               final item = items[i];
@@ -93,26 +118,30 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
                     right: 6,
                     top: 6,
                     child: Tooltip(
-                      message: 'Remove from wishlist',
+                      message: 'Remove ${product.name} from wishlist',
                       child: Material(
                         color: Colors.transparent,
                         shape: const CircleBorder(),
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
-                          onTap: () => _remove(item),
-                          // 10px padding + 16px icon = 36px tap target
-                          // (was 6px padding = 28px) — a full 44px circle
-                          // would visually overwhelm this small grid-card
-                          // corner badge, so this is a practical middle
-                          // ground rather than strict compliance.
+                          onTap:
+                              idsAsync.isLoading ||
+                                  ref
+                                      .read(wishlistProductIdsProvider.notifier)
+                                      .isUpdating(item.productId)
+                              ? null
+                              : () => _remove(item),
                           child: Container(
-                            padding: const EdgeInsets.all(10),
+                            padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
                               color: AppColors.black.withValues(alpha: 0.45),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.favorite,
-                                size: 16, color: AppColors.red),
+                            child: Icon(
+                              Icons.favorite,
+                              size: 16,
+                              color: AppPalette.of(context).accent,
+                            ),
                           ),
                         ),
                       ),
@@ -124,7 +153,8 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
           );
         },
         loading: () => const ProductGridSkeleton(),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(myWishlistProvider)),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(myWishlistProvider)),
       ),
     );
   }

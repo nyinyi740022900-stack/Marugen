@@ -79,6 +79,13 @@ const STATUS_COPY: Record<string, { title: string; body: (orderShort: string) =>
     title: 'Order cancelled',
     body: (id) => `Order #${id} was cancelled.`,
   },
+  // Fired by the new stripe-refund Edge Function once a real Stripe
+  // refund has been issued — this is a genuine customer-facing money
+  // event now, unlike before when "refunded" was just a status label.
+  refunded: {
+    title: 'Order refunded',
+    body: (id) => `Order #${id} has been refunded to your original payment method.`,
+  },
 };
 
 const EVENT_COPY: Record<string, { title: string; body: (orderShort: string) => string }> = {

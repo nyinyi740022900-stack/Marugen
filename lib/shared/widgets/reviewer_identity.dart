@@ -79,8 +79,11 @@ class _ReviewerAvatarState extends State<ReviewerAvatar> {
     final letter = (name != null && name.isNotEmpty) ? name[0].toUpperCase() : '?';
     // Deterministic so the same reviewer always gets the same color,
     // rather than a random one that would visually change on rebuild.
-    final color =
+    final identityColor =
         ReviewerAvatar._palette[letter.codeUnitAt(0) % ReviewerAvatar._palette.length];
+    final color = Theme.of(context).brightness == Brightness.dark
+        ? Color.lerp(identityColor, Colors.white, 0.5)!
+        : identityColor;
     return CircleAvatar(
       radius: widget.radius,
       backgroundColor: color.withValues(alpha: 0.15),

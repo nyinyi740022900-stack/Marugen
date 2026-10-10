@@ -4,8 +4,9 @@ import '../../../shared/models/wishlist_item.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/wishlist_repository.dart';
 
-final wishlistRepositoryProvider =
-    Provider<WishlistRepository>((ref) => WishlistRepository());
+final wishlistRepositoryProvider = Provider<WishlistRepository>(
+  (ref) => WishlistRepository(),
+);
 
 final myWishlistProvider = FutureProvider<List<WishlistItem>>((ref) {
   ref.watch(authStateProvider);
@@ -23,24 +24,41 @@ final myWishlistProvider = FutureProvider<List<WishlistItem>>((ref) {
 /// flips the cached set immediately and only talks to the network in the
 /// background, reverting on failure.
 class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
+  int _generation = 0;
+  final _pendingIds = <String>{};
+  bool isUpdating(String productId) => _pendingIds.contains(productId);
+
   @override
   AsyncValue<Set<String>> build() {
-    ref.watch(authStateProvider);
+    ref.watch(currentUserIdProvider);
+    _generation++;
+    _pendingIds.clear();
+    ref.onDispose(() {
+      _generation++;
+      _pendingIds.clear();
+    });
     _load();
     return const AsyncLoading();
   }
 
   Future<void> _load() async {
+    final generation = _generation;
     try {
-      final ids = await ref.read(wishlistRepositoryProvider).fetchMyWishlistProductIds();
-      state = AsyncData(ids);
+      final ids = await ref
+          .read(wishlistRepositoryProvider)
+          .fetchMyWishlistProductIds();
+      if (generation == _generation) state = AsyncData(ids);
     } catch (e, st) {
-      state = AsyncError(e, st);
+      if (generation == _generation) state = AsyncError(e, st);
     }
   }
 
   Future<void> toggle(String productId, bool currentlyFavorited) async {
-    final current = state.valueOrNull ?? {};
+    if (_pendingIds.contains(productId)) return;
+    final current = state.valueOrNull;
+    if (current == null) throw StateError('Wishlist is not loaded yet');
+    final generation = _generation;
+    _pendingIds.add(productId);
     final optimistic = {...current};
     if (currentlyFavorited) {
       optimistic.remove(productId);
@@ -57,17 +75,31 @@ class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
         await repo.add(productId);
       }
     } catch (_) {
-      // Revert to the pre-toggle set on failure — the network call is the
-      // source of truth, the optimistic flip was only a guess.
-      state = AsyncData(current);
+      // Revert only this product; unrelated successful updates stay intact.
+      if (generation == _generation) {
+        final restored = {...?state.valueOrNull};
+        if (currentlyFavorited) {
+          restored.add(productId);
+        } else {
+          restored.remove(productId);
+        }
+        state = AsyncData(restored);
+      }
       rethrow;
+    } finally {
+      if (generation == _generation) {
+        _pendingIds.remove(productId);
+        final latest = state.valueOrNull;
+        if (latest != null) state = AsyncData(Set.of(latest));
+      }
     }
   }
 }
 
 final wishlistProductIdsProvider =
     NotifierProvider<WishlistIdsNotifier, AsyncValue<Set<String>>>(
-        WishlistIdsNotifier.new);
+      WishlistIdsNotifier.new,
+    );
 
 /// Toggles a product's wishlist membership. Callers (product card /
 /// detail) are expected to have already confirmed the user is logged in
@@ -88,5 +120,6 @@ class WishlistController {
   }
 }
 
-final wishlistControllerProvider =
-    Provider<WishlistController>((ref) => WishlistController(ref));
+final wishlistControllerProvider = Provider<WishlistController>(
+  (ref) => WishlistController(ref),
+);

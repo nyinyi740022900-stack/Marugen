@@ -16,6 +16,7 @@ import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/models/product.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/domain/cart_item.dart';
+import '../../orders/presentation/purchase_intent.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/reviews_section.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
@@ -51,13 +52,21 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   late final TabController _tabController;
   final _scrollController = ScrollController();
   final _overviewKey = GlobalKey();
+  final _variantKey = GlobalKey();
+  final _sizeKey = GlobalKey();
+  final _optionsFocus = FocusNode();
+  final _sizeFocus = FocusNode();
   final _detailsKey = GlobalKey();
   final _reviewsKey = GlobalKey();
   final _recommendationsKey = GlobalKey();
   bool _userTappedTab = false;
 
-  List<GlobalKey> get _sectionKeys =>
-      [_overviewKey, _detailsKey, _reviewsKey, _recommendationsKey];
+  List<GlobalKey> get _sectionKeys => [
+    _overviewKey,
+    _detailsKey,
+    _reviewsKey,
+    _recommendationsKey,
+  ];
 
   @override
   void initState() {
@@ -71,6 +80,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _tabController.dispose();
+    _optionsFocus.dispose();
+    _sizeFocus.dispose();
     super.dispose();
   }
 
@@ -102,28 +113,66 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
     final box = ctx.findRenderObject() as RenderBox;
     final currentGlobalY = box.localToGlobal(Offset.zero).dy;
     final targetOffset =
-        (_scrollController.offset + currentGlobalY - _stickyThresholdY)
-            .clamp(0.0, _scrollController.position.maxScrollExtent);
+        (_scrollController.offset + currentGlobalY - _stickyThresholdY).clamp(
+          0.0,
+          _scrollController.position.maxScrollExtent,
+        );
 
     setState(() {
       _userTappedTab = true;
       _tabController.index = index;
     });
-    await _scrollController.animateTo(
-      targetOffset,
-      duration: const Duration(milliseconds: 350),
-      curve: Curves.easeInOut,
+    try {
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _scrollController.jumpTo(targetOffset);
+      } else {
+        await _scrollController.animateTo(
+          targetOffset,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+        );
+      }
+    } finally {
+      _userTappedTab = false;
+    }
+  }
+
+  Future<void> _selectOptions() async {
+    final key = _selectedVariant == null && _variantKey.currentContext != null
+        ? _variantKey
+        : _sizeKey;
+    final target = key.currentContext;
+    if (target == null) return;
+    await Scrollable.ensureVisible(
+      target,
+      alignment: 0.35,
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 300),
     );
-    _userTappedTab = false;
+    if (mounted) {
+      (key == _variantKey ? _optionsFocus : _sizeFocus).requestFocus();
+    }
   }
 
   Future<void> _contactShop(Product product) async {
-    final settings = await ref.read(shopSettingsProvider.future);
-    final phone = settings['shop_phone'] as String? ?? '';
-    await launchShopContact(
-      phone,
-      message: "Hi, I'm interested in ${product.name}",
-    );
+    try {
+      final settings = await ref.read(shopSettingsProvider.future);
+      if (!mounted) return;
+      await contactShop(
+        context,
+        settings['shop_phone'] as String? ?? '',
+        message: "Hi, I'm interested in ${product.name}",
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Shop contact is unavailable. Please try again.'),
+          ),
+        );
+      }
+    }
   }
 
   /// Shared by Add to Cart and Buy Now so both respect the selected
@@ -167,7 +216,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
       selectedVariant: _selectedVariant,
       selectedSize: product.hasSizeOptions ? _selectedSize : null,
     );
-    context.push('/checkout', extra: [item]);
+    beginCheckout(context, ref, buyNowItems: [item]);
   }
 
   @override
@@ -183,7 +232,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               title: 'Product not found',
               subtitle: 'It may have been removed or is no longer available.',
               actionLabel: 'Back to Shop',
-              onAction: () => context.canPop() ? context.pop() : context.go('/'),
+              onAction: () =>
+                  context.canPop() ? context.pop() : context.go('/'),
             );
           }
           // Reset the selection if we've navigated to a different product
@@ -234,17 +284,21 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                     // only fixable before by tapping into
                                     // the fullscreen gallery.
                                     child: Container(
-                                      color: AppColors.charcoal,
+                                      color: AppColors.black,
                                       child: CachedNetworkImage(
                                         imageUrl: url,
                                         fit: BoxFit.contain,
-                                        placeholder: (_, _) =>
-                                            Container(color: AppColors.offWhite),
+                                        placeholder: (_, _) => Container(
+                                          color: AppPalette.of(context)
+                                              .background,
+                                        ),
                                         errorWidget: (_, _, _) => Container(
-                                          color: AppColors.offWhite,
-                                          child: const Icon(
+                                          color: AppPalette.of(context)
+                                              .background,
+                                          child: Icon(
                                             Icons.image_not_supported_outlined,
-                                            color: AppColors.greySoft,
+                                            color: AppPalette.of(context)
+                                                .textMuted,
                                           ),
                                         ),
                                       ),
@@ -273,11 +327,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                           ],
                         )
                       : Container(
-                          color: AppColors.charcoal,
-                          child: const Icon(
+                          color: AppPalette.of(context).surfaceMuted,
+                          child: Icon(
                             Icons.water,
                             size: 48,
-                            color: AppColors.greySoft,
+                            color: AppPalette.of(context).textMuted,
                           ),
                         ),
                 ),
@@ -287,6 +341,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                 delegate: _PdpTabBarDelegate(
                   height: _tabBarHeight,
                   child: TabBar(
+                    isScrollable: true,
                     controller: _tabController,
                     onTap: _onTabTap,
                     // The app's shared TabBarThemeData styles white labels
@@ -296,9 +351,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                     // Labels are also kept short (not "Product Details" /
                     // "Recommendations") so all 4 fit without truncation
                     // on a standard phone width.
-                    labelColor: AppColors.black,
-                    unselectedLabelColor: AppColors.grey,
-                    indicatorColor: AppColors.red,
+                    labelColor: AppPalette.of(context).text,
+                    unselectedLabelColor: AppPalette.of(context).textMuted,
+                    indicatorColor: AppPalette.of(context).accent,
                     dividerColor: Colors.transparent,
                     labelStyle: const TextStyle(
                       fontSize: 13,
@@ -320,8 +375,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               SliverToBoxAdapter(
                 child: Container(
                   key: _overviewKey,
-                  decoration: const BoxDecoration(
-                    color: AppColors.offWhite,
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).background,
                   ),
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
@@ -339,103 +394,123 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      if (product.hasVariants || product.hasSizeOptions) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          'Choose the listed option and size for your order. Price and availability update with your selection. If you need help choosing, contact the shop.',
+                          style: TextStyle(
+                            color: AppPalette.of(context).textMuted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
                       if (product.hasVariants) ...[
                         const SizedBox(height: AppSpacing.md),
                         Text(
+                          key: _variantKey,
                           product.hasSizeOptions
                               ? 'WEIGHT'
-                              : (product.isLiveFish ? 'CHOOSE FISH' : 'OPTIONS'),
-                          style: const TextStyle(
+                              : (product.isLiveFish
+                                    ? 'CHOOSE FISH'
+                                    : 'OPTIONS'),
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
                             letterSpacing: 0.8,
-                            color: AppColors.grey,
+                            color: AppPalette.of(context).textMuted,
                           ),
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        Wrap(
-                          spacing: AppSpacing.sm,
-                          runSpacing: AppSpacing.sm,
-                          children: [
-                            for (final v in product.variants)
-                              Builder(
-                                builder: (_) {
-                                  final weightStock = product.hasSizeOptions
-                                      ? product.sizeOptions.fold<int>(
-                                          0,
-                                          (s, size) {
+                        Focus(
+                          focusNode: _optionsFocus,
+                          child: Wrap(
+                            spacing: AppSpacing.sm,
+                            runSpacing: AppSpacing.sm,
+                            children: [
+                              for (final v in product.variants)
+                                Builder(
+                                  builder: (_) {
+                                    final weightStock = product.hasSizeOptions
+                                        ? product.sizeOptions.fold<int>(0, (
+                                            s,
+                                            size,
+                                          ) {
                                             final q = product.stockFor(
                                               variantId: v.id,
                                               size: size,
                                             );
                                             return s + (q > 0 ? q : 0);
-                                          },
-                                        )
-                                      : v.stockQuantity;
-                                  final inStock = weightStock > 0;
-                                  return ChoiceChip(
-                                    label: Text(
-                                      inStock
-                                          ? v.label
-                                          : '${v.label} (Sold out)',
-                                    ),
-                                    selected: _selectedVariant?.id == v.id,
-                                    showCheckmark: false,
-                                    onSelected: inStock
-                                        ? (_) => setState(() {
-                                            _selectedVariant = v;
-                                            _quantity = 1;
                                           })
-                                        : null,
-                                  );
-                                },
-                              ),
-                          ],
+                                        : v.stockQuantity;
+                                    final inStock = weightStock > 0;
+                                    return ChoiceChip(
+                                      label: Text(
+                                        inStock
+                                            ? v.label
+                                            : '${v.label} (Sold out)',
+                                      ),
+                                      selected: _selectedVariant?.id == v.id,
+                                      showCheckmark: false,
+                                      onSelected: inStock
+                                          ? (_) => setState(() {
+                                              _selectedVariant = v;
+                                              _quantity = 1;
+                                            })
+                                          : null,
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
                         ),
                       ],
                       if (product.hasSizeOptions) ...[
                         const SizedBox(height: AppSpacing.md),
-                        const Text(
+                        Text(
+                          key: _sizeKey,
                           'SIZE',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
                             letterSpacing: 0.8,
-                            color: AppColors.grey,
+                            color: AppPalette.of(context).textMuted,
                           ),
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        Wrap(
-                          spacing: AppSpacing.sm,
-                          runSpacing: AppSpacing.sm,
-                          children: [
-                            for (final size in product.sizeOptions)
-                              Builder(
-                                builder: (_) {
-                                  final sizeStock = _selectedVariant == null
-                                      ? null
-                                      : product.stockFor(
-                                          variantId: _selectedVariant!.id,
-                                          size: size,
-                                        );
-                                  final soldOut = sizeStock != null &&
-                                      sizeStock <= 0;
-                                  return ChoiceChip(
-                                    label: Text(
-                                      soldOut ? '$size (Sold out)' : size,
-                                    ),
-                                    selected: _selectedSize == size,
-                                    showCheckmark: false,
-                                    onSelected: soldOut
+                        Focus(
+                          focusNode: _sizeFocus,
+                          child: Wrap(
+                            spacing: AppSpacing.sm,
+                            runSpacing: AppSpacing.sm,
+                            children: [
+                              for (final size in product.sizeOptions)
+                                Builder(
+                                  builder: (_) {
+                                    final sizeStock = _selectedVariant == null
                                         ? null
-                                        : (_) => setState(() {
-                                            _selectedSize = size;
-                                            _quantity = 1;
-                                          }),
-                                  );
-                                },
-                              ),
-                          ],
+                                        : product.stockFor(
+                                            variantId: _selectedVariant!.id,
+                                            size: size,
+                                          );
+                                    final soldOut =
+                                        sizeStock != null && sizeStock <= 0;
+                                    return ChoiceChip(
+                                      label: Text(
+                                        soldOut ? '$size (Sold out)' : size,
+                                      ),
+                                      selected: _selectedSize == size,
+                                      showCheckmark: false,
+                                      onSelected: soldOut
+                                          ? null
+                                          : (_) => setState(() {
+                                              _selectedSize = size;
+                                              _quantity = 1;
+                                            }),
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
                         ),
                       ],
                       const SizedBox(height: AppSpacing.sm),
@@ -448,27 +523,32 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                           children: [
                             Text(
                               formatPrice(product.salePrice!),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 20,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.red,
+                                color: AppPalette.of(context).accent,
                               ),
                             ),
                             const SizedBox(width: 8),
                             Text(
                               formatPrice(product.price!),
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14,
-                                color: AppColors.grey,
+                                color: AppPalette.of(context).textMuted,
                                 decoration: TextDecoration.lineThrough,
                               ),
                             ),
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppColors.red,
-                                borderRadius: BorderRadius.circular(AppRadius.sm),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.sm,
+                                ),
                               ),
                               child: Text(
                                 '-${product.discountPercent}%',
@@ -490,10 +570,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                     ? formatPrice(_selectedVariant!.price)
                                     : 'Select an option')
                               : formatPrice(product.price!),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.red,
+                            color: AppPalette.of(context).accent,
                           ),
                         ),
                       ReviewSummary(productId: product.id),
@@ -506,8 +586,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       if (!product.isLiveFish &&
                           product.isPurchasable &&
                           !product.isOutOfStock &&
-                          (!product.hasVariants ||
-                              _selectedVariant != null) &&
+                          (!product.hasVariants || _selectedVariant != null) &&
                           (!product.hasSizeOptions ||
                               _selectedSize != null)) ...[
                         const SizedBox(height: AppSpacing.md),
@@ -526,13 +605,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       const SizedBox(height: AppSpacing.xl),
                       if (product.videoUrl != null &&
                           product.videoUrl!.isNotEmpty) ...[
-                        const Text(
+                        Text(
                           'VIDEO',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
                             letterSpacing: 0.8,
-                            color: AppColors.grey,
+                            color: AppPalette.of(context).textMuted,
                           ),
                         ),
                         const SizedBox(height: AppSpacing.sm),
@@ -545,7 +624,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               SliverToBoxAdapter(
                 child: Container(
                   key: _detailsKey,
-                  color: AppColors.offWhite,
+                  color: AppPalette.of(context).background,
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
                     AppSpacing.xl,
@@ -556,24 +635,27 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (!hasFishDetails && product.description == null)
-                        const Text(
+                        Text(
                           'No additional details for this product.',
-                          style: TextStyle(color: AppColors.grey, fontSize: 13.5),
+                          style: TextStyle(
+                            color: AppPalette.of(context).textMuted,
+                            fontSize: 13.5,
+                          ),
                         ),
                       if (hasFishDetails) ...[
-                        const Text(
+                        Text(
                           'DETAILS',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
                             letterSpacing: 0.8,
-                            color: AppColors.grey,
+                            color: AppPalette.of(context).textMuted,
                           ),
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         Container(
                           decoration: BoxDecoration(
-                            color: AppColors.white,
+                            color: AppPalette.of(context).surface,
                             borderRadius: BorderRadius.circular(AppRadius.md),
                             boxShadow: AppShadows.card,
                           ),
@@ -599,13 +681,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                         const SizedBox(height: AppSpacing.xl),
                       ],
                       if (product.description != null) ...[
-                        const Text(
+                        Text(
                           'DESCRIPTION',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
                             letterSpacing: 0.8,
-                            color: AppColors.grey,
+                            color: AppPalette.of(context).textMuted,
                           ),
                         ),
                         const SizedBox(height: AppSpacing.sm),
@@ -621,7 +703,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               SliverToBoxAdapter(
                 child: Container(
                   key: _reviewsKey,
-                  color: AppColors.offWhite,
+                  color: AppPalette.of(context).background,
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
                     AppSpacing.xl,
@@ -634,7 +716,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               SliverToBoxAdapter(
                 child: Container(
                   key: _recommendationsKey,
-                  color: AppColors.offWhite,
+                  color: AppPalette.of(context).background,
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
                     AppSpacing.xl,
@@ -649,7 +731,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
         },
         loading: () => const ProductDetailSkeleton(),
         error: (e, _) => ErrorState(
-          onRetry: () => ref.invalidate(productDetailProvider(widget.productId)),
+          onRetry: () =>
+              ref.invalidate(productDetailProvider(widget.productId)),
         ),
       ),
       bottomNavigationBar: productAsync.maybeWhen(
@@ -663,8 +746,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               product.hasSizeOptions && !soldOut && _selectedSize == null;
           final needsOptionSelection =
               needsVariantSelection || needsSizeSelection;
-          final canBuy =
-              !soldOut && !contactForPrice && !needsOptionSelection;
+          final canBuy = !soldOut && !contactForPrice && !needsOptionSelection;
 
           return SafeArea(
             child: Container(
@@ -675,7 +757,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                 AppSpacing.md,
               ),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppPalette.of(context).surface,
                 boxShadow: AppShadows.raised,
               ),
               child: Column(
@@ -686,11 +768,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       needsVariantSelection && needsSizeSelection
                           ? 'Select weight and size above to continue'
                           : needsVariantSelection
-                              ? 'Select an option above to continue'
-                              : 'Select a size above to continue',
-                      style: const TextStyle(
+                          ? 'Select an option above to continue'
+                          : 'Select a size above to continue',
+                      style: TextStyle(
                         fontSize: 12.5,
-                        color: AppColors.grey,
+                        color: AppPalette.of(context).textMuted,
                       ),
                     ),
                     const SizedBox(height: AppSpacing.sm),
@@ -726,6 +808,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                           child: OutlinedButton(
                             onPressed: canBuy
                                 ? () => _showCartMessage(_addToCart(product))
+                                : needsOptionSelection
+                                ? _selectOptions
                                 : null,
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(
@@ -736,10 +820,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                             child: Text(
                               needsOptionSelection
                                   ? (needsVariantSelection && needsSizeSelection
-                                      ? 'Select Options'
-                                      : needsSizeSelection
-                                          ? 'Select a Size'
-                                          : 'Select an Option')
+                                        ? 'Select Options'
+                                        : needsSizeSelection
+                                        ? 'Select a Size'
+                                        : 'Select an Option')
                                   : 'Add to Cart',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -789,19 +873,19 @@ class _ChatButton extends StatelessWidget {
     return Tooltip(
       message: 'Chat with shop',
       child: Material(
-        color: AppColors.white,
-        shape: const CircleBorder(
-          side: BorderSide(color: AppColors.lightGrey, width: 1.2),
+        color: AppPalette.of(context).surface,
+        shape: CircleBorder(
+          side: BorderSide(color: AppPalette.of(context).border, width: 1.2),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
-          child: const Padding(
-            padding: EdgeInsets.all(12),
+          child: Padding(
+            padding: EdgeInsets.all(13),
             child: Icon(
               Icons.chat_bubble_outline,
               size: 22,
-              color: AppColors.black,
+              color: AppPalette.of(context).text,
             ),
           ),
         ),
@@ -817,11 +901,7 @@ class _StockLine extends ConsumerWidget {
   final Product product;
   final ProductVariant? variant;
   final String? size;
-  const _StockLine({
-    required this.product,
-    required this.variant,
-    this.size,
-  });
+  const _StockLine({required this.product, required this.variant, this.size});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -841,34 +921,36 @@ class _StockLine extends ConsumerWidget {
     final String label;
     if (available <= 0) {
       icon = Icons.remove_circle_outline;
-      color = AppColors.grey;
+      color = AppPalette.of(context).textMuted;
       label = product.unavailableLabel;
     } else if (product.isLiveFish && !product.hasVariants) {
       // A single fish with no options is one specific animal — "in stock"
       // reads oddly. A batch listing with options is picked per-variety
       // instead, so it falls through to the normal stock messaging below.
       icon = Icons.check_circle_outline;
-      color = AppColors.success;
+      color = AppPalette.of(context).success;
       label = 'Available — one-of-a-kind fish';
     } else if (available <= threshold) {
       icon = Icons.local_fire_department_outlined;
-      color = AppColors.red;
+      color = AppPalette.of(context).accent;
       label = 'Only $available left';
     } else {
       icon = Icons.check_circle_outline;
-      color = AppColors.success;
+      color = AppPalette.of(context).success;
       label = 'In stock';
     }
     return Row(
       children: [
         Icon(icon, size: 16, color: color),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: color,
+        Flexible(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
           ),
         ),
       ],
@@ -894,16 +976,19 @@ class _QuantityStepper extends StatelessWidget {
     final q = quantity.clamp(1, effectiveMax);
     return Row(
       children: [
-        const Text(
+        Text(
           'Quantity',
-          style: TextStyle(fontSize: 13.5, color: AppColors.grey),
+          style: TextStyle(
+            fontSize: 13.5,
+            color: AppPalette.of(context).textMuted,
+          ),
         ),
         const Spacer(),
         Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.pill),
-            border: Border.all(color: AppColors.lightGrey),
+            border: Border.all(color: AppPalette.of(context).border),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -954,13 +1039,15 @@ class _StepButton extends StatelessWidget {
       child: InkWell(
         onTap: enabled ? onTap : null,
         customBorder: const CircleBorder(),
-        // 13px padding + 18px icon = 44px tap target (was 8px = 34px).
+        // 48 logical pixels for touch and keyboard users.
         child: Padding(
           padding: const EdgeInsets.all(13),
           child: Icon(
             icon,
             size: 18,
-            color: enabled ? AppColors.black : AppColors.greySoft,
+            color: enabled
+                ? AppPalette.of(context).text
+                : AppPalette.of(context).textMuted,
           ),
         ),
       ),
@@ -982,19 +1069,19 @@ class _DeliveryInfoCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'DELIVERY',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 12,
             letterSpacing: 0.8,
-            color: AppColors.grey,
+            color: AppPalette.of(context).textMuted,
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
         Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppPalette.of(context).surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
@@ -1041,7 +1128,7 @@ class _InfoRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: AppColors.red),
+        Icon(icon, size: 20, color: AppPalette.of(context).accent),
         const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
@@ -1057,9 +1144,9 @@ class _InfoRow extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 subtitle,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
-                  color: AppColors.grey,
+                  color: AppPalette.of(context).textMuted,
                   height: 1.35,
                 ),
               ),
@@ -1082,20 +1169,46 @@ class _FavoriteAppBarButton extends ConsumerWidget {
     final isLoggedIn = ref.watch(isLoggedInProvider);
     final idsAsync = ref.watch(wishlistProductIdsProvider);
     final isFavorited = idsAsync.valueOrNull?.contains(productId) ?? false;
+    final busy =
+        idsAsync.isLoading ||
+        ref.read(wishlistProductIdsProvider.notifier).isUpdating(productId);
 
     return IconButton(
       tooltip: isFavorited ? 'Remove from wishlist' : 'Add to wishlist',
       icon: Icon(isFavorited ? Icons.favorite : Icons.favorite_border),
-      color: isFavorited ? AppColors.red : AppColors.white,
-      onPressed: () async {
-        if (!isLoggedIn) {
-          context.push('/login');
-          return;
-        }
-        await ref
-            .read(wishlistControllerProvider)
-            .toggle(productId, isFavorited);
-      },
+      color: isFavorited ? AppPalette.of(context).accent : AppColors.white,
+      onPressed: isLoggedIn && busy
+          ? null
+          : () async {
+              if (!isLoggedIn) {
+                context.push('/login');
+                return;
+              }
+              if (idsAsync.hasError) {
+                ref.invalidate(wishlistProductIdsProvider);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Reloading your wishlist. Please try again.'),
+                  ),
+                );
+                return;
+              }
+              try {
+                await ref
+                    .read(wishlistControllerProvider)
+                    .toggle(productId, isFavorited);
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Could not update your wishlist. Please try again.',
+                      ),
+                    ),
+                  );
+                }
+              }
+            },
     );
   }
 }
@@ -1116,25 +1229,26 @@ class _RelatedProductsRow extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'YOU MAY ALSO LIKE',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 12,
                 letterSpacing: 0.8,
-                color: AppColors.grey,
+                color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
-              height: 260,
+              height:
+                  220 + 105 * (MediaQuery.textScalerOf(context).scale(14) / 14),
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: related.length,
                 separatorBuilder: (_, _) =>
                     const SizedBox(width: AppSpacing.md),
                 itemBuilder: (context, i) => SizedBox(
-                  width: 150,
+                  width: 220,
                   child: ProductCard(
                     product: related[i],
                     onTap: () => context.push('/product/${related[i].id}'),
@@ -1165,13 +1279,25 @@ class _SpecRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 13.5, color: AppColors.grey),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13.5,
+                color: AppPalette.of(context).textMuted,
+              ),
+            ),
           ),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),
@@ -1195,11 +1321,12 @@ class _PdpTabBarDelegate extends SliverPersistentHeaderDelegate {
   double get maxExtent => height;
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return ColoredBox(
-      color: AppColors.white,
-      child: child,
-    );
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return ColoredBox(color: AppPalette.of(context).surface, child: child);
   }
 
   @override

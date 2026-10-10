@@ -25,61 +25,78 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 96,
-              height: 96,
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  colors: [
-                    AppColors.redSoft,
-                    AppColors.redSoft.withValues(alpha: 0.35),
-                  ],
-                ),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Container(
-                  width: 60,
-                  height: 60,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
                   decoration: BoxDecoration(
-                    color: AppColors.white,
+                    gradient: RadialGradient(
+                      colors: [
+                        AppPalette.of(context).accentSoft,
+                        AppPalette.of(context).accentSoft
+                            .withValues(alpha: 0.35),
+                      ],
+                    ),
                     shape: BoxShape.circle,
-                    boxShadow: AppShadows.card,
                   ),
-                  child: Icon(icon, size: 28, color: AppColors.red),
+                  child: Center(
+                    child: Container(
+                      width: 60,
+                      height: 60,
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).surface,
+                        shape: BoxShape.circle,
+                        boxShadow: AppShadows.card,
+                      ),
+                      child: Icon(
+                        icon,
+                        size: 28,
+                        color: AppPalette.of(context).accent,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-            ),
-            if (subtitle != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                subtitle!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.grey, fontSize: 13.5, height: 1.4),
-              ),
-            ],
-            if (actionLabel != null && onAction != null) ...[
-              const SizedBox(height: AppSpacing.xl),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: onAction,
-                  child: Text(actionLabel!),
+                const SizedBox(height: AppSpacing.lg),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
                 ),
-              ),
-            ],
-          ],
+                if (subtitle != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppPalette.of(context).textMuted,
+                      fontSize: 13.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+                if (actionLabel != null && onAction != null) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: onAction,
+                      child: Text(actionLabel!),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -107,4 +124,37 @@ class ErrorState extends StatelessWidget {
       onAction: onRetry,
     );
   }
+}
+
+/// Compact recovery for a section inside an already scrollable page.
+class InlineErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const InlineErrorState({
+    super.key,
+    required this.message,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: TextStyle(color: AppPalette.of(context).textMuted),
+          ),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    ),
+  );
 }

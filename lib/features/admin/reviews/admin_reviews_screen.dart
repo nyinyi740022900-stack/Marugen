@@ -17,16 +17,17 @@ import '../../../shared/models/review.dart';
 class AdminReviewsPagedNotifier extends PagedNotifier<ProductReview> {
   @override
   Future<List<ProductReview>> fetchPage(int offset, int limit) {
-    return ref.read(reviewRepositoryProvider).fetchAllReviewsForAdminPage(
-          offset: offset,
-          limit: limit,
-        );
+    return ref
+        .read(reviewRepositoryProvider)
+        .fetchAllReviewsForAdminPage(offset: offset, limit: limit);
   }
 }
 
 final adminReviewsPagedProvider =
-    NotifierProvider<AdminReviewsPagedNotifier, AsyncValue<PagedListState<ProductReview>>>(
-        AdminReviewsPagedNotifier.new);
+    NotifierProvider<
+      AdminReviewsPagedNotifier,
+      AsyncValue<PagedListState<ProductReview>>
+    >(AdminReviewsPagedNotifier.new);
 
 /// Moderate customer reviews — hide abusive ones from the public shop,
 /// and reply publicly to any review (Amazon/Shopee/Lazada/Google Business
@@ -78,10 +79,13 @@ class _AdminReviewsScreenState extends ConsumerState<AdminReviewsScreen> {
             separatorBuilder: (_, _) => const SizedBox(height: 10),
             itemBuilder: (context, i) {
               if (i >= paged.items.length) {
-                return const Padding(
+                return Padding(
                   padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
                   child: Center(
-                    child: CircularProgressIndicator(color: AppColors.red, strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      color: AppPalette.of(context).accent,
+                      strokeWidth: 2,
+                    ),
                   ),
                 );
               }
@@ -89,8 +93,10 @@ class _AdminReviewsScreenState extends ConsumerState<AdminReviewsScreen> {
             },
           );
         },
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.red),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
         ),
         error: (e, _) => ErrorState(
           onRetry: () => ref.read(adminReviewsPagedProvider.notifier).refresh(),
@@ -166,21 +172,32 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                 ),
                 if (review.isHidden)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
-                      color: AppColors.redSoft,
+                      color: AppPalette.of(context).accentSoft,
                       borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
-                    child: const Text('Hidden',
-                        style: TextStyle(
-                            fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.redDark)),
+                    child: Text(
+                      'Hidden',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppPalette.of(context).accent,
+                      ),
+                    ),
                   ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               '${'★' * review.rating}${'☆' * (5 - review.rating)}  ·  ${DateFormat.yMMMd().format(review.createdAt)}',
-              style: const TextStyle(fontSize: 12.5, color: AppColors.grey),
+              style: TextStyle(
+                fontSize: 12.5,
+                color: AppPalette.of(context).textMuted,
+              ),
             ),
             if (review.comment != null && review.comment!.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -192,17 +209,31 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(AppSpacing.md),
                 decoration: BoxDecoration(
-                  color: AppColors.offWhite,
+                  color: AppPalette.of(context).surfaceMuted,
                   borderRadius: BorderRadius.circular(AppRadius.sm),
-                  border: Border(left: BorderSide(color: AppColors.red.withValues(alpha: 0.4), width: 3)),
+                  border: Border(
+                    left: BorderSide(
+                      color: AppPalette.of(context).accent
+                          .withValues(alpha: 0.4),
+                      width: 3,
+                    ),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Your reply',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                    const Text(
+                      'Your reply',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    Text(review.shopReply!, style: const TextStyle(fontSize: 13, height: 1.35)),
+                    Text(
+                      review.shopReply!,
+                      style: const TextStyle(fontSize: 13, height: 1.35),
+                    ),
                   ],
                 ),
               ),
@@ -226,9 +257,9 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                     onPressed: _saving
                         ? null
                         : () => setState(() {
-                              _replying = false;
-                              _replyCtrl.text = review.shopReply ?? '';
-                            }),
+                            _replying = false;
+                            _replyCtrl.text = review.shopReply ?? '';
+                          }),
                     child: const Text('Cancel'),
                   ),
                   const SizedBox(width: 4),
@@ -238,7 +269,10 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                         ? const SizedBox(
                             height: 16,
                             width: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.white,
+                            ),
                           )
                         : const Text('Post Reply'),
                   ),
@@ -256,7 +290,10 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                   ),
                 TextButton(
                   onPressed: () async {
-                    await ReviewRepository().setHidden(review.id, !review.isHidden);
+                    await ReviewRepository().setHidden(
+                      review.id,
+                      !review.isHidden,
+                    );
                     ref.read(adminReviewsPagedProvider.notifier).refresh();
                     // Same gap _saveReply had above: the customer-facing
                     // product page watches this family provider, not the

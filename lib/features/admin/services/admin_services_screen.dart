@@ -40,30 +40,47 @@ class AdminServicesTab extends ConsumerWidget {
                   return Card(
                     child: ListTile(
                       leading: CircleAvatar(
-                        backgroundColor: AppColors.offWhite,
+                        backgroundColor: AppPalette.of(context).surfaceMuted,
                         backgroundImage: s.imageUrls.isNotEmpty
                             ? NetworkImage(s.imageUrls.first)
                             : null,
                         child: s.imageUrls.isEmpty
-                            ? const Icon(Icons.room_service_outlined, color: AppColors.grey)
+                            ? Icon(
+                                Icons.room_service_outlined,
+                                color: AppPalette.of(context).textMuted,
+                              )
                             : null,
                       ),
-                      title: Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        s.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       subtitle: Text(
                         s.active ? (s.category ?? 'Active') : 'Hidden',
-                        style: TextStyle(color: s.active ? AppColors.grey : AppColors.error),
+                        style: TextStyle(
+                          color: s.active
+                              ? AppPalette.of(context).textMuted
+                              : AppPalette.of(context).error,
+                        ),
                       ),
                       trailing: IconButton(
                         tooltip: 'Delete',
-                        icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                        icon: Icon(
+                          Icons.delete_outline,
+                          color: AppPalette.of(context).error,
+                        ),
                         onPressed: () async {
                           final confirmed = await confirmDestructiveAction(
                             context,
                             title: 'Delete service?',
-                            message: 'This permanently removes "${s.name}". This cannot be undone.',
+                            message:
+                                'This permanently removes "${s.name}". This cannot be undone.',
                           );
                           if (!confirmed) return;
-                          await ref.read(serviceRepositoryProvider).deleteService(s.id);
+                          await ref
+                              .read(serviceRepositoryProvider)
+                              .deleteService(s.id);
                           ref.invalidate(servicesProvider);
                         },
                       ),
@@ -72,15 +89,22 @@ class AdminServicesTab extends ConsumerWidget {
                   );
                 },
               ),
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.red),
+        loading: () => Center(
+          child: CircularProgressIndicator(
+            color: AppPalette.of(context).accent,
+          ),
         ),
-        error: (e, _) => ErrorState(onRetry: () => ref.invalidate(servicesProvider)),
+        error: (e, _) =>
+            ErrorState(onRetry: () => ref.invalidate(servicesProvider)),
       ),
     );
   }
 
-  void _showServiceForm(BuildContext context, WidgetRef ref, {Service? existing}) {
+  void _showServiceForm(
+    BuildContext context,
+    WidgetRef ref, {
+    Service? existing,
+  }) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -100,10 +124,15 @@ class _ServiceFormSheet extends ConsumerStatefulWidget {
 
 class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
   late final _nameCtrl = TextEditingController(text: widget.existing?.name);
-  late final _descCtrl = TextEditingController(text: widget.existing?.description);
-  late final _priceCtrl =
-      TextEditingController(text: widget.existing?.price?.toString());
-  late final _categoryCtrl = TextEditingController(text: widget.existing?.category);
+  late final _descCtrl = TextEditingController(
+    text: widget.existing?.description,
+  );
+  late final _priceCtrl = TextEditingController(
+    text: widget.existing?.price?.toString(),
+  );
+  late final _categoryCtrl = TextEditingController(
+    text: widget.existing?.category,
+  );
   late bool _showPrice = widget.existing?.showPrice ?? true;
   late bool _active = widget.existing?.active ?? true;
 
@@ -137,10 +166,16 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
       final repo = ref.read(serviceRepositoryProvider);
       final payload = <String, dynamic>{
         'name': _nameCtrl.text.trim(),
-        'description': _descCtrl.text.trim().isEmpty ? null : _descCtrl.text.trim(),
-        'price': _priceCtrl.text.trim().isEmpty ? null : double.tryParse(_priceCtrl.text.trim()),
+        'description': _descCtrl.text.trim().isEmpty
+            ? null
+            : _descCtrl.text.trim(),
+        'price': _priceCtrl.text.trim().isEmpty
+            ? null
+            : double.tryParse(_priceCtrl.text.trim()),
         'show_price': _showPrice,
-        'category': _categoryCtrl.text.trim().isEmpty ? null : _categoryCtrl.text.trim(),
+        'category': _categoryCtrl.text.trim().isEmpty
+            ? null
+            : _categoryCtrl.text.trim(),
         'active': _active,
       };
 
@@ -170,7 +205,8 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -191,20 +227,25 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.existing == null ? 'Add Service' : 'Edit Service',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              widget.existing == null ? 'Add Service' : 'Edit Service',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: AppSpacing.lg),
             TextField(
               controller: _nameCtrl,
               decoration: const InputDecoration(
-                  labelText: 'Service name',
-                  hintText: 'e.g. Fish Recovery & Quarantine'),
+                labelText: 'Service name',
+                hintText: 'e.g. Fish Recovery & Quarantine',
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _categoryCtrl,
               decoration: const InputDecoration(
-                  labelText: 'Category (optional)', hintText: 'e.g. Health Care'),
+                labelText: 'Category (optional)',
+                hintText: 'e.g. Health Care',
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             TextField(
@@ -215,8 +256,12 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _priceCtrl,
-              decoration: const InputDecoration(labelText: 'Price (SGD, optional)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Price (SGD, optional)',
+              ),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
             ),
             const SizedBox(height: AppSpacing.sm),
             SwitchListTile(
@@ -234,12 +279,15 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
               onChanged: (v) => setState(() => _active = v),
             ),
             const SizedBox(height: AppSpacing.md),
-            const Text('PHOTOS',
-                style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                    letterSpacing: 0.8,
-                    color: AppColors.grey)),
+            Text(
+              'PHOTOS',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+                letterSpacing: 0.8,
+                color: AppPalette.of(context).textMuted,
+              ),
+            ),
             const SizedBox(height: AppSpacing.sm),
             Wrap(
               spacing: 8,
@@ -250,14 +298,24 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(AppRadius.sm),
-                        child: Image.network(url, width: 72, height: 72, fit: BoxFit.cover),
+                        child: Image.network(
+                          url,
+                          width: 72,
+                          height: 72,
+                          fit: BoxFit.cover,
+                        ),
                       ),
                       Positioned(
                         top: -6,
                         right: -6,
                         child: IconButton(
-                          icon: const Icon(Icons.cancel, size: 18, color: AppColors.error),
-                          onPressed: () => setState(() => _existingImageUrls.remove(url)),
+                          icon: Icon(
+                            Icons.cancel,
+                            size: 18,
+                            color: AppPalette.of(context).error,
+                          ),
+                          onPressed: () =>
+                              setState(() => _existingImageUrls.remove(url)),
                         ),
                       ),
                     ],
@@ -277,10 +335,13 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: AppColors.offWhite,
+                      color: AppPalette.of(context).surfaceMuted,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
-                    child: const Icon(Icons.add_a_photo_outlined, color: AppColors.grey),
+                    child: Icon(
+                      Icons.add_a_photo_outlined,
+                      color: AppPalette.of(context).textMuted,
+                    ),
                   ),
                 ),
               ],
@@ -292,7 +353,11 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
                   ? const SizedBox(
                       height: 18,
                       width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.white))
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
                   : const Text('Save'),
             ),
           ],
@@ -311,6 +376,12 @@ class _PickedImageThumb extends StatelessWidget {
     return FutureBuilder<Uint8List>(
       future: file.readAsBytes(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Icon(
+            Icons.broken_image_outlined,
+            color: AppPalette.of(context).textMuted,
+          );
+        }
         if (!snapshot.hasData) return const SizedBox.shrink();
         return Image.memory(snapshot.data!, fit: BoxFit.cover);
       },

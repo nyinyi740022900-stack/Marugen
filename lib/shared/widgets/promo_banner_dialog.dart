@@ -91,17 +91,19 @@ class _PromoBannerCard extends StatelessWidget {
                   placeholder: (_, _) => SizedBox(
                     height: 200,
                     width: placeholderWidth,
-                    child: const Center(
-                      child: CircularProgressIndicator(color: AppColors.red),
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        color: AppPalette.of(context).accent,
+                      ),
                     ),
                   ),
                   errorWidget: (_, _, _) => SizedBox(
                     height: 200,
                     width: placeholderWidth,
-                    child: const Center(
+                    child: Center(
                       child: Icon(
                         Icons.image_not_supported_outlined,
-                        color: AppColors.greySoft,
+                        color: AppPalette.of(context).textMuted,
                         size: 40,
                       ),
                     ),

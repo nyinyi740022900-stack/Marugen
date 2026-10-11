@@ -151,83 +151,104 @@ class _TransactionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final rawId = order.stripePaymentIntentId ?? '';
     final shortId = rawId.length > 20 ? '${rawId.substring(0, 20)}…' : rawId;
+    final identity = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          shortId,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12.5,
+            color: AppPalette.of(context).textMuted,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          DateFormat.yMMMd().add_jm().format(order.createdAt),
+          style: TextStyle(
+            fontSize: 11.5,
+            color: AppPalette.of(context).textMuted,
+          ),
+        ),
+      ],
+    );
+    final amount = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          'S\$${order.total.toStringAsFixed(2)}',
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5),
+        ),
+        const SizedBox(height: 3),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: _statusColor(context).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+          ),
+          child: Text(
+            orderStatusLabel(order.status).toUpperCase(),
+            style: TextStyle(
+              fontSize: 10,
+              color: _statusColor(context),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+      ],
+    );
+    final icon = Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: AppPalette.of(context).surfaceMuted,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.credit_card_outlined,
+        size: 17,
+        color: AppPalette.of(context).textMuted,
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
         vertical: AppSpacing.md,
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: AppPalette.of(context).surfaceMuted,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.credit_card_outlined,
-              size: 17,
-              color: AppPalette.of(context).textMuted,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact =
+              constraints.maxWidth < 300 ||
+              MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3;
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  shortId,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: AppPalette.of(context).textMuted,
-                  ),
+                Row(
+                  children: [
+                    icon,
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(child: identity),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  DateFormat.yMMMd().add_jm().format(order.createdAt),
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: AppPalette.of(context).textMuted,
-                  ),
-                ),
+                const SizedBox(height: AppSpacing.sm),
+                Align(alignment: Alignment.centerRight, child: amount),
               ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            );
+          }
+          return Row(
             children: [
-              Text(
-                'S\$${order.total.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14.5,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _statusColor(context).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                ),
-                child: Text(
-                  orderStatusLabel(order.status).toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: _statusColor(context),
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
+              icon,
+              const SizedBox(width: AppSpacing.md),
+              Expanded(child: identity),
+              const SizedBox(width: AppSpacing.sm),
+              amount,
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../../shared/models/product.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/product_grid.dart';
 import '../../shop/data/product_repository.dart';
 import '../../shop/presentation/shop_providers.dart';
 
@@ -70,7 +71,7 @@ class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
             child: _AdminSearchField(),
           ),
           SizedBox(
-            height: 48,
+            height: 32 + MediaQuery.textScalerOf(context).scale(24),
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(
@@ -183,73 +184,69 @@ class _ProductGrid extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return CustomScrollView(
-      controller: scrollController,
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-            AppSpacing.md,
-          ),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: AppSpacing.md,
-              crossAxisSpacing: AppSpacing.md,
-              childAspectRatio: 0.6,
-            ),
-            delegate: SliverChildBuilderDelegate((context, i) {
-              final product = products[i];
-              return Stack(
-                children: [
-                  ProductCard(
-                    product: product,
-                    onTap: () => context.push('/admin/products/${product.id}'),
-                    // Favoriting is a customer affordance — admin has no
-                    // use for it, and it collides with the sold-toggle
-                    // below in the same corner.
-                    showFavoriteToggle: false,
-                  ),
-                  // One-tap "mark sold/unavailable" for a single live
-                  // fish — a farm admin selling a koi/arowana in
-                  // person (at a show, or a walk-in) needs to pull it
-                  // from the app immediately without opening the full
-                  // edit form. Not shown for a batch listing with fish
-                  // options: each option's own stock field is the
-                  // right place to mark that one sold. Regular
-                  // restockable goods don't get this either: their
-                  // "how many are left" question is better answered by
-                  // the numeric stock field in the edit form.
-                  if (product.isLiveFish && !product.hasVariants)
-                    Positioned(
-                      top: 6,
-                      right: 6,
-                      child: _AvailabilityToggle(product: product, ref: ref),
+    return LayoutBuilder(
+      builder: (context, constraints) => CustomScrollView(
+        controller: scrollController,
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            sliver: SliverGrid(
+              gridDelegate: productGridDelegate(
+                context,
+                constraints.maxWidth - 32,
+              ),
+              delegate: SliverChildBuilderDelegate((context, i) {
+                final product = products[i];
+                return Stack(
+                  children: [
+                    ProductCard(
+                      product: product,
+                      onTap: () =>
+                          context.push('/admin/products/${product.id}'),
+                      // Favoriting is a customer affordance — admin has no
+                      // use for it, and it collides with the sold-toggle
+                      // below in the same corner.
+                      showFavoriteToggle: false,
                     ),
-                ],
-              );
-            }, childCount: products.length),
+                    // One-tap "mark sold/unavailable" for a single live
+                    // fish — a farm admin selling a koi/arowana in
+                    // person (at a show, or a walk-in) needs to pull it
+                    // from the app immediately without opening the full
+                    // edit form. Not shown for a batch listing with fish
+                    // options: each option's own stock field is the
+                    // right place to mark that one sold. Regular
+                    // restockable goods don't get this either: their
+                    // "how many are left" question is better answered by
+                    // the numeric stock field in the edit form.
+                    if (product.isLiveFish && !product.hasVariants)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: _AvailabilityToggle(product: product, ref: ref),
+                      ),
+                  ],
+                );
+              }, childCount: products.length),
+            ),
           ),
-        ),
-        if (trailingLoader)
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
-              child: Center(
-                child: CircularProgressIndicator(
-                  color: AppColors.red,
-                  strokeWidth: 2,
+          if (trailingLoader)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: AppColors.red,
+                    strokeWidth: 2,
+                  ),
                 ),
               ),
+            )
+          else
+            const SliverToBoxAdapter(
+              child: SizedBox(height: AppSpacing.xxxl + AppSpacing.xl),
             ),
-          )
-        else
-          const SliverToBoxAdapter(
-            child: SizedBox(height: AppSpacing.xxxl + AppSpacing.xl),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

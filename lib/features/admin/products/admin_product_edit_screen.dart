@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -480,6 +481,11 @@ class _AdminProductEditScreenState
             ),
             const SizedBox(height: AppSpacing.md),
             DropdownButtonFormField<ProductCategory>(
+              isExpanded: true,
+              itemHeight: math.max(
+                kMinInteractiveDimension,
+                32 + MediaQuery.textScalerOf(context).scale(16),
+              ),
               initialValue: _category,
               decoration: const InputDecoration(labelText: 'Category'),
               items: [
@@ -866,6 +872,34 @@ class _VariantEditRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final label = TextFormField(
+      controller: row.labelCtrl,
+      onChanged: onLabelChanged,
+      decoration: InputDecoration(
+        labelText: 'Label',
+        hintText: labelHint,
+        isDense: true,
+      ),
+    );
+    final price = TextFormField(
+      controller: row.priceCtrl,
+      decoration: const InputDecoration(labelText: 'Price', isDense: true),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    );
+    final stock = TextFormField(
+      controller: row.stockCtrl,
+      decoration: const InputDecoration(labelText: 'Stock', isDense: true),
+      keyboardType: TextInputType.number,
+    );
+    final remove = IconButton(
+      tooltip: 'Remove option',
+      icon: Icon(
+        Icons.close,
+        size: 18,
+        color: AppPalette.of(context).textMuted,
+      ),
+      onPressed: onRemove,
+    );
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
@@ -873,60 +907,47 @@ class _VariantEditRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.sm),
         boxShadow: AppShadows.card,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 3,
-            child: TextFormField(
-              controller: row.labelCtrl,
-              onChanged: onLabelChanged,
-              decoration: InputDecoration(
-                labelText: 'Label',
-                hintText: labelHint,
-                isDense: true,
-              ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            flex: 2,
-            child: TextFormField(
-              controller: row.priceCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Price',
-                isDense: true,
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-            ),
-          ),
-          if (!hideStock) ...[
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              flex: 2,
-              child: TextFormField(
-                controller: row.stockCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Stock',
-                  isDense: true,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 520 ||
+              MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3) {
+            return Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: label),
+                    remove,
+                  ],
                 ),
-                keyboardType: TextInputType.number,
-              ),
-            ),
-          ],
-          IconButton(
-            icon: Icon(
-              Icons.close,
-              size: 18,
-              color: AppPalette.of(context).textMuted,
-            ),
-            onPressed: onRemove,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: price),
+                    if (!hideStock) ...[
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(child: stock),
+                    ],
+                  ],
+                ),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(flex: 3, child: label),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(flex: 2, child: price),
+              if (!hideStock) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(flex: 2, child: stock),
+              ],
+              remove,
+            ],
+          );
+        },
       ),
     );
   }

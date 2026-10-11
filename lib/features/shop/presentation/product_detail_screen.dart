@@ -11,6 +11,7 @@ import '../../../shared/utils/view_tracker.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/fullscreen_image_gallery.dart';
 import '../../../shared/widgets/product_card.dart';
+import '../../../shared/widgets/product_grid.dart';
 import '../../../shared/widgets/product_video_player.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../../shared/models/product.dart';
@@ -974,7 +975,11 @@ class _QuantityStepper extends StatelessWidget {
   Widget build(BuildContext context) {
     final effectiveMax = max < 1 ? 1 : max;
     final q = quantity.clamp(1, effectiveMax);
-    return Row(
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: AppSpacing.md,
+      runSpacing: AppSpacing.sm,
       children: [
         Text(
           'Quantity',
@@ -983,7 +988,6 @@ class _QuantityStepper extends StatelessWidget {
             color: AppPalette.of(context).textMuted,
           ),
         ),
-        const Spacer(),
         Container(
           decoration: BoxDecoration(
             color: AppPalette.of(context).surface,
@@ -1240,8 +1244,7 @@ class _RelatedProductsRow extends ConsumerWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
-              height:
-                  220 + 105 * (MediaQuery.textScalerOf(context).scale(14) / 14),
+              height: productCardExtent(context, 220),
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: related.length,

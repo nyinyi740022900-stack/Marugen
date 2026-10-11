@@ -17,6 +17,72 @@ import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
 import 'package:marugen_app/features/wishlist/presentation/wishlist_providers.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    for (final width in [360.0, 390.0]) {
+      for (final scale in [1.0, 1.3]) {
+        testWidgets(
+          'two products share a row on $platform at $width / $scale',
+          (tester) async {
+            tester.view.physicalSize = Size(width, 900);
+            tester.view.devicePixelRatio = 1;
+            addTearDown(tester.view.resetPhysicalSize);
+            addTearDown(tester.view.resetDevicePixelRatio);
+            final product = Product.fromMap({
+              'id': 'p',
+              'name': 'Marugen Special Mix High Growth Food',
+              'category': 'fish_food',
+              'price': 118.80,
+              'stock_quantity': 10,
+              'avg_rating': 4.8,
+              'review_count': 999,
+              'sold_count': 12345,
+            });
+            await tester.pumpWidget(
+              ProviderScope(
+                overrides: [
+                  isLoggedInProvider.overrideWithValue(false),
+                  wishlistProductIdsProvider.overrideWith(_EmptyWishlist.new),
+                  shopSettingsProvider.overrideWith((ref) async => {}),
+                ],
+                child: MaterialApp(
+                  theme: ThemeData(platform: platform),
+                  builder: (context, child) => MediaQuery(
+                    data: MediaQuery.of(context)
+                        .copyWith(textScaler: TextScaler.linear(scale)),
+                    child: child!,
+                  ),
+                  home: Scaffold(
+                    body: ProductGrid(
+                      itemCount: 4,
+                      itemBuilder: (_, i) => ProductCard(product: product),
+                    ),
+                  ),
+                ),
+              ),
+            );
+            await tester.pump();
+            final cards = find.byType(ProductCard);
+            expect(
+              tester.getTopLeft(cards.at(0)).dy,
+              tester.getTopLeft(cards.at(1)).dy,
+            );
+            expect(
+              tester.getTopLeft(cards.at(2)).dy,
+              greaterThan(tester.getTopLeft(cards.at(0)).dy),
+            );
+            expect(
+              tester
+                  .getSize(find.byTooltip('Add ${product.name} to cart').first)
+                  .width,
+              greaterThanOrEqualTo(48),
+            );
+            expect(tester.takeException(), isNull);
+          },
+        );
+      }
+    }
+  }
+
   testWidgets('grid prices align for one and two line product names', (
     tester,
   ) async {
@@ -105,7 +171,7 @@ void main() {
     );
     expect(find.byTooltip('Save ${product.name} to wishlist'), findsOneWidget);
   });
-  for (final width in [320.0, 390.0, 1024.0]) {
+  for (final width in [320.0, 360.0, 390.0, 1024.0]) {
     testWidgets('long card names at double text scale fit width $width', (
       tester,
     ) async {

@@ -7,8 +7,66 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:marugen_app/core/theme/theme_preference.dart';
 import 'package:marugen_app/core/theme/appearance_tile.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
+import 'package:marugen_app/features/shop/presentation/shop_screen.dart';
+import 'package:marugen_app/features/shop/presentation/shop_providers.dart';
+import 'package:marugen_app/features/cart/presentation/cart_providers.dart';
+import 'package:marugen_app/features/notifications/presentation/notification_providers.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets(
+      'shop corner appearance control changes and saves theme on $platform',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        tester.view.physicalSize = const Size(360, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              productListProvider.overrideWith((ref) async => []),
+              cartCountProvider.overrideWith((ref) => 0),
+              unreadNotificationCountProvider.overrideWith((ref) => 0),
+            ],
+            child: Consumer(
+              builder: (context, ref, _) => MaterialApp(
+                theme: AppTheme.light.copyWith(platform: platform),
+                darkTheme: AppTheme.dark.copyWith(platform: platform),
+                themeMode: ref.watch(themeModeProvider),
+                home: const ShopScreen(),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final button = find.byTooltip('Appearance');
+        expect(button, findsOneWidget);
+        expect(tester.getSize(button).width, greaterThanOrEqualTo(48));
+        expect(tester.getTopRight(button).dx, greaterThanOrEqualTo(352));
+        for (final choice in ['Dark', 'Light', 'System']) {
+          await tester.tap(button);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text(choice));
+          await tester.pumpAndSettle();
+          expect(
+            (await SharedPreferences.getInstance()).getString(
+              'appearance_mode',
+            ),
+            choice.toLowerCase(),
+          );
+          if (choice != 'System') {
+            expect(
+              Theme.of(tester.element(find.byType(ShopScreen))).brightness,
+              choice == 'Dark' ? Brightness.dark : Brightness.light,
+            );
+          }
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   test('late preference loading never replaces a new user choice', () async {
     SharedPreferences.setMockInitialValues({'appearance_mode': 'light'});
     final pending = Completer<SharedPreferences>();

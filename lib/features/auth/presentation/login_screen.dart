@@ -74,57 +74,54 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: ContentWidth(
         maxWidth: 560,
         child: SafeArea(
-          child: Column(
-            children: [
-              // Brand hero — white panel so the black seal logo stays visible.
-              // Sized to shrink on short screens (small phones, or a phone in
-              // split-screen) rather than push the form sheet below it out of
-              // the fixed viewport: the form sheet is the one thing below that
-              // scrolls, so on a short screen the user could scroll it and
-              // still never see "Welcome back" (scrolled up, under this fixed
-              // hero) and the "Sign up" link (scrolled down, past the visible
-              // area) at the same time. Shrinking this hero on short screens
-              // keeps the whole form sheet on screen without scrolling.
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  AppSpacing.xl,
-                  MediaQuery.of(context).size.height < 700
-                      ? AppSpacing.md
-                      : AppSpacing.xl,
-                  AppSpacing.xl,
-                  AppSpacing.md,
-                ),
-                child: Column(
-                  children: [
-                    BrandLogo(
-                      size: MediaQuery.of(context).size.height < 700 ? 64 : 88,
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text(
-                      'MARUGEN FISH FARM',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppPalette.of(context).text,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 3,
+          child: CustomScrollView(
+            slivers: [
+              // The hero and form scroll together, including above the keyboard.
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    AppSpacing.xl,
+                    MediaQuery.of(context).size.height < 700
+                        ? AppSpacing.md
+                        : AppSpacing.xl,
+                    AppSpacing.xl,
+                    AppSpacing.md,
+                  ),
+                  child: Column(
+                    children: [
+                      BrandLogo(
+                        size: MediaQuery.of(context).size.height < 700
+                            ? 64
+                            : 88,
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Premium Koi & Arowana — Singapore',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppPalette.of(context).textMuted,
-                        fontSize: 12.5,
-                        letterSpacing: 0.4,
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        'MARUGEN FISH FARM',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppPalette.of(context).text,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 3,
+                        ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Text(
+                        'Premium Koi & Arowana — Singapore',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppPalette.of(context).textMuted,
+                          fontSize: 12.5,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               // Form sheet
-              Expanded(
+              SliverFillRemaining(
+                hasScrollBody: false,
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
@@ -133,7 +130,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       top: Radius.circular(AppRadius.lg),
                     ),
                   ),
-                  child: SingleChildScrollView(
+                  child: Padding(
                     padding: EdgeInsets.fromLTRB(
                       AppSpacing.xl,
                       MediaQuery.of(context).size.height < 700
@@ -304,11 +301,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             label: const Text('Continue with Apple'),
                           ),
                           const SizedBox(height: AppSpacing.lg),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 4,
+                            runSpacing: 4,
                             children: [
                               Text(
-                                "Don't have an account? ",
+                                "Don't have an account?",
                                 style: TextStyle(
                                   color: AppPalette.of(context).textMuted,
                                   fontSize: 13.5,

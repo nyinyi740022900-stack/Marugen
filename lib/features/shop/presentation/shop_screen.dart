@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/models/product.dart';
 import '../../../shared/widgets/brand_logo.dart';
 import '../../../shared/widgets/empty_state.dart';
@@ -44,6 +45,7 @@ class ShopScreen extends ConsumerWidget {
           const NotificationBellButton(),
           const SizedBox(width: 6),
           const _CartBadgeButton(),
+          const AppearanceButton(),
           const SizedBox(width: 4),
         ],
       ),

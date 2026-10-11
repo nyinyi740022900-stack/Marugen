@@ -21,15 +21,20 @@ class NotificationsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
-        title: const Text('NOTIFICATIONS'),
+        title: const Text(
+          'NOTIFICATIONS',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: [
           notificationsAsync.maybeWhen(
             data: (items) => items.any((n) => !n.read)
-                ? TextButton(
+                ? IconButton(
+                    tooltip: 'Mark all read',
+                    icon: const Icon(Icons.done_all),
                     onPressed: () => ref
                         .read(myNotificationsProvider.notifier)
                         .markAllRead(),
-                    child: const Text('Mark all read'),
                   )
                 : const SizedBox.shrink(),
             orElse: () => const SizedBox.shrink(),

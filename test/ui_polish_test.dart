@@ -135,12 +135,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Log in to your account'), findsOneWidget);
-        await tester.scrollUntilVisible(
-          find.text('Appearance'),
-          160,
-          scrollable: find.byType(Scrollable).first,
-        );
-        await tester.tap(find.text('Appearance'));
+        await tester.tap(find.byTooltip('Appearance'));
         await tester.pumpAndSettle();
         expect(find.text('Use your device appearance'), findsOneWidget);
         Navigator.of(tester.element(find.text('Use your device appearance')))

@@ -144,7 +144,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final isLoggedIn = ref.watch(isLoggedInProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: const [AppearanceButton(), SizedBox(width: 4)],
+      ),
       body: ContentWidth(
         child: !isLoggedIn
             ? const _GuestProfile()
@@ -246,7 +249,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     const SizedBox(height: 24),
                     const Divider(),
-                    const AppearanceTile(),
                     ListTile(
                       leading: const Icon(Icons.location_on_outlined),
                       title: const Text('Delivery Addresses'),
@@ -405,21 +407,6 @@ class _GuestProfile extends StatelessWidget {
                   actionLabel: 'Log In',
                   onAction: () => context.push('/login'),
                 ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              Text(
-                'THIS DEVICE',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppPalette.of(context).textMuted,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Card(
-                margin: EdgeInsets.zero,
-                clipBehavior: Clip.antiAlias,
-                child: const AppearanceTile(),
               ),
             ],
           ),

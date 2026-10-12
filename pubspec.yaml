@@ -1,7 +1,7 @@
 name: marugen_app
 description: "Marugen Fish Farm — e-commerce app for Koi, Arowana, fish food & accessories."
 publish_to: 'none'
-version: 1.0.2+7
+version: 1.0.3+8
 
 environment:
   sdk: ^3.13.2
@@ -52,6 +52,8 @@ dependencies:
   crypto: ^3.0.7
 
 dev_dependencies:
+  integration_test:
+    sdk: flutter
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0

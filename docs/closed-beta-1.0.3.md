@@ -63,3 +63,14 @@ After an on-device integration build, allow Flutter's normal release tooling reg
 ## Play Console preparation
 
 Uploaded the verified bundle to the existing Alpha draft on 2026-10-13. Preview reported Ready to release, 100% rollout to the Alpha test audience, and zero lost phone/tablet support. Publishing overview also contained existing tester-group, privacy URL and Data safety changes prepared separately. Reviewed those pending items and added the missing App interactions declaration for actual app visits/product views: collected, retained (not ephemeral), required, Analytics purpose. Existing website URLs were retained at the user's explicit instruction.
+
+## Submission outcome — 13 October 2026
+
+Google Play Console accepted the submission of four pending changes: Alpha release
+1.0.3 (8), the existing tester Google Group, the existing privacy URL, and the
+reviewed Data safety questionnaire including App interactions. Publishing overview
+now shows **Changes in review**. Quick checks were still running at confirmation;
+Google approval and availability to testers have not been claimed.
+
+Proof: `output/releases/closed-beta-1.0.3-in-review.png`.
+Source implementation was committed and pushed to main as `b34ee53`.

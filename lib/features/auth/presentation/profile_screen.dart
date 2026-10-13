@@ -99,7 +99,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       message:
           'This permanently removes your profile, saved addresses, wishlist, and reviews. '
           'This cannot be undone. (Past orders are kept for accounting/tax records, with '
-          'your personal details removed from them.)',
+          'necessary order, payment and delivery details retained.)',
       confirmLabel: 'Delete Account',
     );
     if (!confirmed) return;

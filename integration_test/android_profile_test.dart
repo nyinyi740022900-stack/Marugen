@@ -99,6 +99,14 @@ void main() {
       expect(find.text('Continue with Google').hitTestable(), findsOneWidget);
       await tester.pump(const Duration(seconds: 1));
       await binding.takeScreenshot('android-login');
+      await tester.ensureVisible(find.text('Privacy Policy'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Privacy Policy'));
+      await tester.pumpAndSettle();
+      expect(find.text('marugenfishfarmaiagent@gmail.com'), findsOneWidget);
+      expect(find.text('Email a privacy request'), findsOneWidget);
+      expect(find.textContaining('placeholder'), findsNothing);
+      await binding.takeScreenshot('android-privacy-policy');
       expect(tester.takeException(), isNull);
     },
   );

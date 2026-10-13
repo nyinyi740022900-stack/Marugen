@@ -119,7 +119,7 @@ class OrderItem {
 
 class Order {
   final String id;
-  final String userId;
+  final String? userId;
 
   /// Human-readable, date-based order number (e.g. "20092026-0001") —
   /// assigned server-side by a trigger on insert (see migration 0024).
@@ -189,7 +189,7 @@ class Order {
   factory Order.fromMap(Map<String, dynamic> map) {
     return Order(
       id: map['id'] as String,
-      userId: map['user_id'] as String,
+      userId: map['user_id'] as String?,
       orderNumber: map['order_number'] as String?,
       status: orderStatusFromString(map['status'] as String? ?? 'pending'),
       total: (map['total'] as num?)?.toDouble() ?? 0,

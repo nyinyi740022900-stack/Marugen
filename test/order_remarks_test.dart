@@ -34,6 +34,10 @@ void main() {
       'created_at': '2026-10-10T00:00:00Z',
     };
     expect(Order.fromMap(row).customerRemarks, isNull);
+    final retained = Order.fromMap({...row, 'user_id': null});
+    expect(retained.userId, isNull);
+    expect(retained.total, 20);
+    expect(retained.status, OrderStatus.paid);
     expect(
       Order.fromMap({...row, 'customer_remarks': 'Call before delivery'})
           .customerRemarks,

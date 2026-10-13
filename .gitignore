@@ -62,4 +62,5 @@ supabase/.temp/
 
 # Generated Android reports and local document previews
 /android/build/
+/android/.kotlin/
 /output/

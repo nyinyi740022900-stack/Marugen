@@ -71,7 +71,11 @@ class AuthRepository {
   /// 0045_admin_view_profiles.sql; returns null for a non-admin caller or a
   /// missing id, same as a not-found result.
   Future<AppUser?> fetchAppUserById(String id) async {
-    final data = await _client.from('profiles').select().eq('id', id).maybeSingle();
+    final data = await _client
+        .from('profiles')
+        .select()
+        .eq('id', id)
+        .maybeSingle();
     if (data == null) return null;
     return AppUser.fromMap(data);
   }
@@ -86,14 +90,20 @@ class AuthRepository {
   Future<String> uploadAvatar(Uint8List bytes, String ext) async {
     final user = currentUser;
     if (user == null) throw Exception('Not logged in');
-    final path = 'avatars/${user.id}/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _client.storage.from('product-images').uploadBinary(
+    final path =
+        'avatars/${user.id}/${DateTime.now().millisecondsSinceEpoch}.$ext';
+    await _client.storage
+        .from('product-images')
+        .uploadBinary(
           path,
           bytes,
           fileOptions: const FileOptions(upsert: true),
         );
     final url = _client.storage.from('product-images').getPublicUrl(path);
-    await _client.from('profiles').update({'avatar_url': url}).eq('id', user.id);
+    await _client
+        .from('profiles')
+        .update({'avatar_url': url})
+        .eq('id', user.id);
     return url;
   }
 
@@ -119,7 +129,11 @@ class AuthRepository {
     await _client.auth.signInWithPassword(email: email, password: password);
   }
 
-  Future<void> signUpWithEmail(String email, String password, {String? fullName}) async {
+  Future<void> signUpWithEmail(
+    String email,
+    String password, {
+    String? fullName,
+  }) async {
     await _client.auth.signUp(
       email: email,
       password: password,
@@ -142,7 +156,8 @@ class AuthRepository {
     }
     await GoogleSignIn.instance.initialize(
       serverClientId: webClientId,
-      clientId: defaultTargetPlatform == TargetPlatform.iOS ||
+      clientId:
+          defaultTargetPlatform == TargetPlatform.iOS ||
               defaultTargetPlatform == TargetPlatform.macOS
           ? (iosClientId.isEmpty ? null : iosClientId)
           : null,
@@ -169,11 +184,13 @@ class AuthRepository {
 
     final authorization =
         await googleUser.authorizationClient.authorizationForScopes(scopes) ??
-            await googleUser.authorizationClient.authorizeScopes(scopes);
+        await googleUser.authorizationClient.authorizeScopes(scopes);
 
     final idToken = googleUser.authentication.idToken;
     if (idToken == null) {
-      throw Exception('Google did not return an ID token. Check GOOGLE_WEB_CLIENT_ID.');
+      throw Exception(
+        'Google did not return an ID token. Check GOOGLE_WEB_CLIENT_ID.',
+      );
     }
 
     await _client.auth.signInWithIdToken(
@@ -185,7 +202,8 @@ class AuthRepository {
 
   /// Native Apple sign-in on iOS/macOS; browser OAuth elsewhere.
   Future<void> signInWithApple() async {
-    final isApplePlatform = !kIsWeb &&
+    final isApplePlatform =
+        !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.iOS ||
             defaultTargetPlatform == TargetPlatform.macOS);
 
@@ -230,11 +248,13 @@ class AuthRepository {
       ];
       if (parts.isNotEmpty) {
         await _client.auth.updateUser(
-          UserAttributes(data: {
-            'full_name': parts.join(' '),
-            'given_name': credential.givenName,
-            'family_name': credential.familyName,
-          }),
+          UserAttributes(
+            data: {
+              'full_name': parts.join(' '),
+              'given_name': credential.givenName,
+              'family_name': credential.familyName,
+            },
+          ),
         );
       }
     }
@@ -244,8 +264,10 @@ class AuthRepository {
     const charset =
         '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
     final random = Random.secure();
-    return List.generate(length, (_) => charset[random.nextInt(charset.length)])
-        .join();
+    return List.generate(
+      length,
+      (_) => charset[random.nextInt(charset.length)],
+    ).join();
   }
 
   Future<void> signOut() async {
@@ -268,12 +290,8 @@ class AuthRepository {
     await _client.auth.signOut();
   }
 
-  /// Deletes (or, if the account has order history, anonymizes) the
-  /// signed-in user's account via the `delete-account` Edge Function —
-  /// required by Google Play's Account Deletion policy. Signs the local
-  /// session out afterwards either way, since the server side already
-  /// removed or permanently banned the account. Throws with the server's
-  /// error message on failure.
+  /// Permanently deletes the signed-in auth account and personal profile.
+  /// Necessary order records remain, detached from the deleted profile.
   Future<void> deleteAccount() async {
     final res = await _client.functions.invoke('delete-account');
     if (res.status >= 400) {
@@ -283,7 +301,24 @@ class AuthRepository {
           : 'Could not delete your account';
       throw Exception(message);
     }
-    await signOut();
+    // The server already deleted this account. Clear the local session without
+    // requiring a global revocation request against the now-missing user.
+    try {
+      await _client.auth.signOut(scope: SignOutScope.local);
+    } catch (e) {
+      // Local auth state is cleared before the optional remote sign-out call.
+      developer.log('Post-deletion sign-out cleanup failed', name: 'AuthRepository', error: e);
+    }
+    try {
+      await AppIconBadge.clear();
+      if (_googleInitialized) await GoogleSignIn.instance.signOut();
+    } catch (e) {
+      developer.log(
+        'Post-deletion device cleanup failed',
+        name: 'AuthRepository',
+        error: e,
+      );
+    }
   }
 
   /// Sends a password-reset email via Supabase Auth. Uses the same deep
@@ -293,7 +328,10 @@ class AuthRepository {
   /// `AuthChangeEvent.passwordRecovery` and sends the user to
   /// ResetPasswordScreen to actually set a new password.
   Future<void> sendPasswordResetEmail(String email) {
-    return _client.auth.resetPasswordForEmail(email, redirectTo: oauthRedirectTo);
+    return _client.auth.resetPasswordForEmail(
+      email,
+      redirectTo: oauthRedirectTo,
+    );
   }
 
   /// Sets a new password for the currently-authenticated session — used

@@ -252,7 +252,7 @@ Deno.serve(async (req) => {
     } else {
       // Customer notification — the order's own owner.
       targets.push({
-        recipientIds: [order.user_id as string],
+        recipientIds: order.user_id ? [order.user_id as string] : [],
         title: statusCopy!.title,
         body: statusCopy!.body(orderShort),
         type: 'order_status',

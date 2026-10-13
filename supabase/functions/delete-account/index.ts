@@ -1,27 +1,7 @@
-// Supabase Edge Function: delete-account
-//
-// Lets a signed-in customer request deletion of their own account, called
-// from the "Delete my account" option in profile_screen.dart. Required by
-// Google Play's Account Deletion policy (any app that lets users create an
-// account must offer a way to delete it) and by the deletion right promised
-// in docs/privacy.html.
-//
-// A hard delete isn't always possible: `orders.user_id` has no ON DELETE
-// cascade (orders are kept for accounting/tax reasons — see privacy.html
-// section 5), so deleting auth.users would fail with a foreign-key error
-// for anyone who has ever placed an order. Behaviour:
-//   - No orders on file  -> hard delete: removes the auth user, which
-//     cascades to profiles/addresses/wishlist_items/product_reviews.
-//   - Has order history  -> anonymize: wipe personal fields from the
-//     profile, delete addresses/wishlist/reviews, then permanently ban
-//     the auth user and scramble its email/password so it can never sign
-//     in again. Order rows themselves are left untouched.
-//
-// Deploy:  supabase functions deploy delete-account
-// Secrets: none beyond the project's existing SUPABASE_URL / anon / service
-//          role keys (same as every other function in this project).
-
+// Requires migration 0051 before deployment. Never bans an account as a deletion substitute.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+import { deleteCustomer } from './delete_customer.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
@@ -43,6 +23,8 @@ function jsonError(message: string, status: number) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
+  if (req.method !== 'POST') return jsonError('Method not allowed', 405);
+
   try {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return jsonError('Missing Authorization header', 401);
@@ -58,61 +40,30 @@ Deno.serve(async (req) => {
 
     const admin = createClient(supabaseUrl, serviceRoleKey);
 
-    const { count: orderCount, error: orderCountError } = await admin
-      .from('orders')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id);
-    if (orderCountError) {
-      return jsonError(`Could not check order history: ${orderCountError.message}`, 500);
-    }
+    // Staff accounts may own retained shop images. Route them through support
+    // rather than deleting business assets or falsely claiming deletion.
+    const { data: profile, error: profileError } = await admin
+      .from('profiles').select('role').eq('id', user.id).single();
+    if (profileError) return jsonError('Could not verify account. Please contact support.', 500);
+    if (profile.role !== 'customer') return jsonError('Staff account deletion requires support: marugenfishfarmaiagent@gmail.com', 409);
 
-    // Always clear what we can delete outright regardless of which path
-    // below is taken — none of these are needed for accounting records.
-    await admin.from('wishlist_items').delete().eq('user_id', user.id);
-    await admin.from('product_reviews').delete().eq('user_id', user.id);
-    await admin.from('addresses').delete().eq('user_id', user.id);
+    const bucket = admin.storage.from('product-images');
+    await deleteCustomer({
+      listAvatars: async (prefix, offset) => {
+        const { data, error } = await bucket.list(prefix, { limit: 100, offset, sortBy: { column: 'name', order: 'asc' } });
+        return { files: (data ?? []).map(f => ({ name: f.name, id: f.id ?? null })), error: error?.message };
+      },
+      removeAvatars: async paths => {
+        const { error } = await bucket.remove(paths);
+        return error?.message;
+      },
+      deleteAuthUser: async id => {
+        const { error } = await admin.auth.admin.deleteUser(id);
+        return error?.message;
+      },
+    }, user.id);
 
-    if (!orderCount) {
-      // No order history — safe to remove the auth user outright. This
-      // cascades to the profiles row (and, transitively, anything with an
-      // `on delete cascade` FK to it) automatically.
-      const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
-      if (deleteError) {
-        return jsonError(`Could not delete account: ${deleteError.message}`, 500);
-      }
-      return new Response(JSON.stringify({ deleted: true, anonymized: false }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Has order history — anonymize instead of hard-deleting so the
-    // orders (and their FK to profiles.id) stay intact for accounting/tax
-    // purposes, matching docs/privacy.html section 5. The account is
-    // permanently banned so it can never be signed back into.
-    const { error: profileError } = await admin
-      .from('profiles')
-      .update({
-        full_name: 'Deleted user',
-        phone: null,
-        avatar_url: null,
-        fcm_token: null,
-      })
-      .eq('id', user.id);
-    if (profileError) {
-      return jsonError(`Could not anonymize profile: ${profileError.message}`, 500);
-    }
-
-    const { error: banError } = await admin.auth.admin.updateUserById(user.id, {
-      email: `deleted-${user.id}@deleted.marugen.invalid`,
-      password: crypto.randomUUID() + crypto.randomUUID(),
-      ban_duration: '876000h', // ~100 years — effectively permanent
-      user_metadata: {},
-    });
-    if (banError) {
-      return jsonError(`Could not disable sign-in: ${banError.message}`, 500);
-    }
-
-    return new Response(JSON.stringify({ deleted: false, anonymized: true }), {
+    return new Response(JSON.stringify({ deleted: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {

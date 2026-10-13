@@ -342,6 +342,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                             ],
                           ),
+                          TextButton(
+                            onPressed: () => context.push('/privacy'),
+                            child: const Text('Privacy Policy'),
+                          ),
                         ],
                       ),
                     ),

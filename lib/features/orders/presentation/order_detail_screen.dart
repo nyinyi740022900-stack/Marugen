@@ -450,6 +450,7 @@ class _OrderDetailBody extends ConsumerWidget {
                   // is genuinely the viewer's own order.
                   canReview:
                       order.status == OrderStatus.delivered &&
+                      order.userId != null &&
                       order.userId ==
                           ref.watch(currentAppUserProvider).valueOrNull?.id,
                 ),
@@ -947,7 +948,7 @@ class _OrderAppBarActions extends ConsumerWidget {
     final currentUser = ref.watch(currentAppUserProvider).valueOrNull;
     final isAdmin = currentUser?.role.isAdmin ?? false;
     final isOwnOrder = order.userId == currentUser?.id;
-    if (isAdmin && !isOwnOrder) {
+    if (isAdmin && !isOwnOrder && order.userId != null) {
       return IconButton(
         tooltip: 'View Customer',
         icon: const Icon(Icons.person_outline),

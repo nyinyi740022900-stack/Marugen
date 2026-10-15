@@ -153,6 +153,7 @@ class _CartBadgeButton extends ConsumerWidget {
       alignment: Alignment.center,
       children: [
         IconButton(
+          tooltip: 'Open cart',
           icon: const Icon(Icons.shopping_bag_outlined),
           onPressed: () => context.push('/cart'),
         ),

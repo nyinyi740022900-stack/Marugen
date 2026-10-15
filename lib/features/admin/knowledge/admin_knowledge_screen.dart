@@ -56,17 +56,9 @@ class _AdminVarieties extends ConsumerWidget {
             final v = varieties[i];
             return Card(
               child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: AppPalette.of(context).surfaceMuted,
-                  backgroundImage: v.imageUrl != null
-                      ? NetworkImage(v.imageUrl!)
-                      : null,
-                  child: v.imageUrl == null
-                      ? Icon(
-                          Icons.water,
-                          color: AppPalette.of(context).textMuted,
-                        )
-                      : null,
+                leading: _KnowledgeThumbnail(
+                  url: v.imageUrl,
+                  fallback: Icons.water,
                 ),
                 title: Text(
                   v.name,
@@ -163,17 +155,9 @@ class _AdminArticles extends ConsumerWidget {
             final a = articles[i];
             return Card(
               child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: AppPalette.of(context).surfaceMuted,
-                  backgroundImage: a.coverImageUrl != null
-                      ? NetworkImage(a.coverImageUrl!)
-                      : null,
-                  child: a.coverImageUrl == null
-                      ? Icon(
-                          Icons.menu_book_outlined,
-                          color: AppPalette.of(context).textMuted,
-                        )
-                      : null,
+                leading: _KnowledgeThumbnail(
+                  url: a.coverImageUrl,
+                  fallback: Icons.menu_book_outlined,
                 ),
                 title: Text(
                   a.title,
@@ -245,6 +229,34 @@ class _AdminArticles extends ConsumerWidget {
         error: (e, _) =>
             ErrorState(onRetry: () => ref.invalidate(articlesProvider)),
       ),
+    );
+  }
+}
+
+/// Remote guide images may be unavailable or rate-limited. Keep the row
+/// usable and show its category icon when loading fails.
+class _KnowledgeThumbnail extends StatelessWidget {
+  const _KnowledgeThumbnail({required this.url, required this.fallback});
+
+  final String? url;
+  final IconData fallback;
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = Icon(fallback, color: AppPalette.of(context).textMuted);
+    return CircleAvatar(
+      backgroundColor: AppPalette.of(context).surfaceMuted,
+      child: url == null || url!.isEmpty
+          ? icon
+          : ClipOval(
+              child: Image.network(
+                url!,
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => icon,
+              ),
+            ),
     );
   }
 }

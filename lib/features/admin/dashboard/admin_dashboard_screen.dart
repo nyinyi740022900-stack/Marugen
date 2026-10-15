@@ -329,33 +329,37 @@ class _LowStockSection extends StatelessWidget {
             boxShadow: AppShadows.card,
           ),
           clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              for (var i = 0; i < shown.length; i++) ...[
-                if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
-                _LowStockRow(product: shown[i]),
-              ],
-              if (hasMore) ...[
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  dense: true,
-                  onTap: () => context.push('/admin/low-stock'),
-                  title: Text(
-                    '+${products.length - shown.length} more',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
+          child: Material(
+            color: AppPalette.of(context).surface,
+            child: Column(
+              children: [
+                for (var i = 0; i < shown.length; i++) ...[
+                  if (i > 0)
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                  _LowStockRow(product: shown[i]),
+                ],
+                if (hasMore) ...[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    dense: true,
+                    onTap: () => context.push('/admin/low-stock'),
+                    title: Text(
+                      '+${products.length - shown.length} more',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                    trailing: Icon(
+                      Icons.chevron_right,
+                      size: 18,
                       color: AppPalette.of(context).textMuted,
                     ),
                   ),
-                  trailing: Icon(
-                    Icons.chevron_right,
-                    size: 18,
-                    color: AppPalette.of(context).textMuted,
-                  ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ],
@@ -447,8 +451,8 @@ class _StuckPendingSection extends ConsumerWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Payment was never confirmed — any stock or live fish these hold '
-          'is auto-released within ~40 min, or cancel now to free it sooner.',
+          'Stock stays reserved until payment cancellation is confirmed. '
+          'Refresh or cancel the order to check its latest payment status.',
           style: TextStyle(
             fontSize: 12,
             color: AppPalette.of(context).textMuted,
@@ -463,53 +467,69 @@ class _StuckPendingSection extends ConsumerWidget {
             boxShadow: AppShadows.card,
           ),
           clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              for (var i = 0; i < orders.length; i++) ...[
-                if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
-                ListTile(
-                  dense: true,
-                  onTap: () => context.push('/orders/${orders[i].id}'),
-                  leading: Icon(
-                    Icons.hourglass_bottom,
-                    size: 20,
-                    color: AppPalette.of(context).warning,
-                  ),
-                  title: Text(
-                    '#${orders[i].displayNumber}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13.5,
+          child: Material(
+            color: AppPalette.of(context).surface,
+            child: Column(
+              children: [
+                for (var i = 0; i < orders.length; i++) ...[
+                  if (i > 0)
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    dense: true,
+                    onTap: () => context.push('/orders/${orders[i].id}'),
+                    leading: Icon(
+                      Icons.hourglass_bottom,
+                      size: 20,
+                      color: AppPalette.of(context).warning,
+                    ),
+                    title: Text(
+                      '#${orders[i].displayNumber}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${formatPrice(orders[i].total)} · created '
+                      '${DateTime.now().difference(orders[i].createdAt).inMinutes} min ago',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    trailing: TextButton(
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final confirmed = await confirmDestructiveAction(
+                          context,
+                          title: 'Cancel this order?',
+                          message:
+                              'Order #${orders[i].displayNumber} will be cancelled and any reserved stock released. This cannot be undone.',
+                          confirmLabel: 'Cancel Order',
+                        );
+                        if (!confirmed) return;
+                        try {
+                          await ref
+                              .read(orderRepositoryProvider)
+                              .updateOrderStatus(
+                                orders[i].id,
+                                OrderStatus.cancelled,
+                              );
+                        } catch (_) {
+                          // Server refuses while the payment may still complete.
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'The order was not cancelled. Its payment may still be processing; refresh and try again.',
+                              ),
+                            ),
+                          );
+                        }
+                        refreshAdminOrders(ref);
+                      },
+                      child: const Text('Cancel now'),
                     ),
                   ),
-                  subtitle: Text(
-                    '${formatPrice(orders[i].total)} · created '
-                    '${DateTime.now().difference(orders[i].createdAt).inMinutes} min ago',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  trailing: TextButton(
-                    onPressed: () async {
-                      final confirmed = await confirmDestructiveAction(
-                        context,
-                        title: 'Cancel this order?',
-                        message:
-                            'Order #${orders[i].displayNumber} will be cancelled and any reserved stock released. This cannot be undone.',
-                        confirmLabel: 'Cancel Order',
-                      );
-                      if (!confirmed) return;
-                      await ref
-                          .read(orderRepositoryProvider)
-                          .updateOrderStatus(
-                            orders[i].id,
-                            OrderStatus.cancelled,
-                          );
-                      refreshAdminOrders(ref);
-                    },
-                    child: const Text('Cancel now'),
-                  ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ],
@@ -556,63 +576,66 @@ class _TopProductsCard extends StatelessWidget {
         boxShadow: AppShadows.card,
       ),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          for (var i = 0; i < top.length; i++) ...[
-            if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
-            ListTile(
-              dense: true,
-              leading: CircleAvatar(
-                radius: 14,
-                backgroundColor: AppPalette.of(context).accentSoft,
-                child: Text(
-                  '${i + 1}',
+      child: Material(
+        color: AppPalette.of(context).surface,
+        child: Column(
+          children: [
+            for (var i = 0; i < top.length; i++) ...[
+              if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
+              ListTile(
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 14,
+                  backgroundColor: AppPalette.of(context).accentSoft,
+                  child: Text(
+                    '${i + 1}',
+                    style: TextStyle(
+                      color: AppPalette.of(context).accent,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                title: Text(
+                  top[i].key,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13.5,
+                  ),
+                ),
+                trailing: Text(
+                  '${top[i].value} sold',
                   style: TextStyle(
-                    color: AppPalette.of(context).accent,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
+                    fontSize: 12.5,
+                    color: AppPalette.of(context).textMuted,
                   ),
                 ),
               ),
-              title: Text(
-                top[i].key,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13.5,
+            ],
+            if (hasMore) ...[
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              ListTile(
+                dense: true,
+                onTap: () => context.push('/admin/top-products'),
+                title: Text(
+                  '+${ranked.length - top.length} more',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppPalette.of(context).textMuted,
+                  ),
                 ),
-              ),
-              trailing: Text(
-                '${top[i].value} sold',
-                style: TextStyle(
-                  fontSize: 12.5,
+                trailing: Icon(
+                  Icons.chevron_right,
+                  size: 18,
                   color: AppPalette.of(context).textMuted,
                 ),
               ),
-            ),
+            ],
           ],
-          if (hasMore) ...[
-            const Divider(height: 1, indent: 16, endIndent: 16),
-            ListTile(
-              dense: true,
-              onTap: () => context.push('/admin/top-products'),
-              title: Text(
-                '+${ranked.length - top.length} more',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: AppPalette.of(context).textMuted,
-                ),
-              ),
-              trailing: Icon(
-                Icons.chevron_right,
-                size: 18,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }

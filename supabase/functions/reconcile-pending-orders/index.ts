@@ -25,54 +25,49 @@
 // Deploy:  supabase functions deploy reconcile-pending-orders --no-verify-jwt
 // Secrets: STRIPE_SECRET_KEY (already set for create-payment-intent/stripe-webhook)
 
-import Stripe from 'https://esm.sh/stripe@17?target=deno';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import Stripe from "https://esm.sh/stripe@17?target=deno";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  applyPaymentEvent,
+  cancelPendingPayment,
+} from "../_shared/payment_lifecycle.ts";
+import { createPaymentPort } from "../_shared/payment_port.ts";
 
-const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
-  apiVersion: '2024-06-20',
+const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
+  apiVersion: "2024-06-20",
 });
 
-const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-const serviceRoleKey =
-  Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceRoleKey = Deno.env.get("SB_SERVICE_KEY") ??
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const admin = createClient(supabaseUrl, serviceRoleKey);
 
 const RECONCILE_AFTER_MS = 5 * 60 * 1000;
 
-async function notifyOrderStatus(orderId: string, status: string) {
-  try {
-    await fetch(`${supabaseUrl}/functions/v1/send-order-notification`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ order_id: orderId, status }),
-    });
-  } catch (err) {
-    console.error('[reconcile-pending-orders] notifyOrderStatus failed', err);
-  }
-}
-
+const port = createPaymentPort(admin, stripe, supabaseUrl, serviceRoleKey);
 Deno.serve(async (req) => {
   // Exact match, not a substring check — see send-order-notification for
   // why `includes` would be unsafe here.
-  const authHeader = req.headers.get('Authorization') ?? '';
+  const authHeader = req.headers.get("Authorization") ?? "";
   if (!serviceRoleKey || authHeader !== `Bearer ${serviceRoleKey}`) {
-    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 });
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+    });
   }
 
   const cutoff = new Date(Date.now() - RECONCILE_AFTER_MS).toISOString();
   const { data: staleOrders, error } = await admin
-    .from('orders')
-    .select('id, stripe_payment_intent_id')
-    .eq('status', 'pending')
-    .not('stripe_payment_intent_id', 'is', null)
-    .lt('created_at', cutoff);
+    .from("orders")
+    .select("id, stripe_payment_intent_id, created_at")
+    .eq("status", "pending")
+    .not("stripe_payment_intent_id", "is", null)
+    .lt("created_at", cutoff);
 
   if (error) {
-    console.error('[reconcile-pending-orders] query failed', error);
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    console.error("[reconcile-pending-orders] query failed", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+    });
   }
 
   let reconciled = 0;
@@ -81,36 +76,34 @@ Deno.serve(async (req) => {
       const intent = await stripe.paymentIntents.retrieve(
         order.stripe_payment_intent_id as string,
       );
-      if (intent.status !== 'succeeded') continue;
-
-      // Same `.eq('status', 'pending')` idempotency guard stripe-webhook
-      // uses on its own update — this can never race a webhook that
-      // already landed (or a concurrent reconcile run) into a double
-      // notify, since only the write that actually flips the row reports
-      // a match.
-      const { data: updated, error: updateError } = await admin
-        .from('orders')
-        .update({ status: 'paid' })
-        .eq('id', order.id)
-        .eq('status', 'pending')
-        .select('id')
-        .maybeSingle();
-
-      if (updateError) {
-        console.error('[reconcile-pending-orders] failed to mark paid', order.id, updateError);
-        continue;
-      }
-      if (updated) {
+      if (intent.status === "succeeded" || intent.status === "canceled") {
+        await applyPaymentEvent(
+          intent.status === "succeeded"
+            ? "payment_intent.succeeded"
+            : "payment_intent.canceled",
+          intent.id,
+          port,
+        );
         reconciled++;
-        await notifyOrderStatus(order.id, 'paid');
+      } else if (
+        Date.now() - new Date(order.created_at).getTime() > 30 * 60 * 1000 &&
+        ["requires_payment_method", "requires_confirmation", "requires_action"]
+          .includes(intent.status)
+      ) {
+        await cancelPendingPayment(order.id, port);
+        reconciled++;
       }
     } catch (err) {
-      console.error('[reconcile-pending-orders] stripe lookup failed', order.id, err);
+      console.error(
+        "[reconcile-pending-orders] stripe lookup failed",
+        order.id,
+        err,
+      );
     }
   }
 
   return new Response(
     JSON.stringify({ checked: staleOrders?.length ?? 0, reconciled }),
-    { headers: { 'Content-Type': 'application/json' } },
+    { headers: { "Content-Type": "application/json" } },
   );
 });

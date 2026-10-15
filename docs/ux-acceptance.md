@@ -50,3 +50,28 @@ The earlier 25/40 was a provisional review across ten heuristics, each worth fou
 4. **Content and usability validation.** Review real SKU guidance and shop policies with the owner. Observe first-time, returning, and assistive-technology shoppers completing find/select/save/remove/buy tasks. Record completion, mistakes, recovery, and unanswered questions, then resolve material findings and reassess each heuristic.
 
 These updates are separate from the confirmed defects already fixed. The score remains unconfirmed until the evidence gates are completed; no new numerical score is invented here.
+
+## Guest account consistency follow-up — 2026-10-14
+
+The seven reported UI findings are implemented:
+
+1. Profile and Orders share the same guest sign-in layout and button geometry.
+2. Customer order numbers and status badges wrap at large text sizes rather than overflowing.
+3. Cart, order-search clear, and address-delete buttons have accessible labels; address deletion retains a 48-pixel minimum target.
+4. Guest Notifications and Wishlist show a sign-in invitation before subscribing to account data.
+5. Guest pages share the title “Log in to your account” and “Log In” action, with concise contextual descriptions.
+6. Empty customer Orders includes “Browse Shop” and selects the Shop tab.
+7. Orders, Cart and Notifications use consistent title case.
+
+Wishlist now has a registered route used by Profile and by the login return destination.
+
+Verification: all 140 Flutter tests passed; Flutter analysis reported no issues; independent source review found no remaining material issue. New regressions cover identical guest button placement in Light/Dark, 320×600 guest screens with double text size, 320×640 Orders with double text size, the production Wishlist/login return route, and the empty Orders action. These are widget/router checks, not a live Google credential sign-in or screen-reader session.
+
+Android runtime verification was attempted but could not start: the configured Pixel 7 emulator references an absent Android 37.1 system image. No new beta bundle was built or uploaded for this follow-up.
+
+
+## Android/admin acceptance follow-up — 2026-10-16
+
+The earlier missing emulator image was restored. Android guest checks passed, followed by native owner/staff runs against synthetic local accounts. Both admin roles completed product creation, module navigation, fixed bottom navigation placement, light/dark changes, logout and denied admin re-entry. Dashboard ink surfaces, Hero collisions, failed guide thumbnails and animated theme-button errors found during testing were fixed.
+
+Fresh full suite: 193 passed; analysis clean. Real local role, payment, network-loss and PostgreSQL checks passed. Full evidence and untested interactions: `docs/audit-fixes-verification-2026-10-15.md`. Real Google OAuth, interactive native card form/cancel/3DS/Google Pay, physical-device assistive technology, hosted backend rollout and courier booking remain separate acceptance gates. No 40/40 score or release approval is inferred from automated checks. No production deployment or beta upload.

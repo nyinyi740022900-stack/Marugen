@@ -27,19 +27,11 @@ import '../utils/invoice_pdf.dart';
 import 'order_status_timeline.dart';
 import 'orders_providers.dart';
 
-/// Full detail view for a single order — pushed from [OrdersScreen].
-/// The [order] is normally passed straight through via `GoRouter`'s
-/// `extra` (it's already fully loaded, items included, from
-/// `OrderRepository.fetchMyOrders`), avoiding a second query. If it's
-/// missing (e.g. a deep link), it's re-fetched by [orderId].
+/// Router extras provide a preview while the current session fetches the order.
+/// Only a successful authoritative fetch enables actions.
 class OrderDetailScreen extends ConsumerWidget {
   final String orderId;
   final Order? order;
-
-  /// True when arriving straight from a successful checkout — shows a
-  /// one-time "order placed" banner instead of a separate confirmation
-  /// screen, so there's a clear acknowledgment without duplicating this
-  /// screen's content elsewhere.
   final bool justPlaced;
 
   const OrderDetailScreen({
@@ -51,75 +43,124 @@ class OrderDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (order != null) {
-      return _OrderDetailScaffold(order: order!, justPlaced: justPlaced);
-    }
+    final userId = ref.watch(currentUserIdProvider);
+    final appUserAsync = ref.watch(currentAppUserProvider);
+    final appUser = appUserAsync.valueOrNull;
+    final sessionReady =
+        userId != null &&
+        !appUserAsync.isLoading &&
+        !appUserAsync.hasError &&
+        appUser?.id == userId;
+    final isAdmin = sessionReady && appUser!.role.isAdmin;
+    bool canView(Order o) =>
+        sessionReady && o.id == orderId && (isAdmin || o.userId == userId);
+    final orderAsync = sessionReady
+        ? ref.watch(orderByIdProvider(orderId))
+        : const AsyncLoading<Order?>();
+    final loaded = !orderAsync.isLoading && !orderAsync.hasError
+        ? orderAsync.valueOrNull
+        : null;
+    final authoritative = loaded != null && canView(loaded) ? loaded : null;
+    // Riverpod retains the last result during refresh/retry. Never replace
+    // that result with an older router snapshot once a fetch has settled.
+    final previewSource = orderAsync.hasValue
+        ? orderAsync.valueOrNull
+        : orderAsync.hasError
+        ? null
+        : order;
+    final preview = previewSource != null && canView(previewSource)
+        ? previewSource
+        : null;
 
-    final orderAsync = ref.watch(orderByIdProvider(orderId));
-    return Scaffold(
-      backgroundColor: AppPalette.of(context).background,
-      appBar: AppBar(
-        title: const Text('Order Detail'),
-        actions: [
-          orderAsync.maybeWhen(
-            data: (o) => o == null
-                ? const SizedBox.shrink()
-                : _OrderAppBarActions(order: o),
-            orElse: () => const SizedBox.shrink(),
-          ),
-        ],
-      ),
-      body: orderAsync.when(
-        data: (o) {
-          if (o == null) {
-            return EmptyState(
-              icon: Icons.receipt_long_outlined,
-              title: 'Order not found',
-              subtitle:
-                  "It may have been removed, or you don't have access to it.",
-              actionLabel: 'Back to Orders',
-              onAction: () =>
-                  context.canPop() ? context.pop() : context.go('/'),
-            );
-          }
-          return _OrderDetailBody(order: o, justPlaced: justPlaced);
-        },
-        loading: () => ListView(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          children: const [
-            ListRowSkeleton(),
-            SizedBox(height: AppSpacing.lg),
-            ListRowSkeleton(),
-          ],
-        ),
-        error: (e, _) => ErrorState(
-          onRetry: () => ref.invalidate(orderByIdProvider(orderId)),
-        ),
-      ),
-    );
-  }
-}
-
-class _OrderDetailScaffold extends StatelessWidget {
-  final Order order;
-  final bool justPlaced;
-  const _OrderDetailScaffold({required this.order, this.justPlaced = false});
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: Text(
-          justPlaced ? 'Order Placed' : 'Order #${order.displayNumber}',
+          authoritative == null
+              ? 'Order Detail'
+              : justPlaced
+              ? 'Order Placed'
+              : 'Order #${authoritative.displayNumber}',
         ),
         automaticallyImplyLeading: !justPlaced,
-        actions: [_OrderAppBarActions(order: order)],
+        actions: [
+          if (authoritative != null) _OrderAppBarActions(order: authoritative),
+        ],
       ),
-      body: ContentWidth(
-        maxWidth: 760,
-        child: _OrderDetailBody(order: order, justPlaced: justPlaced),
-      ),
+      body: userId == null
+          ? EmptyState(
+              icon: Icons.login,
+              title: 'Sign in to view your order',
+              subtitle: 'Your order details are available after signing in.',
+              actionLabel: 'Sign In',
+              onAction: () => context.go('/login'),
+            )
+          : appUserAsync.hasError
+          ? ErrorState(onRetry: () => ref.invalidate(currentAppUserProvider))
+          : ContentWidth(
+              maxWidth: 760,
+              child: orderAsync.when(
+                skipLoadingOnRefresh: false,
+                skipLoadingOnReload: false,
+                skipError: false,
+                data: (o) {
+                  if (authoritative == null) {
+                    return EmptyState(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'Order not found',
+                      subtitle: "It may have been removed, or you don't have access to it.",
+                      actionLabel: 'Back to Orders',
+                      onAction: () =>
+                          context.canPop() ? context.pop() : context.go('/'),
+                    );
+                  }
+                  return RefreshIndicator(
+                    onRefresh: () async {
+                      try {
+                        final refreshed = ref.refresh(
+                          orderByIdProvider(orderId).future,
+                        );
+                        await refreshed;
+                      } catch (_) {
+                        // The provider's error state offers an actionable retry.
+                      }
+                    },
+                    child: _OrderDetailBody(
+                      order: authoritative,
+                      justPlaced: justPlaced,
+                    ),
+                  );
+                },
+                loading: () => preview == null
+                    ? ListView(
+                        padding: const EdgeInsets.all(AppSpacing.lg),
+                        children: const [
+                          ListRowSkeleton(),
+                          SizedBox(height: AppSpacing.lg),
+                          ListRowSkeleton(),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          const LinearProgressIndicator(),
+                          const Padding(
+                            padding: EdgeInsets.all(AppSpacing.sm),
+                            child: Text('Updating order…'),
+                          ),
+                          Expanded(
+                            child: IgnorePointer(
+                              child: ExcludeSemantics(
+                                child: _OrderDetailBody(order: preview),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                error: (e, _) => ErrorState(
+                  onRetry: () => ref.invalidate(orderByIdProvider(orderId)),
+                ),
+              ),
+            ),
     );
   }
 }
@@ -149,6 +190,7 @@ class _OrderDetailBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final shipping = order.shippingAddress;
     return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         if (justPlaced) ...[
@@ -523,8 +565,7 @@ class _OrderDetailBody extends ConsumerWidget {
             if (justPlaced) return const _ContinueShoppingButton();
             return Column(
               children: [
-                if (order.status == OrderStatus.pending ||
-                    order.status == OrderStatus.paid) ...[
+                if (order.status == OrderStatus.pending) ...[
                   _CancelOrderButton(order: order),
                   const SizedBox(height: AppSpacing.lg),
                 ],
@@ -857,34 +898,77 @@ class _CancelOrderButton extends ConsumerStatefulWidget {
 class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
   bool _loading = false;
 
+  bool _canCancel(
+    String? userId,
+    AsyncValue<AppUser?> user,
+    AsyncValue<Order?> currentOrder,
+  ) {
+    final profile = user.valueOrNull;
+    final current = currentOrder.valueOrNull;
+    return userId != null &&
+        !user.isLoading &&
+        !user.hasError &&
+        profile?.id == userId &&
+        !(profile?.role.isAdmin ?? true) &&
+        !currentOrder.isLoading &&
+        !currentOrder.hasError &&
+        current?.id == widget.order.id &&
+        current?.userId == userId &&
+        current?.status == OrderStatus.pending;
+  }
+
   Future<void> _cancel() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cancel this order?'),
-        content: const Text(
-          'This cannot be undone. Refunds (if already paid) are handled by the shop.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Keep Order'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-              'Cancel Order',
-              style: TextStyle(color: AppPalette.of(context).error),
-            ),
-          ),
-        ],
+      builder: (ctx) => Consumer(
+        builder: (ctx, dialogRef, _) {
+          final userId = dialogRef.watch(currentUserIdProvider);
+          final user = dialogRef.watch(currentAppUserProvider);
+          final currentOrder = dialogRef.watch(
+            orderByIdProvider(widget.order.id),
+          );
+          final canCancel = _canCancel(userId, user, currentOrder);
+          if (!canCancel) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (ctx.mounted && ModalRoute.of(ctx)?.isCurrent == true) {
+                Navigator.pop(ctx, false);
+              }
+            });
+          }
+          return AlertDialog(
+            title: const Text('Cancel this order?'),
+            content: const Text('This cannot be undone.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Keep Order'),
+              ),
+              TextButton(
+                onPressed: canCancel ? () => Navigator.pop(ctx, true) : null,
+                child: Text(
+                  'Cancel Order',
+                  style: TextStyle(color: AppPalette.of(ctx).error),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
-    if (confirmed != true) return;
+    if (!mounted || confirmed != true) return;
+    final userId = ref.read(currentUserIdProvider);
+    if (!_canCancel(
+      userId,
+      ref.read(currentAppUserProvider),
+      ref.read(orderByIdProvider(widget.order.id)),
+    )) {
+      return;
+    }
 
     setState(() => _loading = true);
     try {
       await ref.read(orderRepositoryProvider).cancelMyOrder(widget.order.id);
+      if (!mounted || ref.read(currentUserIdProvider) != userId) return;
       ref.invalidate(myOrdersProvider);
       ref.invalidate(orderByIdProvider(widget.order.id));
       if (mounted) {

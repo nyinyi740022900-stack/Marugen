@@ -1,10 +1,14 @@
 import 'dart:async';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/order.dart';
 
 class OrderRepository {
-  final _client = SupabaseService.client;
+  final SupabaseClient _client;
+  OrderRepository({SupabaseClient? client})
+    : _client = client ?? SupabaseService.client;
 
   Future<List<Order>> fetchMyOrders() async {
     final user = SupabaseService.currentUser;
@@ -71,6 +75,10 @@ class OrderRepository {
   }
 
   Future<void> updateOrderStatus(String orderId, OrderStatus status) async {
+    if (status == OrderStatus.cancelled) {
+      await cancelMyOrder(orderId);
+      return;
+    }
     await _client
         .from('orders')
         .update({'status': status.name})
@@ -129,14 +137,18 @@ class OrderRepository {
     }
   }
 
-  /// Customer-initiated cancellation. RLS (0007_customer_order_cancel.sql)
-  /// only allows this when the order is still `pending`/`paid` and only
-  /// lets the update land on `status = 'cancelled'` — nothing else.
+  /// Customer/admin cancellation is verified by the payment backend before
+  /// pending stock can be released. Paid orders require the refund endpoint.
   Future<void> cancelMyOrder(String orderId) async {
-    await _client
-        .from('orders')
-        .update({'status': 'cancelled'})
-        .eq('id', orderId);
+    final response = await _client.functions.invoke(
+      'cancel-order',
+      body: {'order_id': orderId},
+    );
+    if (response.status >= 400) {
+      throw StateError(
+        'Cancellation was not confirmed. Refresh the order or contact the shop.',
+      );
+    }
   }
 
   /// Fetches a single order by id (RLS restricts this to the owning user,

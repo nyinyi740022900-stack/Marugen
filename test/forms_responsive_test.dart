@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:marugen_app/features/auth/presentation/login_screen.dart';
+import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
 import 'package:marugen_app/features/auth/presentation/signup_screen.dart';
 import 'package:marugen_app/features/auth/presentation/forgot_password_screen.dart';
 import 'package:marugen_app/features/auth/presentation/reset_password_screen.dart';
@@ -19,7 +20,11 @@ Widget host(
   double textScale = 2,
 }) {
   return ProviderScope(
-    overrides: [myNotificationsProvider.overrideWith(_Inbox.new)],
+    overrides: [
+      isLoggedInProvider.overrideWithValue(true),
+      currentUserIdProvider.overrideWithValue('customer'),
+      myNotificationsProvider.overrideWith(_Inbox.new),
+    ],
     child: MaterialApp(
       theme: brightness == Brightness.dark ? AppTheme.dark : AppTheme.light,
       builder: (context, child) => MediaQuery(

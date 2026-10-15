@@ -431,6 +431,11 @@ class _AdminProductEditScreenState
                       width: 80,
                       height: 80,
                       fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox(
+                        width: 80,
+                        height: 80,
+                        child: Icon(Icons.broken_image_outlined),
+                      ),
                     ),
                   ),
                 for (var i = 0; i < _newImages.length; i++)

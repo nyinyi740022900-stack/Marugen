@@ -17,6 +17,7 @@ import '../../features/cart/presentation/cart_screen.dart';
 import '../../features/legal/privacy_screen.dart';
 import '../../features/legal/terms_screen.dart';
 import '../../features/notifications/presentation/notifications_screen.dart';
+import '../../features/wishlist/presentation/wishlist_screen.dart';
 import '../../features/cart/domain/cart_item.dart';
 import '../../features/orders/presentation/checkout_screen.dart';
 import '../../features/orders/presentation/purchase_intent.dart';
@@ -133,6 +134,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             ProductDetailScreen(productId: state.pathParameters['id']!),
       ),
       GoRoute(path: '/cart', builder: (_, _) => const CartScreen()),
+      GoRoute(path: '/wishlist', builder: (_, _) => const WishlistScreen()),
       GoRoute(
         path: '/checkout',
         // `extra` carries a Buy Now item list (see product_detail_screen

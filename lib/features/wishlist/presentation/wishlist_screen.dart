@@ -1,3 +1,5 @@
+import '../../auth/presentation/auth_providers.dart';
+import '../../../shared/widgets/guest_account_state.dart';
 import '../../../shared/widgets/product_grid.dart';
 
 import 'package:flutter/material.dart';
@@ -79,6 +81,17 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!ref.watch(isLoggedInProvider)) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Wishlist')),
+        body: const GuestAccountState(
+          icon: Icons.favorite_border,
+          subtitle: 'View your saved products and wishlist.',
+          returnTo: '/wishlist',
+        ),
+      );
+    }
+
     final wishlistAsync = ref.watch(myWishlistProvider);
     final idsAsync = ref.watch(wishlistProductIdsProvider);
 

@@ -153,7 +153,16 @@ class AdminShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final index = ref.watch(adminTabIndexProvider);
     return Scaffold(
-      body: IndexedStack(index: index, children: _tabs),
+      body: IndexedStack(
+        index: index,
+        children: [
+          for (var i = 0; i < _tabs.length; i++)
+            TickerMode(
+              enabled: i == index,
+              child: HeroMode(enabled: i == index, child: _tabs[i]),
+            ),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _isMoreSelected(index) ? 3 : index,
         onDestinationSelected: (i) {

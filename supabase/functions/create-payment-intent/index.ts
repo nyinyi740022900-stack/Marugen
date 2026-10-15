@@ -7,17 +7,28 @@
 // Deploy:   supabase functions deploy create-payment-intent
 // Secrets:  supabase secrets set STRIPE_SECRET_KEY=sk_test_xxx
 
-import Stripe from 'https://esm.sh/stripe@17?target=deno';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { normaliseCustomerRemarks, normaliseRemarksRevision, remarksRetryAction } from './order_remarks.ts';
+import Stripe from "https://esm.sh/stripe@17?target=deno";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  applyPaymentEvent,
+  cleanupUnlinkedPayment,
+  completedCheckoutResponse,
+} from "../_shared/payment_lifecycle.ts";
+import { createPaymentPort } from "../_shared/payment_port.ts";
+import {
+  normaliseCustomerRemarks,
+  normaliseRemarksRevision,
+  remarksRetryAction,
+} from "./order_remarks.ts";
 
-const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY') ?? '', {
-  apiVersion: '2024-06-20',
+const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
+  apiVersion: "2024-06-20",
 });
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
 };
 
 type CartLineIn = {
@@ -41,7 +52,7 @@ type BuiltLine = {
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
@@ -50,55 +61,74 @@ function roundMoney(n: number) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get('Authorization');
+    const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return jsonResponse({ error: 'Missing authorization' }, 401);
+      return jsonResponse({ error: "Missing authorization" }, 401);
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     // Prefer the new publishable/secret key pair (set explicitly via
     // `supabase secrets set`) over the legacy JWT anon/service_role names
     // auto-injected by the platform, so this keeps working whether or not
     // legacy JWT-based API keys are later disabled project-wide.
-    const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-    const serviceKey =
-      Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const anonKey = Deno.env.get("SB_ANON_KEY") ??
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+    const serviceKey = Deno.env.get("SB_SERVICE_KEY") ??
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
     const admin = createClient(supabaseUrl, serviceKey);
+    const paymentPort = createPaymentPort(
+      admin,
+      stripe,
+      supabaseUrl,
+      serviceKey,
+    );
 
     const {
       data: { user },
       error: userError,
     } = await userClient.auth.getUser();
     if (userError || !user) {
-      return jsonResponse({ error: 'Unauthorized' }, 401);
+      return jsonResponse({ error: "Unauthorized" }, 401);
     }
 
     const body = await req.json();
     const itemsIn = (body.items ?? []) as CartLineIn[];
-    const currency = (body.currency as string | undefined) ?? 'sgd';
-    const shippingIn = body.shipping_address as Record<string, unknown> | undefined;
+    const currency = (body.currency as string | undefined) ?? "sgd";
+    if (currency.toLowerCase() !== "sgd") {
+      return jsonResponse({ error: "Only SGD is supported" }, 400);
+    }
+    const shippingIn = body.shipping_address as
+      | Record<string, unknown>
+      | undefined;
     const promoCodeRaw = (body.promo_code as string | undefined)?.trim();
-    const idempotencyKey = (body.idempotency_key as string | undefined)?.trim() || null;
+    const idempotencyKey =
+      (body.idempotency_key as string | undefined)?.trim() || null;
     let customerRemarks: string | null;
     let customerRemarksRevision: number;
     try {
       customerRemarks = normaliseCustomerRemarks(body.customer_remarks);
-      customerRemarksRevision = normaliseRemarksRevision(body.customer_remarks_revision);
+      customerRemarksRevision = normaliseRemarksRevision(
+        body.customer_remarks_revision,
+      );
     } catch (error) {
-      return jsonResponse({ error: error instanceof Error ? error.message : 'Invalid order requests.' }, 400);
+      return jsonResponse({
+        error: error instanceof Error
+          ? error.message
+          : "Invalid order requests.",
+      }, 400);
     }
 
     if (!Array.isArray(itemsIn) || itemsIn.length === 0) {
-      return jsonResponse({ error: 'Cart is empty' }, 400);
+      return jsonResponse({ error: "Cart is empty" }, 400);
     }
 
     // Client sends the same idempotency_key for every retry of one checkout
@@ -108,44 +138,74 @@ Deno.serve(async (req) => {
     // it's racing a concurrent one — return that instead of reserving stock
     // and creating a Stripe PaymentIntent a second time.
     const userId: string = user.id;
-    async function findExistingPendingOrder() {
+    async function findExistingCheckout() {
       if (!idempotencyKey) return null;
-      const { data: existing } = await admin
-        .from('orders')
-        .select('id, stripe_payment_intent_id, total, customer_remarks, customer_remarks_revision')
-        .eq('user_id', userId)
-        .eq('idempotency_key', idempotencyKey)
-        .eq('status', 'pending')
+      const { data: existing, error: lookupError } = await admin
+        .from("orders")
+        .select(
+          "id, user_id, status, stripe_payment_intent_id, total, customer_remarks, customer_remarks_revision",
+        )
+        .eq("user_id", userId)
+        .eq("idempotency_key", idempotencyKey)
+        .neq("status", "cancelled")
         .maybeSingle();
-      if (!existing?.stripe_payment_intent_id) return null;
+      if (lookupError) throw lookupError;
+      if (!existing) return null;
+      const completed = completedCheckoutResponse(existing);
+      if (completed) return jsonResponse(completed);
+      if (!existing.stripe_payment_intent_id) {
+        return jsonResponse({
+          error: "Your checkout is still being prepared. Retry shortly.",
+          orderId: existing.id,
+        }, 409);
+      }
       // A retry must keep the same order/payment, but may carry an edited
       // customer note after a dropped response. Never silently ignore it or
       // modify an order that has already left the pending state.
       const action = remarksRetryAction(
-        existing.customer_remarks ?? null, existing.customer_remarks_revision,
-        customerRemarks, customerRemarksRevision,
+        existing.customer_remarks ?? null,
+        existing.customer_remarks_revision,
+        customerRemarks,
+        customerRemarksRevision,
       );
-      if (action === 'stale') {
-        return jsonResponse({ error: 'Your requests have changed. Retry with your latest requests.' }, 409);
+      if (action === "stale") {
+        return jsonResponse({
+          error: "Your requests have changed. Retry with your latest requests.",
+        }, 409);
       }
-      if (action === 'update') {
+      if (action === "update") {
         const { data: updated, error: remarksError } = await admin
-          .from('orders')
-          .update({ customer_remarks: customerRemarks, customer_remarks_revision: customerRemarksRevision })
-          .eq('id', existing.id)
+          .from("orders")
+          .update({
+            customer_remarks: customerRemarks,
+            customer_remarks_revision: customerRemarksRevision,
+          })
+          .eq("id", existing.id)
           // Atomic version guard prevents an older in-flight retry overwriting a newer note.
-          .lt('customer_remarks_revision', customerRemarksRevision)
-          .eq('user_id', userId)
-          .eq('status', 'pending')
-          .select('id')
+          .lt("customer_remarks_revision", customerRemarksRevision)
+          .eq("user_id", userId)
+          .eq("status", "pending")
+          .select("id")
           .maybeSingle();
         if (remarksError || !updated) {
-          return jsonResponse({ error: 'Your order changed. Check your orders before trying again.' }, 409);
+          return jsonResponse({
+            error: "Your order changed. Check your orders before trying again.",
+          }, 409);
         }
       }
       const existingIntent = await stripe.paymentIntents.retrieve(
         existing.stripe_payment_intent_id,
       );
+      if (existingIntent.status === "succeeded") {
+        await applyPaymentEvent(
+          "payment_intent.succeeded",
+          existingIntent.id,
+          paymentPort,
+        );
+        return jsonResponse(
+          completedCheckoutResponse({ ...existing, status: "paid" }),
+        );
+      }
       return jsonResponse({
         clientSecret: existingIntent.client_secret,
         paymentIntentId: existingIntent.id,
@@ -156,7 +216,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const existingResponse = await findExistingPendingOrder();
+    const existingResponse = await findExistingCheckout();
     if (existingResponse) return existingResponse;
 
     // Delivery-only: the shop hand-delivers every order (see
@@ -164,7 +224,7 @@ Deno.serve(async (req) => {
     // self-delivery instead of a courier). There is no self-collection/
     // pickup flow anymore.
     if (!shippingIn) {
-      return jsonResponse({ error: 'Shipping address required' }, 400);
+      return jsonResponse({ error: "Shipping address required" }, 400);
     }
     const shippingAddress: Record<string, unknown> = { ...shippingIn };
 
@@ -175,22 +235,23 @@ Deno.serve(async (req) => {
       const productId = line.product_id;
       const qty = Math.floor(Number(line.quantity) || 0);
       if (!productId || qty < 1) {
-        return jsonResponse({ error: 'Invalid cart line' }, 400);
+        return jsonResponse({ error: "Invalid cart line" }, 400);
       }
 
       const { data: product, error: productError } = await admin
-        .from('products')
+        .from("products")
         .select(
-          'id, name, category, price, sale_price, show_price, stock_quantity, is_sold, size_options, image_urls',
+          "id, name, category, price, sale_price, show_price, stock_quantity, is_sold, size_options, image_urls",
         )
-        .eq('id', productId)
+        .eq("id", productId)
         .maybeSingle();
 
       if (productError || !product) {
         return jsonResponse({ error: `Product not found: ${productId}` }, 400);
       }
 
-      const isLiveFish = product.category === 'koi' || product.category === 'arowana';
+      const isLiveFish = product.category === "koi" ||
+        product.category === "arowana";
       // Snapshot the product's cover photo onto the order line — the
       // product itself (and its images) can be edited or deleted later,
       // but the order's item photo should stay as it was at purchase time.
@@ -199,10 +260,13 @@ Deno.serve(async (req) => {
           ? product.image_urls[0]
           : null;
       const sizeOptions: string[] = Array.isArray(product.size_options)
-        ? product.size_options.filter((s: unknown) => typeof s === 'string' && s.trim().length > 0)
+        ? product.size_options.filter((s: unknown) =>
+          typeof s === "string" && s.trim().length > 0
+        )
         : [];
-      const sizeLabelRaw =
-        typeof line.size_label === 'string' ? line.size_label.trim() : '';
+      const sizeLabelRaw = typeof line.size_label === "string"
+        ? line.size_label.trim()
+        : "";
       let sizeLabel: string | undefined;
       if (!isLiveFish && sizeOptions.length > 0) {
         if (!sizeLabelRaw || !sizeOptions.includes(sizeLabelRaw)) {
@@ -223,38 +287,44 @@ Deno.serve(async (req) => {
         // one specific animal, so quantity must be 1 just like the
         // no-variant live-fish path below.
         if (isLiveFish && qty !== 1) {
-          return jsonResponse({ error: 'Live fish quantity must be 1' }, 400);
+          return jsonResponse({ error: "Live fish quantity must be 1" }, 400);
         }
 
         const { data: variant, error: variantError } = await admin
-          .from('product_variants')
-          .select('id, product_id, label, price, stock_quantity')
-          .eq('id', line.variant_id)
-          .eq('product_id', productId)
+          .from("product_variants")
+          .select("id, product_id, label, price, stock_quantity")
+          .eq("id", line.variant_id)
+          .eq("product_id", productId)
           .maybeSingle();
 
         if (variantError || !variant) {
-          return jsonResponse({ error: `Variant not found: ${line.variant_id}` }, 400);
+          return jsonResponse({
+            error: `Variant not found: ${line.variant_id}`,
+          }, 400);
         }
         if (!product.show_price) {
-          return jsonResponse({ error: `${product.name} is contact-for-price` }, 400);
+          return jsonResponse(
+            { error: `${product.name} is contact-for-price` },
+            400,
+          );
         }
 
         if (sizeLabel) {
           const { data: sizeStock, error: sizeStockError } = await admin
-            .from('product_variant_size_stocks')
-            .select('stock_quantity')
-            .eq('variant_id', variant.id)
-            .eq('size_label', sizeLabel)
+            .from("product_variant_size_stocks")
+            .select("stock_quantity")
+            .eq("variant_id", variant.id)
+            .eq("size_label", sizeLabel)
             .maybeSingle();
           if (sizeStockError) {
-            return jsonResponse({ error: 'Could not check size stock' }, 500);
+            return jsonResponse({ error: "Could not check size stock" }, 500);
           }
           const available = Number(sizeStock?.stock_quantity ?? 0);
           if (available < qty) {
             return jsonResponse(
               {
-                error: `${product.name} (${variant.label} · ${sizeLabel}) is out of stock`,
+                error:
+                  `${product.name} (${variant.label} · ${sizeLabel}) is out of stock`,
               },
               400,
             );
@@ -280,29 +350,41 @@ Deno.serve(async (req) => {
         subtotal += unit * qty;
       } else {
         if (!product.show_price || product.price == null) {
-          return jsonResponse({ error: `${product.name} is contact-for-price` }, 400);
+          return jsonResponse(
+            { error: `${product.name} is contact-for-price` },
+            400,
+          );
         }
         // Variant products (weight options, or a live-fish batch listing's
         // fish/variety picks) must choose one on the client — checked
         // before the base price/stock fields below, which are unused once
         // variants exist and may be stale.
         const { count } = await admin
-          .from('product_variants')
-          .select('id', { count: 'exact', head: true })
-          .eq('product_id', productId);
+          .from("product_variants")
+          .select("id", { count: "exact", head: true })
+          .eq("product_id", productId);
         if ((count ?? 0) > 0) {
-          return jsonResponse({ error: `${product.name} requires a variant` }, 400);
+          return jsonResponse(
+            { error: `${product.name} requires a variant` },
+            400,
+          );
         }
 
         if (isLiveFish) {
           if (qty !== 1) {
-            return jsonResponse({ error: 'Live fish quantity must be 1' }, 400);
+            return jsonResponse({ error: "Live fish quantity must be 1" }, 400);
           }
           if (product.is_sold || product.stock_quantity < 1) {
-            return jsonResponse({ error: `${product.name} is already sold` }, 400);
+            return jsonResponse(
+              { error: `${product.name} is already sold` },
+              400,
+            );
           }
         } else if (product.stock_quantity < qty) {
-          return jsonResponse({ error: `${product.name} is out of stock` }, 400);
+          return jsonResponse(
+            { error: `${product.name} is out of stock` },
+            400,
+          );
         }
 
         // Sale price wins only when it's actually a discount — never
@@ -331,36 +413,43 @@ Deno.serve(async (req) => {
     let promoId: string | null = null;
     if (promoCodeRaw) {
       const { data: promo } = await admin
-        .from('promo_codes')
+        .from("promo_codes")
         .select(
-          'id, code, discount_type, discount_value, active, expires_at, max_redemptions, times_redeemed',
+          "id, code, discount_type, discount_value, active, expires_at, max_redemptions, times_redeemed",
         )
-        .ilike('code', promoCodeRaw)
+        .ilike("code", promoCodeRaw)
         .maybeSingle();
 
       if (!promo || !promo.active) {
-        return jsonResponse({ error: 'Invalid promo code' }, 400);
+        return jsonResponse({ error: "Invalid promo code" }, 400);
       }
       if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
-        return jsonResponse({ error: 'Promo code expired' }, 400);
+        return jsonResponse({ error: "Promo code expired" }, 400);
       }
-      if (promo.max_redemptions != null && promo.times_redeemed >= promo.max_redemptions) {
-        return jsonResponse({ error: 'This promo code has reached its usage limit' }, 400);
+      if (
+        promo.max_redemptions != null &&
+        promo.times_redeemed >= promo.max_redemptions
+      ) {
+        return jsonResponse({
+          error: "This promo code has reached its usage limit",
+        }, 400);
       }
       const { data: alreadyUsed } = await admin
-        .from('promo_code_redemptions')
-        .select('id')
-        .eq('promo_code_id', promo.id)
-        .eq('user_id', user.id)
+        .from("promo_code_redemptions")
+        .select("id")
+        .eq("promo_code_id", promo.id)
+        .eq("user_id", user.id)
         .maybeSingle();
       if (alreadyUsed) {
-        return jsonResponse({ error: 'You have already used this promo code' }, 400);
+        return jsonResponse(
+          { error: "You have already used this promo code" },
+          400,
+        );
       }
 
-      const raw =
-        promo.discount_type === 'percent'
-          ? subtotal * Number(promo.discount_value) / 100
-          : Number(promo.discount_value);
+      const raw = promo.discount_type === "percent"
+        ? subtotal * Number(promo.discount_value) / 100
+        : Number(promo.discount_value);
       discountAmount = roundMoney(Math.min(Math.max(raw, 0), subtotal));
       promoCode = promo.code;
       promoId = promo.id;
@@ -369,9 +458,9 @@ Deno.serve(async (req) => {
     const netSubtotal = roundMoney(subtotal - discountAmount);
 
     const { data: settings } = await admin
-      .from('settings')
-      .select('gst_percent, gst_included_in_price')
-      .eq('id', 1)
+      .from("settings")
+      .select("gst_percent, gst_included_in_price")
+      .eq("id", 1)
       .maybeSingle();
 
     const gstPercent = Number(settings?.gst_percent ?? 9);
@@ -383,16 +472,16 @@ Deno.serve(async (req) => {
     }
 
     if (payableTotal <= 0) {
-      return jsonResponse({ error: 'Invalid total' }, 400);
+      return jsonResponse({ error: "Invalid total" }, 400);
     }
 
     const amountCents = Math.round(payableTotal * 100);
 
     const { data: order, error: orderError } = await admin
-      .from('orders')
+      .from("orders")
       .insert({
         user_id: user.id,
-        status: 'pending',
+        status: "pending",
         total: payableTotal,
         shipping_address: shippingAddress,
         customer_remarks: customerRemarks,
@@ -401,7 +490,7 @@ Deno.serve(async (req) => {
         discount_amount: discountAmount > 0 ? discountAmount : null,
         idempotency_key: idempotencyKey,
       })
-      .select('id')
+      .select("id")
       .single();
 
     if (orderError || !order) {
@@ -409,16 +498,18 @@ Deno.serve(async (req) => {
       // — a concurrent request with the same idempotency_key won the race
       // and inserted its pending order first. Return that one instead of
       // failing the request outright.
-      if (orderError?.code === '23505') {
-        const raced = await findExistingPendingOrder();
+      if (orderError?.code === "23505") {
+        const raced = await findExistingCheckout();
         if (raced) return raced;
       }
-      return jsonResponse({ error: `Could not create order: ${orderError?.message}` }, 500);
+      return jsonResponse({
+        error: `Could not create order: ${orderError?.message}`,
+      }, 500);
     }
 
     const orderId = order.id as string;
 
-    const { error: itemsError } = await admin.from('order_items').insert(
+    const { error: itemsError } = await admin.from("order_items").insert(
       builtLines.map((line) => ({
         order_id: orderId,
         product_id: line.product_id,
@@ -433,8 +524,14 @@ Deno.serve(async (req) => {
     );
 
     if (itemsError) {
-      await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
-      return jsonResponse({ error: itemsError.message || 'Stock unavailable' }, 409);
+      await admin.from("orders").update({ status: "cancelled" }).eq(
+        "id",
+        orderId,
+      );
+      return jsonResponse(
+        { error: itemsError.message || "Stock unavailable" },
+        409,
+      );
     }
 
     // Claim the promo code atomically, the same way live-fish stock is
@@ -447,15 +544,25 @@ Deno.serve(async (req) => {
     // order on failure re-runs the same stock-restore trigger the
     // itemsError/stripeErr paths rely on, so nothing is left half-reserved.
     if (promoId) {
-      const { data: claimed, error: claimError } = await admin.rpc('claim_promo_redemption', {
-        p_promo_id: promoId,
-      });
+      const { data: claimed, error: claimError } = await admin.rpc(
+        "claim_promo_redemption",
+        {
+          p_promo_id: promoId,
+        },
+      );
       if (claimError || !claimed) {
-        await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
-        return jsonResponse({ error: 'This promo code has reached its usage limit' }, 409);
+        await admin.from("orders").update({ status: "cancelled" }).eq(
+          "id",
+          orderId,
+        );
+        return jsonResponse({
+          error: "This promo code has reached its usage limit",
+        }, 409);
       }
 
-      const { error: redemptionError } = await admin.from('promo_code_redemptions').insert({
+      const { error: redemptionError } = await admin.from(
+        "promo_code_redemptions",
+      ).insert({
         promo_code_id: promoId,
         user_id: user.id,
         order_id: orderId,
@@ -464,9 +571,15 @@ Deno.serve(async (req) => {
         // Unique violation (promo_code_id, user_id) means this user
         // already redeemed it — release the slot we just claimed above so
         // the cap isn't wrongly consumed by a rejected attempt.
-        await admin.rpc('release_promo_redemption', { p_promo_id: promoId });
-        await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
-        return jsonResponse({ error: 'You have already used this promo code' }, 409);
+        await admin.rpc("release_promo_redemption", { p_promo_id: promoId });
+        await admin.from("orders").update({ status: "cancelled" }).eq(
+          "id",
+          orderId,
+        );
+        return jsonResponse(
+          { error: "You have already used this promo code" },
+          409,
+        );
       }
     }
 
@@ -482,19 +595,37 @@ Deno.serve(async (req) => {
         },
       });
     } catch (stripeErr) {
-      await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
+      await admin.from("orders").update({ status: "cancelled" }).eq(
+        "id",
+        orderId,
+      );
       return jsonResponse({ error: `Stripe error: ${stripeErr}` }, 500);
     }
 
-    const { error: linkError } = await admin
-      .from('orders')
+    const { data: linkedOrder, error: linkError } = await admin
+      .from("orders")
       .update({ stripe_payment_intent_id: paymentIntent.id })
-      .eq('id', orderId);
+      .eq("id", orderId)
+      .eq("status", "pending")
+      .is("stripe_payment_intent_id", null)
+      .select("id")
+      .maybeSingle();
 
-    if (linkError) {
-      await stripe.paymentIntents.cancel(paymentIntent.id).catch(() => {});
-      await admin.from('orders').update({ status: 'cancelled' }).eq('id', orderId);
-      return jsonResponse({ error: `Could not link payment: ${linkError.message}` }, 500);
+    if (linkError || !linkedOrder) {
+      try {
+        await cleanupUnlinkedPayment(orderId, paymentIntent.id, paymentPort);
+      } catch (cleanupError) {
+        // Keep reserved stock when Stripe cancellation or DB linkage is uncertain.
+        console.error(
+          "Payment link cleanup requires reconciliation",
+          orderId,
+          paymentIntent.id,
+          cleanupError,
+        );
+      }
+      return jsonResponse({
+        error: "Could not link payment. Check your order before retrying.",
+      }, 409);
     }
 
     return jsonResponse({

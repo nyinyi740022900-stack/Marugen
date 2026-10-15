@@ -129,14 +129,17 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(AppSpacing.lg),
           children: [
-            SegmentedButton<_Period>(
-              segments: const [
-                ButtonSegment(value: _Period.daily, label: Text('Daily')),
-                ButtonSegment(value: _Period.weekly, label: Text('Weekly')),
-                ButtonSegment(value: _Period.monthly, label: Text('Monthly')),
-              ],
-              selected: {_period},
-              onSelectionChanged: (s) => setState(() => _period = s.first),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<_Period>(
+                segments: const [
+                  ButtonSegment(value: _Period.daily, label: Text('Daily')),
+                  ButtonSegment(value: _Period.weekly, label: Text('Weekly')),
+                  ButtonSegment(value: _Period.monthly, label: Text('Monthly')),
+                ],
+                selected: {_period},
+                onSelectionChanged: (s) => setState(() => _period = s.first),
+              ),
             ),
             const SizedBox(height: AppSpacing.xl),
             Text(
@@ -299,47 +302,68 @@ class _BarChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxCount = buckets.fold<int>(1, (m, b) => b.count > m ? b.count : m);
-    return SizedBox(
-      height: 110,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          for (final b in buckets)
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${b.count}',
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: AppPalette.of(context).textMuted,
+    final scaler = MediaQuery.textScalerOf(context);
+    final countWidth = maxCount.toString().length * scaler.scale(9) * 0.7 + 12;
+    final labelWidth = buckets.fold<double>(0, (width, b) {
+      final next = b.label.length * scaler.scale(9) * 0.7 + 12;
+      return next > width ? next : width;
+    });
+    final bucketWidth = countWidth > labelWidth ? countWidth : labelWidth;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minimumWidth = bucketWidth * buckets.length;
+        final width = minimumWidth > constraints.maxWidth
+            ? minimumWidth
+            : constraints.maxWidth;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: width,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (final b in buckets)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${b.count}',
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Container(
+                            height: 60 * (b.count / maxCount).clamp(0.03, 1.0),
+                            decoration: BoxDecoration(
+                              color: AppPalette.of(context).accent,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            b.label,
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 9,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 2),
-                    Container(
-                      height: 60 * (b.count / maxCount).clamp(0.03, 1.0),
-                      decoration: BoxDecoration(
-                        color: AppPalette.of(context).accent,
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      b.label,
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: AppPalette.of(context).textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+                  ),
+              ],
             ),
-        ],
-      ),
+          ),
+        );
+      },
     );
   }
 }

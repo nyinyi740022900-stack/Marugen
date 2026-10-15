@@ -1,3 +1,9 @@
+import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:marugen_app/core/config/env.dart';
+
+import 'support/read_only_http_client.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,7 +24,12 @@ void main() {
       // Exercise the production app/router without installing crash handlers
       // that would intercept the integration runner's assertion reporting.
       await dotenv.load(fileName: '.env');
-      await SupabaseService.init();
+      final readOnlyClient = ReadOnlyHttpClient(http.Client());
+      await Supabase.initialize(
+        url: Env.supabaseUrl,
+        publishableKey: Env.supabaseAnonKey,
+        httpClient: readOnlyClient,
+      );
       expect(
         SupabaseService.currentUser,
         isNull,
@@ -57,6 +68,28 @@ void main() {
       expect(find.byTooltip('Appearance'), findsOneWidget);
       expect(find.text('THIS DEVICE'), findsNothing);
       expect(find.text('Appearance'), findsNothing);
+      final profileLoginRect = tester.getRect(
+        find.text('Log In').hitTestable(),
+      );
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomNavigationBar),
+          matching: find.byIcon(Icons.receipt_long_outlined),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Log in to your account').hitTestable(), findsOneWidget);
+      final orderLoginRect = tester.getRect(find.text('Log In').hitTestable());
+      expect(orderLoginRect.top, closeTo(profileLoginRect.top, 1));
+      expect(orderLoginRect.width, profileLoginRect.width);
+      await binding.takeScreenshot('android-orders-guest');
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomNavigationBar),
+          matching: find.byIcon(Icons.person_outline),
+        ),
+      );
+      await tester.pumpAndSettle();
       await binding.takeScreenshot('android-profile-light');
 
       await tester.tap(find.byTooltip('Appearance'));
@@ -108,6 +141,12 @@ void main() {
       expect(find.textContaining('placeholder'), findsNothing);
       await binding.takeScreenshot('android-privacy-policy');
       expect(tester.takeException(), isNull);
+      expect(
+        readOnlyClient.blockedWrites,
+        greaterThanOrEqualTo(1),
+        reason:
+            'Guest app-visit analytics must be intercepted rather than sent.',
+      );
     },
   );
 }

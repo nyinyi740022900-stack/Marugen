@@ -31,8 +31,12 @@ Future<Uint8List> buildInvoicePdf({
 
   final discount = order.discountAmount ?? 0;
   final netTotal = order.total;
-  final subtotalBeforeGst = gstIncluded ? netTotal / (1 + gstPercent / 100) : netTotal;
-  final gstAmount = gstIncluded ? netTotal - subtotalBeforeGst : netTotal * gstPercent / 100;
+  final subtotalBeforeGst = gstIncluded
+      ? netTotal / (1 + gstPercent / 100)
+      : netTotal;
+  final gstAmount = gstIncluded
+      ? netTotal - subtotalBeforeGst
+      : netTotal * gstPercent / 100;
   final grandTotal = gstIncluded ? netTotal : netTotal + gstAmount;
 
   final shipping = order.shippingAddress;
@@ -70,19 +74,34 @@ Future<Uint8List> buildInvoicePdf({
                     pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                        pw.Text(shopName,
-                            style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                        pw.Text(
+                          shopName,
+                          style: pw.TextStyle(
+                            fontSize: 20,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
                         if (shopAddress != null && shopAddress.isNotEmpty)
                           pw.Padding(
                             padding: const pw.EdgeInsets.only(top: 4),
-                            child: pw.Text(shopAddress,
-                                style: const pw.TextStyle(fontSize: 9.5, color: _grey)),
+                            child: pw.Text(
+                              shopAddress,
+                              style: const pw.TextStyle(
+                                fontSize: 9.5,
+                                color: _grey,
+                              ),
+                            ),
                           ),
                         if (shopPhone != null && shopPhone.isNotEmpty)
                           pw.Padding(
                             padding: const pw.EdgeInsets.only(top: 2),
-                            child: pw.Text('Tel: $shopPhone',
-                                style: const pw.TextStyle(fontSize: 9.5, color: _grey)),
+                            child: pw.Text(
+                              'Tel: $shopPhone',
+                              style: const pw.TextStyle(
+                                fontSize: 9.5,
+                                color: _grey,
+                              ),
+                            ),
                           ),
                       ],
                     ),
@@ -91,16 +110,27 @@ Future<Uint8List> buildInvoicePdf({
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
-                    pw.Text('TAX INVOICE',
-                        style: pw.TextStyle(
-                            fontSize: 16, fontWeight: pw.FontWeight.bold, color: _brandRed)),
+                    pw.Text(
+                      'TAX INVOICE',
+                      style: pw.TextStyle(
+                        fontSize: 16,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _brandRed,
+                      ),
+                    ),
                     pw.SizedBox(height: 4),
-                    pw.Text('Invoice #: ${order.displayNumber}',
-                        style: const pw.TextStyle(fontSize: 9.5)),
-                    pw.Text('Date: ${dateFmt.format(order.createdAt)}',
-                        style: const pw.TextStyle(fontSize: 9.5)),
-                    pw.Text('Status: ${orderStatusLabel(order.status).toUpperCase()}',
-                        style: const pw.TextStyle(fontSize: 9.5)),
+                    pw.Text(
+                      'Invoice #: ${order.displayNumber}',
+                      style: const pw.TextStyle(fontSize: 9.5),
+                    ),
+                    pw.Text(
+                      'Date: ${dateFmt.format(order.createdAt)}',
+                      style: const pw.TextStyle(fontSize: 9.5),
+                    ),
+                    pw.Text(
+                      'Status: ${orderStatusLabel(order.status).toUpperCase()}',
+                      style: const pw.TextStyle(fontSize: 9.5),
+                    ),
                   ],
                 ),
               ],
@@ -113,7 +143,10 @@ Future<Uint8List> buildInvoicePdf({
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                _labelRow('Customer Name', (shipping?['recipient_name'] as String?) ?? '—'),
+                _labelRow(
+                  'Customer Name',
+                  (shipping?['recipient_name'] as String?) ?? '—',
+                ),
                 if ((shipping?['phone'] as String?)?.isNotEmpty ?? false)
                   _labelRow('Phone Number', shipping!['phone'] as String),
                 _labelRow(
@@ -121,11 +154,13 @@ Future<Uint8List> buildInvoicePdf({
                   shipping == null
                       ? '—'
                       : [
-                          shipping['line1'],
-                          shipping['line2'],
-                          shipping['city'],
-                          shipping['postal_code'],
-                        ].where((p) => p != null && (p as String).isNotEmpty).join(', '),
+                              shipping['line1'],
+                              shipping['line2'],
+                              shipping['city'],
+                              shipping['postal_code'],
+                            ]
+                            .where((p) => p != null && (p as String).isNotEmpty)
+                            .join(', '),
                 ),
               ],
             ),
@@ -145,32 +180,72 @@ Future<Uint8List> buildInvoicePdf({
               },
               children: [
                 pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFFF4F2EE)),
+                  decoration: const pw.BoxDecoration(
+                    color: PdfColor.fromInt(0xFFF4F2EE),
+                  ),
                   children: [
                     _cell('ITEM', bold: true, pad: true),
-                    _cell('QTY', bold: true, pad: true, align: pw.TextAlign.center),
-                    _cell('UNIT PRICE', bold: true, pad: true, align: pw.TextAlign.right),
-                    _cell('AMOUNT', bold: true, pad: true, align: pw.TextAlign.right),
+                    _cell(
+                      'QTY',
+                      bold: true,
+                      pad: true,
+                      align: pw.TextAlign.center,
+                    ),
+                    _cell(
+                      'UNIT PRICE',
+                      bold: true,
+                      pad: true,
+                      align: pw.TextAlign.right,
+                    ),
+                    _cell(
+                      'AMOUNT',
+                      bold: true,
+                      pad: true,
+                      align: pw.TextAlign.right,
+                    ),
                   ],
                 ),
                 for (final item in order.items)
                   pw.TableRow(
                     children: [
                       pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                        padding: const pw.EdgeInsets.symmetric(
+                          vertical: 6,
+                          horizontal: 4,
+                        ),
                         child: pw.Column(
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
-                            pw.Text(item.productName, style: const pw.TextStyle(fontSize: 9.5)),
+                            pw.Text(
+                              item.productName,
+                              style: const pw.TextStyle(fontSize: 9.5),
+                            ),
                             if (item.optionLabel != null)
-                              pw.Text(item.optionLabel!,
-                                  style: const pw.TextStyle(fontSize: 8, color: _grey)),
+                              pw.Text(
+                                item.optionLabel!,
+                                style: const pw.TextStyle(
+                                  fontSize: 8,
+                                  color: _grey,
+                                ),
+                              ),
                           ],
                         ),
                       ),
-                      _cell('${item.quantity}', pad: true, align: pw.TextAlign.center),
-                      _cell(_money(item.unitPrice), pad: true, align: pw.TextAlign.right),
-                      _cell(_money(item.subtotal), pad: true, align: pw.TextAlign.right),
+                      _cell(
+                        '${item.quantity}',
+                        pad: true,
+                        align: pw.TextAlign.center,
+                      ),
+                      _cell(
+                        _money(item.unitPrice),
+                        pad: true,
+                        align: pw.TextAlign.right,
+                      ),
+                      _cell(
+                        _money(item.subtotal),
+                        pad: true,
+                        align: pw.TextAlign.right,
+                      ),
                     ],
                   ),
               ],
@@ -186,20 +261,27 @@ Future<Uint8List> buildInvoicePdf({
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('PAYMENT',
-                          style: pw.TextStyle(
-                              fontSize: 9,
-                              fontWeight: pw.FontWeight.bold,
-                              color: _grey,
-                              letterSpacing: 0.8)),
+                      pw.Text(
+                        'PAYMENT',
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                          color: _grey,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
                       pw.SizedBox(height: 4),
                       if (order.stripePaymentIntentId != null &&
                           order.stripePaymentIntentId!.isNotEmpty)
-                        pw.Text('Ref: ${order.stripePaymentIntentId}',
-                            style: const pw.TextStyle(fontSize: 9.5)),
+                        pw.Text(
+                          'Ref: ${order.stripePaymentIntentId}',
+                          style: const pw.TextStyle(fontSize: 9.5),
+                        ),
                       if (order.promoCode != null)
-                        pw.Text('Promo code: ${order.promoCode}',
-                            style: const pw.TextStyle(fontSize: 9.5)),
+                        pw.Text(
+                          'Promo code: ${order.promoCode}',
+                          style: const pw.TextStyle(fontSize: 9.5),
+                        ),
                     ],
                   ),
                 ),
@@ -208,7 +290,10 @@ Future<Uint8List> buildInvoicePdf({
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                     children: [
-                      _totalRow('Subtotal (excl. GST)', _money(subtotalBeforeGst)),
+                      _totalRow(
+                        'Subtotal (excl. GST)',
+                        _money(subtotalBeforeGst),
+                      ),
                       if (discount > 0)
                         _totalRow(
                           order.promoCode != null
@@ -217,12 +302,20 @@ Future<Uint8List> buildInvoicePdf({
                           '-${_money(discount)}',
                           color: _brandRed,
                         ),
-                      _totalRow('GST (${gstPercent.toStringAsFixed(0)}%)', _money(gstAmount)),
+                      _totalRow(
+                        'GST (${gstPercent.toStringAsFixed(0)}%)',
+                        _money(gstAmount),
+                      ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.symmetric(vertical: 6),
                         child: pw.Divider(color: _lightGrey, thickness: 1),
                       ),
-                      _totalRow('TOTAL', _money(grandTotal), bold: true, fontSize: 13),
+                      _totalRow(
+                        'TOTAL',
+                        _money(grandTotal),
+                        bold: true,
+                        fontSize: 13,
+                      ),
                     ],
                   ),
                 ),
@@ -232,8 +325,10 @@ Future<Uint8List> buildInvoicePdf({
             pw.Divider(color: _lightGrey, thickness: 1),
             pw.SizedBox(height: 8),
             pw.Center(
-              child: pw.Text('Thank you for shopping with $shopName!',
-                  style: const pw.TextStyle(fontSize: 9.5, color: _grey)),
+              child: pw.Text(
+                'Thank you for shopping with $shopName!',
+                style: const pw.TextStyle(fontSize: 9.5, color: _grey),
+              ),
             ),
           ],
         );
@@ -253,28 +348,49 @@ pw.Widget _labelRow(String label, String value) {
       children: [
         pw.SizedBox(
           width: 100,
-          child: pw.Text(label, style: const pw.TextStyle(fontSize: 9.5, color: _grey)),
+          child: pw.Text(
+            label,
+            style: const pw.TextStyle(fontSize: 9.5, color: _grey),
+          ),
         ),
-        pw.Text(value,
-            style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+        pw.Text(
+          value,
+          style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
+        ),
       ],
     ),
   );
 }
 
-pw.Widget _cell(String text,
-    {bool bold = false, bool pad = false, pw.TextAlign align = pw.TextAlign.left}) {
+pw.Widget _cell(
+  String text, {
+  bool bold = false,
+  bool pad = false,
+  pw.TextAlign align = pw.TextAlign.left,
+}) {
   final child = pw.Text(
     text,
     textAlign: align,
-    style: pw.TextStyle(fontSize: 9, fontWeight: bold ? pw.FontWeight.bold : null),
+    style: pw.TextStyle(
+      fontSize: 9,
+      fontWeight: bold ? pw.FontWeight.bold : null,
+    ),
   );
   return pad
-      ? pw.Padding(padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 4), child: child)
+      ? pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          child: child,
+        )
       : child;
 }
 
-pw.Widget _totalRow(String label, String value, {bool bold = false, double fontSize = 10, PdfColor? color}) {
+pw.Widget _totalRow(
+  String label,
+  String value, {
+  bool bold = false,
+  double fontSize = 10,
+  PdfColor? color,
+}) {
   final style = pw.TextStyle(
     fontSize: fontSize,
     fontWeight: bold ? pw.FontWeight.bold : null,
@@ -285,7 +401,13 @@ pw.Widget _totalRow(String label, String value, {bool bold = false, double fontS
     child: pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
-        pw.Text(label, style: style.copyWith(color: color ?? _grey, fontSize: fontSize - (bold ? 0 : 0.5))),
+        pw.Text(
+          label,
+          style: style.copyWith(
+            color: color ?? _grey,
+            fontSize: fontSize - (bold ? 0 : 0.5),
+          ),
+        ),
         pw.Text(value, style: style),
       ],
     ),

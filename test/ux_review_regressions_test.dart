@@ -168,6 +168,7 @@ void main() {
       ProviderScope(
         overrides: [
           authStateProvider.overrideWith((ref) => const Stream.empty()),
+          isLoggedInProvider.overrideWithValue(true),
           currentUserIdProvider.overrideWithValue('customer'),
           myWishlistProvider.overrideWith((ref) async => [item]),
           wishlistRepositoryProvider.overrideWithValue(repository),

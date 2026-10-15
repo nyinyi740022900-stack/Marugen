@@ -16,31 +16,25 @@ OrderStatus orderStatusFromString(String value) {
 }
 
 /// Statuses an order in [current] may move to next — a forward-only
-/// pipeline, not a freeform set. Mirrored exactly by the DB trigger in
-/// `0030_order_status_forward_only.sql` so the same rule holds even if a
-/// client bypasses this UI-level check. `paid`/`packing` can both jump
+/// pipeline, not a freeform set. Payment confirmation is server-owned;
+/// the database guards in 0030/0055 also reject invalid client writes.
+/// `paid`/`packing` can both jump
 /// straight to `delivered` (skipping `shipped`) because live fish orders
 /// are hand-delivered by the shop with no courier "shipped" step — see
 /// admin_delivery_screen.dart's "Delivered by shop" action.
 Set<OrderStatus> validNextStatuses(OrderStatus current) {
   switch (current) {
     case OrderStatus.pending:
-      return {OrderStatus.paid, OrderStatus.cancelled};
+      return {OrderStatus.cancelled};
     case OrderStatus.paid:
       return {
         OrderStatus.packing,
         OrderStatus.shipped,
         OrderStatus.delivered,
-        OrderStatus.cancelled,
         OrderStatus.refunded,
       };
     case OrderStatus.packing:
-      return {
-        OrderStatus.shipped,
-        OrderStatus.delivered,
-        OrderStatus.cancelled,
-        OrderStatus.refunded,
-      };
+      return {OrderStatus.shipped, OrderStatus.delivered, OrderStatus.refunded};
     case OrderStatus.shipped:
       return {OrderStatus.delivered, OrderStatus.refunded};
     case OrderStatus.delivered:

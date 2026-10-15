@@ -13,6 +13,8 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'orders_providers.dart';
+import '../../../shared/widgets/guest_account_state.dart';
+import '../../shop/presentation/shell_tab_provider.dart';
 
 class OrdersScreen extends ConsumerWidget {
   const OrdersScreen({super.key});
@@ -23,7 +25,7 @@ class OrdersScreen extends ConsumerWidget {
 
     if (!isLoggedIn) {
       return Scaffold(
-        appBar: AppBar(title: const Text('My Orders')),
+        appBar: AppBar(title: const Text('Orders')),
         body: const _LoggedOutOrders(),
       );
     }
@@ -33,7 +35,7 @@ class OrdersScreen extends ConsumerWidget {
     final hasQuery = ref.watch(myOrdersSearchQueryProvider).trim().isNotEmpty;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('My Orders')),
+      appBar: AppBar(title: const Text('Orders')),
       body: ContentWidth(
         maxWidth: 760,
         child: Column(
@@ -53,10 +55,18 @@ class OrdersScreen extends ConsumerWidget {
                             title: 'No matching orders',
                             subtitle: 'Try a different order number, status, or item name.',
                           )
-                        : const EmptyState(
+                        : EmptyState(
                             icon: Icons.receipt_long_outlined,
                             title: 'No orders yet',
                             subtitle: 'Your placed orders will show up here.',
+                            actionLabel: 'Browse Shop',
+                            onAction: () {
+                              ref
+                                      .read(customerTabIndexProvider.notifier)
+                                      .state =
+                                  0;
+                              context.go('/');
+                            },
                           );
                   }
                   // Pull-to-refresh — standard on every major shopping app's
@@ -83,9 +93,9 @@ class OrdersScreen extends ConsumerWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
+                                  Wrap(
+                                    spacing: 12,
+                                    runSpacing: 8,
                                     children: [
                                       Text(
                                         'Order #${order.displayNumber}',
@@ -193,6 +203,7 @@ class _OrderSearchFieldState extends ConsumerState<_OrderSearchField> {
         suffixIcon: query.isEmpty
             ? null
             : IconButton(
+                tooltip: 'Clear order search',
                 icon: const Icon(Icons.close, size: 18),
                 onPressed: () =>
                     ref.read(myOrdersSearchQueryProvider.notifier).state = '',
@@ -215,12 +226,9 @@ class _LoggedOutOrders extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return EmptyState(
+    return const GuestAccountState(
       icon: Icons.receipt_long_outlined,
-      title: 'You are not logged in',
-      subtitle: 'Log in to see your orders.',
-      actionLabel: 'Log In',
-      onAction: () => context.push('/login'),
+      subtitle: 'View your orders and delivery updates.',
     );
   }
 }

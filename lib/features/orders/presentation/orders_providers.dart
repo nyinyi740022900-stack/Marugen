@@ -1,11 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/order.dart';
+import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/order_repository.dart';
 
-final orderRepositoryProvider = Provider<OrderRepository>((ref) => OrderRepository());
+final orderRepositoryProvider = Provider<OrderRepository>(
+  (ref) => OrderRepository(),
+);
 
 /// Watches [authStateProvider] (same pattern as [currentAppUserProvider]) so
 /// this re-fetches once sign-in/session-restore actually completes. Without
@@ -33,12 +36,16 @@ final visibleMyOrdersProvider = Provider<AsyncValue<List<Order>>>((ref) {
     return orders.where((o) {
       if (o.displayNumber.toLowerCase().contains(query)) return true;
       if (orderStatusLabel(o.status).toLowerCase().contains(query)) return true;
-      return o.items.any((item) => item.productName.toLowerCase().contains(query));
+      return o.items.any(
+        (item) => item.productName.toLowerCase().contains(query),
+      );
     }).toList();
   });
 });
 
-final adminOrderStatusFilterProvider = StateProvider<OrderStatus?>((ref) => null);
+final adminOrderStatusFilterProvider = StateProvider<OrderStatus?>(
+  (ref) => null,
+);
 
 final adminOrdersProvider = FutureProvider<List<Order>>((ref) {
   final status = ref.watch(adminOrderStatusFilterProvider);
@@ -63,8 +70,10 @@ class AdminOrdersPagedNotifier extends PagedNotifier<Order> {
 }
 
 final adminOrdersPagedProvider =
-    NotifierProvider<AdminOrdersPagedNotifier, AsyncValue<PagedListState<Order>>>(
-        AdminOrdersPagedNotifier.new);
+    NotifierProvider<
+      AdminOrdersPagedNotifier,
+      AsyncValue<PagedListState<Order>>
+    >(AdminOrdersPagedNotifier.new);
 
 /// Call this everywhere an admin mutation used to `ref.invalidate
 /// (adminOrdersProvider)` — keeps both the legacy unbounded list (still
@@ -75,8 +84,19 @@ void refreshAdminOrders(WidgetRef ref) {
   ref.read(adminOrdersPagedProvider.notifier).refresh();
 }
 
-/// Fallback fetch for `/orders/:id` when the [Order] wasn't already passed
-/// via router `extra` (e.g. a deep link).
-final orderByIdProvider = FutureProvider.family<Order?, String>((ref, id) {
-  return ref.watch(orderRepositoryProvider).fetchOrderById(id);
+/// Session-scoped authoritative detail; backend RLS remains the access boundary.
+final orderByIdProvider = FutureProvider.family<Order?, String>((
+  ref,
+  id,
+) async {
+  final userId = ref.watch(currentUserIdProvider);
+  final userAsync = ref.watch(currentAppUserProvider);
+  if (userId == null) return null;
+  final repository = ref.watch(orderRepositoryProvider);
+  final userFuture = ref.watch(currentAppUserProvider.future);
+  final user = userAsync.isLoading ? await userFuture : userAsync.valueOrNull;
+  if (user == null || user.id != userId) return null;
+  final order = await repository.fetchOrderById(id);
+  if (order == null || order.id != id) return null;
+  return user.role.isAdmin || order.userId == userId ? order : null;
 });

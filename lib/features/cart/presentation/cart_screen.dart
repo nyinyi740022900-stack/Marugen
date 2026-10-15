@@ -88,7 +88,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
-      appBar: AppBar(title: const Text('MY CART')),
+      appBar: AppBar(title: const Text('Cart')),
       body: ContentWidth(
         maxWidth: 760,
         child: items.isEmpty

@@ -9,12 +9,24 @@ import '../../../shared/models/address.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
 import 'address_providers.dart';
+import '../../auth/presentation/auth_providers.dart';
+import '../../../shared/widgets/guest_account_state.dart';
 
 class AddressBookScreen extends ConsumerWidget {
   const AddressBookScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final owner = ref.watch(currentUserIdProvider);
+    if (owner == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Delivery Addresses')),
+        body: const GuestAccountState(
+          icon: Icons.location_on_outlined,
+          subtitle: 'Save delivery addresses for faster checkout.',
+        ),
+      );
+    }
     final addressesAsync = ref.watch(myAddressesProvider);
 
     return Scaffold(
@@ -24,6 +36,7 @@ class AddressBookScreen extends ConsumerWidget {
         maxWidth: 760,
         child: addressesAsync.when(
           data: (addresses) {
+            addresses = addresses.where((a) => a.userId == owner).toList();
             if (addresses.isEmpty) {
               return const EmptyState(
                 icon: Icons.location_on_outlined,
@@ -139,7 +152,11 @@ class _AddressCard extends ConsumerWidget {
                     ],
                     const Spacer(),
                     IconButton(
-                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Delete address',
+                      constraints: const BoxConstraints(
+                        minWidth: 48,
+                        minHeight: 48,
+                      ),
                       icon: Icon(
                         Icons.delete_outline,
                         color: AppPalette.of(context).error,
@@ -193,6 +210,7 @@ class _AddressCard extends ConsumerWidget {
             onPressed: () async {
               Navigator.pop(dialogContext);
               try {
+                if (ref.read(currentUserIdProvider) != address.userId) return;
                 await ref
                     .read(addressRepositoryProvider)
                     .deleteAddress(address.id);
@@ -238,12 +256,14 @@ class _AddressFormState extends ConsumerState<AddressForm> {
   late final TextEditingController _cityCtrl;
   late final TextEditingController _postalCtrl;
   late bool _isDefault;
+  late final String? _owner;
   bool _saving = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    _owner = ref.read(currentUserIdProvider);
     final e = widget.existing;
     _labelCtrl = TextEditingController(text: e?.label ?? 'Home');
     _nameCtrl = TextEditingController(text: e?.recipientName ?? '');
@@ -267,7 +287,13 @@ class _AddressFormState extends ConsumerState<AddressForm> {
     super.dispose();
   }
 
+  bool get _canSave =>
+      _owner != null &&
+      ref.read(currentUserIdProvider) == _owner &&
+      (widget.existing == null || widget.existing!.userId == _owner);
+
   Future<void> _save() async {
+    if (!_canSave) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _saving = true;
@@ -277,7 +303,7 @@ class _AddressFormState extends ConsumerState<AddressForm> {
       final repo = ref.read(addressRepositoryProvider);
       final address = Address(
         id: widget.existing?.id ?? '',
-        userId: widget.existing?.userId ?? '',
+        userId: _owner!,
         label: _labelCtrl.text.trim().isEmpty ? 'Home' : _labelCtrl.text.trim(),
         recipientName: _nameCtrl.text.trim(),
         phone: _phoneCtrl.text.trim(),
@@ -294,12 +320,17 @@ class _AddressFormState extends ConsumerState<AddressForm> {
       } else {
         await repo.createAddress(address);
       }
+      if (!mounted || !_canSave) return;
       ref.invalidate(myAddressesProvider);
-      if (mounted) Navigator.pop(context);
+      Navigator.pop(context);
     } catch (_) {
       // Raw Postgres/network errors aren't meaningful to a customer here —
       // same reasoning as auth's friendlyAuthError.
-      setState(() => _error = "Couldn't save this address. Please try again.");
+      if (mounted && _canSave) {
+        setState(
+          () => _error = "Couldn't save this address. Please try again.",
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -307,6 +338,13 @@ class _AddressFormState extends ConsumerState<AddressForm> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(currentUserIdProvider);
+    if (!_canSave) {
+      return const Padding(
+        padding: EdgeInsets.all(AppSpacing.lg),
+        child: Text('Your account changed. Reopen addresses to continue.'),
+      );
+    }
     return Padding(
       padding: EdgeInsets.only(
         left: AppSpacing.lg,

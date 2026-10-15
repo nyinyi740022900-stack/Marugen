@@ -126,6 +126,10 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
                             ? Image.network(
                                 _existingCoverUrl!,
                                 fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => Icon(
+                                  Icons.broken_image_outlined,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
                               )
                             : Icon(
                                 Icons.add_a_photo_outlined,

@@ -1,3 +1,6 @@
+import '../../auth/presentation/auth_providers.dart';
+import '../../../shared/widgets/guest_account_state.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -16,13 +19,24 @@ class NotificationsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(isLoggedInProvider)) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Notifications')),
+        body: const GuestAccountState(
+          icon: Icons.notifications_none_outlined,
+          subtitle: 'View notifications and order updates.',
+          returnTo: '/notifications',
+        ),
+      );
+    }
+
     final notificationsAsync = ref.watch(myNotificationsProvider);
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: const Text(
-          'NOTIFICATIONS',
+          'Notifications',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),

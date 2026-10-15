@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
 import 'package:marugen_app/features/orders/presentation/order_detail_screen.dart';
+import 'package:marugen_app/features/orders/presentation/orders_providers.dart';
 import 'package:marugen_app/shared/models/app_user.dart';
 import 'package:marugen_app/shared/models/order.dart';
 
@@ -24,6 +25,11 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            authStateProvider.overrideWith((ref) => const Stream.empty()),
+            currentUserIdProvider.overrideWithValue(
+              role == UserRole.customer ? 'customer' : 'admin',
+            ),
+            orderByIdProvider(order.id).overrideWith((ref) async => order),
             currentAppUserProvider.overrideWith(
               (ref) async => AppUser(
                 id: role == UserRole.customer ? 'customer' : 'admin',

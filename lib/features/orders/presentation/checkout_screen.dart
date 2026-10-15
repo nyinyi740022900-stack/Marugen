@@ -23,9 +23,9 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../profile/presentation/address_providers.dart';
 import '../../promo/presentation/promo_providers.dart';
-import '../../shop/presentation/shell_tab_provider.dart';
 import '../data/order_repository.dart';
 import '../data/payment_repository.dart';
+import '../utils/payment_confirmation.dart';
 import 'orders_providers.dart';
 import 'purchase_intent.dart';
 
@@ -274,6 +274,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         shippingAddress == null) {
       return;
     }
+    if (shippingAddress.userId != _checkoutOwner) {
+      setState(
+        () => _error = 'Choose a delivery address for your current account.',
+      );
+      return;
+    }
     final items = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
     if (items.isEmpty) return;
     final remarksError = orderRemarksValidationError(_remarksCtrl.text);
@@ -327,46 +333,65 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       pendingOrderId = intent['orderId'] as String?;
       if (!mounted || !_ownsCheckout) return;
 
-      await Stripe.instance.initPaymentSheet(
-        paymentSheetParameters: SetupPaymentSheetParameters(
-          paymentIntentClientSecret: intent['clientSecret'] as String,
-          style: Theme.of(context).brightness == Brightness.dark
-              ? ThemeMode.dark
-              : ThemeMode.light,
-          merchantDisplayName: 'Marugen Fish Farm',
-          // Required for PayNow (and any other redirect/voucher-based
-          // method) to bring the customer back into the app instead of
-          // stranding them in Safari — matches the `marugen` URL scheme
-          // registered in ios/Runner/Info.plist.
-          returnURL: 'marugen://stripe-redirect',
-          // Apple Pay is deliberately left out: without a real merchant ID
-          // (needs a paid Apple Developer Program membership) and the
-          // matching Xcode entitlement, configuring `applePay:` here was
-          // observed to crash the app when the sheet opens rather than
-          // just hiding the button. Re-add once that account/entitlement
-          // exists. Google Pay is Android-only — harmless to leave on here,
-          // it's simply ignored on iOS.
-          googlePay: PaymentSheetGooglePay(
-            merchantCountryCode: 'SG',
-            currencyCode: 'SGD',
-            // Was hardcoded `true` — meant every build, including a real
-            // production release, would only ever offer Google Pay's test
-            // environment, silently failing/faking real customer charges
-            // via Google Pay. Derived from the actual publishable key in
-            // use (not just Env.appEnv) so it's correct even if a build is
-            // mislabeled: `pk_live_...` always means real money.
-            testEnv: !Env.stripePublishableKey.startsWith('pk_live'),
-          ),
-        ),
+      if (pendingOrderId == null) throw StateError('Payment order missing');
+      await presentPendingPayment(
+        intent: intent,
+        ownsCheckout: () => _ownsCheckout,
+        presentPayment: (clientSecret) async {
+          await Stripe.instance.initPaymentSheet(
+            paymentSheetParameters: SetupPaymentSheetParameters(
+              paymentIntentClientSecret: clientSecret,
+              style: Theme.of(context).brightness == Brightness.dark
+                  ? ThemeMode.dark
+                  : ThemeMode.light,
+              merchantDisplayName: 'Marugen Fish Farm',
+              // Required for PayNow (and any other redirect/voucher-based
+              // method) to bring the customer back into the app instead of
+              // stranding them in Safari — matches the `marugen` URL scheme
+              // registered in ios/Runner/Info.plist.
+              returnURL: 'marugen://stripe-redirect',
+              // Apple Pay is deliberately left out: without a real merchant ID
+              // (needs a paid Apple Developer Program membership) and the
+              // matching Xcode entitlement, configuring `applePay:` here was
+              // observed to crash the app when the sheet opens rather than
+              // just hiding the button. Re-add once that account/entitlement
+              // exists. Google Pay is Android-only — harmless to leave on here,
+              // it's simply ignored on iOS.
+              googlePay: PaymentSheetGooglePay(
+                merchantCountryCode: 'SG',
+                currencyCode: 'SGD',
+                // Was hardcoded `true` — meant every build, including a real
+                // production release, would only ever offer Google Pay's test
+                // environment, silently failing/faking real customer charges
+                // via Google Pay. Derived from the actual publishable key in
+                // use (not just Env.appEnv) so it's correct even if a build is
+                // mislabeled: `pk_live_...` always means real money.
+                testEnv: !Env.stripePublishableKey.startsWith('pk_live'),
+              ),
+            ),
+          );
+          // Native initialization may outlive this screen or its signed-in owner.
+          if (!_ownsCheckout) return;
+          await Stripe.instance.presentPaymentSheet();
+        },
       );
-      // Native initialization may outlive this screen or its signed-in owner.
-      if (!_ownsCheckout) return;
-      await Stripe.instance.presentPaymentSheet();
 
       // Buy Now never touched the persistent cart, so there's nothing to
       // clear — whatever was already in the cart before this purchase
       // stays exactly as it was.
       if (!_ownsCheckout) return;
+      final confirmed = await confirmOrderPayment(
+        orderId: pendingOrderId,
+        ownerId: _checkoutOwner,
+        ownsCheckout: () => _ownsCheckout,
+        fetchOrder: ref.read(orderRepositoryProvider).fetchOrderById,
+      );
+      if (!mounted || !_ownsCheckout) return;
+      if (!confirmed) {
+        ref.invalidate(myOrdersProvider);
+        context.go('/orders/$pendingOrderId');
+        return;
+      }
       if (!_isBuyNow) ref.read(cartProvider.notifier).clear();
       // The Orders list is a plain (non-autoDispose) FutureProvider, so
       // without this it keeps showing whatever it last fetched — a
@@ -381,14 +406,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // dumping the customer back to the shop grid with only a toast —
       // the order confirmation *is* the order detail screen, not a
       // separate page, so there's nothing else to keep in sync.
-      if (mounted && pendingOrderId != null) {
-        context.go('/orders/$pendingOrderId?justPlaced=true');
-      } else if (mounted) {
-        ref.read(customerTabIndexProvider.notifier).state = 2;
-        context.go('/');
-      }
+      if (mounted) context.go('/orders/$pendingOrderId?justPlaced=true');
     } on StripeException catch (e) {
-      if (pendingOrderId != null) {
+      if (pendingOrderId != null &&
+          e.error.code == FailureCode.Canceled &&
+          _ownsCheckout) {
         try {
           await OrderRepository().cancelMyOrder(pendingOrderId);
         } catch (cancelError) {
@@ -406,22 +428,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (mounted) {
         setState(
           () => _error = e.error.code == FailureCode.Canceled
-              ? 'Payment cancelled. Your items are saved; you can try again.'
+              ? 'Payment was dismissed. Your items are saved. Check Orders before trying again.'
               : 'Payment could not be completed. Check your payment details and try again.',
         );
       }
     } catch (e) {
-      if (pendingOrderId != null) {
-        try {
-          await OrderRepository().cancelMyOrder(pendingOrderId);
-        } catch (cancelError) {
-          developer.log(
-            'Could not cancel pending order after checkout error',
-            name: 'CheckoutScreen',
-            error: cancelError,
-          );
-        }
-      }
       developer.log('Checkout failed', name: 'CheckoutScreen', error: e);
       if (mounted) {
         setState(

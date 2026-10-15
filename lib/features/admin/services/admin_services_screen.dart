@@ -303,6 +303,11 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
                           width: 72,
                           height: 72,
                           fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox(
+                            width: 72,
+                            height: 72,
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
                         ),
                       ),
                       Positioned(

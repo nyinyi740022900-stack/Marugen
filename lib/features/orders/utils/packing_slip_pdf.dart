@@ -23,11 +23,17 @@ Future<Uint8List> buildPackingSlipPdf(
       .where((value) => value != null && value.toString().trim().isNotEmpty)
       .join(', ');
   final region = [shipping['city'] ?? 'Singapore', shipping['postal_code']]
-      .where((value) => value != null && value.toString().isNotEmpty &&
-          !address.toLowerCase().contains(value.toString().toLowerCase()))
+      .where(
+        (value) =>
+            value != null &&
+            value.toString().isNotEmpty &&
+            !address.toLowerCase().contains(value.toString().toLowerCase()),
+      )
       .join(' ');
   final logoData = await rootBundle.load('assets/images/logo.png');
-  final logo = pw.MemoryImage(logoData.buffer.asUint8List(logoData.offsetInBytes, logoData.lengthInBytes));
+  final logo = pw.MemoryImage(
+    logoData.buffer.asUint8List(logoData.offsetInBytes, logoData.lengthInBytes),
+  );
   final doc = pw.Document();
   pw.Widget text(String value, {double size = 9, bool bold = false}) => pw.Text(
     value,

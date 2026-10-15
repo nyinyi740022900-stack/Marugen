@@ -10,6 +10,7 @@ class EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;
   final String? subtitle;
+  final int subtitleMinLines;
   final String? actionLabel;
   final VoidCallback? onAction;
 
@@ -18,6 +19,7 @@ class EmptyState extends StatelessWidget {
     required this.icon,
     required this.title,
     this.subtitle,
+    this.subtitleMinLines = 0,
     this.actionLabel,
     this.onAction,
   });
@@ -74,13 +76,21 @@ class EmptyState extends StatelessWidget {
                 ),
                 if (subtitle != null) ...[
                   const SizedBox(height: 6),
-                  Text(
-                    subtitle!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: AppPalette.of(context).textMuted,
-                      fontSize: 13.5,
-                      height: 1.4,
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight:
+                          MediaQuery.textScalerOf(context).scale(13.5) *
+                          1.4 *
+                          subtitleMinLines,
+                    ),
+                    child: Text(
+                      subtitle!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppPalette.of(context).textMuted,
+                        fontSize: 13.5,
+                        height: 1.4,
+                      ),
                     ),
                   ),
                 ],

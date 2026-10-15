@@ -182,6 +182,7 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: colors.text,
+          textStyle: textTheme.labelLarge,
           side: BorderSide(color: colors.border, width: 1.2),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
           shape: RoundedRectangleBorder(

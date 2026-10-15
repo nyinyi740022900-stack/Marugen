@@ -7,10 +7,10 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/guest_account_state.dart';
 import '../../../shared/widgets/content_width.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
-import '../../wishlist/presentation/wishlist_screen.dart';
 import 'auth_providers.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -263,11 +263,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       leading: const Icon(Icons.favorite_border),
                       title: const Text('Wishlist'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const WishlistScreen(),
-                        ),
-                      ),
+                      onTap: () => context.push('/wishlist'),
                     ),
                     ListTile(
                       leading: const Icon(Icons.receipt_long_outlined),
@@ -387,31 +383,9 @@ class _GuestProfile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: AppPalette.of(context).surface,
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: EmptyState(
-                  icon: Icons.person_outline,
-                  title: 'Log in to your account',
-                  subtitle: 'View your orders, saved addresses and profile.',
-                  actionLabel: 'Log In',
-                  onAction: () => context.push('/login'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return const GuestAccountState(
+      icon: Icons.person_outline,
+      subtitle: 'View your profile and saved addresses.',
     );
   }
 }

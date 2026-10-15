@@ -34,4 +34,10 @@ SHA-256: `07d536214514003f7f7447b46c250b10389c7907c819f64aa678d9e7a34d4101`.
 
 Deployed rejection smoke checks passed: create-payment-intent/cancel-order return 401 to an anonymous caller, reconciliation returns 403, unsigned Stripe webhook returns 400. Evidence: ignored `output/releases/beta-1.0.4-deployed-smoke.json`.
 
-Git push result will be recorded after completion. Browser extension access currently fails before Play Console interaction; **upload/submission is not yet confirmed**.
+Source release commit `45c1090` was pushed to `origin/codex/whole-app-audit-fixes`. Main was not changed.
+
+After reconnect, extension browser APIs still failed to load their request-header policy. Continued using the supported native Chrome accessibility controls. Uploaded the exact signed bundle through the normal file picker; Play accepted version **9 (1.0.4)** with mapping/native debug symbols, minimum API 24 and target SDK 36. Preview reported Ready to release and no loss of supported devices.
+
+Saved the release in **Closed testing — Alpha**, retaining its existing tester/country configuration and 100% rollout within that closed track. Submitted the single release change. Publishing overview visibly confirmed **Changes in review** and **1 change sent for review**. Google's quick checks were still running (up to 14 minutes shown); approval and availability to testers are not yet confirmed. Managed publishing remains off. No Production release was submitted.
+
+Evidence: ignored local screenshot `output/releases/closed-beta-1.0.4-in-review.png`.

@@ -97,3 +97,10 @@ Coverage remains bounded: the native run does not perform courier booking, print
 ### Final admin verification — 2026-10-16
 
 Full Flutter suite: **193 passed**, no failures (`/private/tmp/marugen-admin-final-flutter.log`). Static analysis: **No issues found** (`/private/tmp/marugen-admin-final-analyze.log`). Formatting of the 11 touched admin/theme/integration/regression files reported 0 changes; `git diff --check` is clean. Both native role runs passed; the financial/network/SQL checks above remain successful. The function server was stopped and Supabase local services were backed up/stopped. No commit, push, production migration/function deploy or closed-beta upload was performed.
+
+
+## Authorized release rollout — 2026-10-16
+
+After the audit phase, the user authorized commit/push and closed-beta upload. Source commit `45c1090` was pushed to `codex/whole-app-audit-fixes` (main unchanged). Applied migrations 0052–0055 and deployed create-payment-intent/cancel-order/stripe-webhook/reconcile-pending-orders; read-only schema/anonymous rejection checks passed. Signed 1.0.4+9 build succeeded with the previous upload certificate; final versioned source suite passed 193 tests and analysis was clean.
+
+Play Console accepted the bundle and confirmed the single Closed testing — Alpha release change was sent for review. Status: Changes in review, quick checks still running. This does not mean Google approval or tester availability. Existing live Stripe client configuration was retained and explained to the user; no real-money smoke transaction was performed. Release checksum, UI evidence and submission details: `closed-beta-1.0.4.md`.

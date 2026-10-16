@@ -1,6 +1,6 @@
 # Android closed beta 1.0.5 (10)
 
-Prepared 2026-10-16 for the existing Closed testing — Alpha track. **Not uploaded yet.**
+Prepared 2026-10-16 for the existing Closed testing — Alpha track. Submitted for review the same day.
 
 ## Changes since 1.0.4 (9)
 
@@ -36,4 +36,16 @@ Version 1.0.5+10, built with `env/prod.json` (same production client config as 1
 
 Migration **0056** must be applied to production before testers rely on product deletion. The CLI account lacks access to the linked project (403), and running production SQL was not permitted for the assistant, so the owner applies it in the Supabase SQL Editor. The statements are idempotent (`drop constraint if exists` / `add constraint`). Verified on the local stack: owner delete succeeds, customer delete is blocked by RLS, the paid order keeps product name, variant, price and total. No Edge Function change.
 
+**Applied 2026-10-16** by the owner in the Supabase SQL Editor. The result shows `order_items_product_id_fkey` and `order_items_variant_id_fkey` with `confdeltype = n` (SET NULL). The migration history table was not updated. A later `supabase db push` would re-run 0056, which is idempotent.
+
 Without 0056 the app still works. Deleting an ordered product then shows "This product has orders…" instead of silently failing.
+
+## Submission status
+
+1.0.4 (9) had been approved and was "Available to selected testers" before this submission.
+
+The owner uploaded the bundle through the Play Console file picker; the assistant's browser bridge limits uploads to 10 MB. Play accepted **10 (1.0.5)**: API 24+, target SDK 36. Preview showed "Ready to release" with no loss of supported devices (Phone 12,379, Tablet 6,799). Rollout is 100% within the closed track. 9 (1.0.4) is not carried over.
+
+Release notes (en-US) summarise the first-launch notification order, the Login back button and status bar, Guide tab alignment, and the admin error, delete and dialog fixes.
+
+The release was saved and the single change submitted. Publishing overview shows **Changes in review**, with Google's quick checks still running (up to 13 minutes). Approval is not yet confirmed. Managed publishing is off. No Production release was submitted.

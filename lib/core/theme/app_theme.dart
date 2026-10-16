@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Marugen Fish Farm brand palette — derived from the shop logo
 /// (black ring, red hanko seal, white brush strokes, red/white koi).
@@ -553,4 +554,16 @@ class AppTheme {
       ),
     );
   }
+}
+
+/// Status-bar icons readable on a [brightness] background. Only the status
+/// bar fields are set — the `SystemUiOverlayStyle.light/.dark` presets
+/// also force an opaque black Android navigation bar.
+SystemUiOverlayStyle statusBarStyleFor(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  return SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+    statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+  );
 }

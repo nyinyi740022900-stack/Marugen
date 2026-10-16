@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
@@ -110,15 +109,7 @@ class MarugenApp extends ConsumerWidget {
       themeMode: ref.watch(themeModeProvider),
       routerConfig: router,
       scaffoldMessengerKey: PushNotificationService.messengerKey,
-      // Fallback status-bar style for screens without an AppBar (e.g.
-      // Login): otherwise iOS keeps the previous screen's light icons,
-      // leaving the clock invisible on a light background.
-      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
-        value: Theme.of(context).brightness == Brightness.dark
-            ? SystemUiOverlayStyle.light
-            : SystemUiOverlayStyle.dark,
-        child: _NonProdReleaseBanner(child: child),
-      ),
+      builder: (context, child) => _NonProdReleaseBanner(child: child),
     );
   }
 }

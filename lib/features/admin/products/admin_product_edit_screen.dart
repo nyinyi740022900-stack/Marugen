@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
@@ -393,7 +394,38 @@ class _AdminProductEditScreenState
       ),
     );
     if (confirmed != true) return;
-    await ProductRepository().deleteProduct(widget.productId!);
+    try {
+      await ProductRepository().deleteProduct(widget.productId!);
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      // 23503: order_items still reference this product (it has been
+      // ordered). Previously this failed silently with no feedback.
+      final message = e.code == '23503'
+          ? 'This product has orders, so it can\'t be deleted. Turn off '
+                '"Available for sale in app" to stop selling it.'
+          : friendlyErrorMessage(
+              e,
+              fallback: 'Could not delete the product. Please try again.',
+              context: 'admin.product_edit',
+            );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: 'Could not delete the product. Please try again.',
+              context: 'admin.product_edit',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     refreshAdminProducts(ref);
     if (mounted) context.pop();
   }

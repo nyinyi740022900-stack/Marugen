@@ -545,6 +545,10 @@ class AppTheme {
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: AppColors.white,
+        // Explicit, like the dark theme: without it AlertDialog titles
+        // fell back to an inherited light style and were invisible.
+        titleTextStyle: textTheme.titleLarge,
+        contentTextStyle: textTheme.bodyMedium,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.lg),
         ),

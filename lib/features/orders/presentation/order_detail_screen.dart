@@ -690,7 +690,8 @@ class _OrderItemTile extends ConsumerWidget {
               ),
             ],
           ),
-          if (canReview) ...[
+          // A deleted product leaves a detached snapshot (no product id).
+          if (canReview && item.productId.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             Padding(
               padding: const EdgeInsets.only(left: 72),
@@ -802,6 +803,11 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
     var added = 0;
     var skipped = 0;
     for (final item in widget.order.items) {
+      // Product deleted since the order was placed — nothing to re-add.
+      if (item.productId.isEmpty) {
+        skipped++;
+        continue;
+      }
       final product = await repo.fetchProductById(item.productId);
       if (product == null) {
         skipped++;

@@ -17,7 +17,11 @@ void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets('Android local admin modules and product save', (tester) async {
     await dotenv.load(fileName: '.env');
-    expect(Env.supabaseUrl, 'http://10.0.2.2:54321');
+    // Loopback only: Android emulator host alias or iOS simulator localhost.
+    expect(
+      Env.supabaseUrl,
+      anyOf('http://10.0.2.2:54321', 'http://127.0.0.1:54321'),
+    );
     const email = String.fromEnvironment('LOCAL_TEST_EMAIL');
     const password = String.fromEnvironment('LOCAL_TEST_PASSWORD');
     const role = String.fromEnvironment('LOCAL_TEST_ROLE');
@@ -93,12 +97,12 @@ void main() {
     FocusManager.instance.primaryFocus?.unfocus();
     await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
     await settle();
-    await tester.scrollUntilVisible(
-      find.text('Save'),
-      250,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.widgetWithText(ElevatedButton, 'Save'));
+    // Scroll the editor's own list: on tablets the first Scrollable in
+    // the tree is not the form, so a generic scroll left Save off-screen.
+    final save = find.widgetWithText(ElevatedButton, 'Save');
+    await tester.ensureVisible(save);
+    await settle();
+    await tester.tap(save);
     await settle();
     for (
       var i = 0;

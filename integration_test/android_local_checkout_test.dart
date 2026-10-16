@@ -25,7 +25,11 @@ void main() {
     tester,
   ) async {
     await dotenv.load(fileName: '.env');
-    expect(Env.supabaseUrl, 'http://10.0.2.2:54321');
+    // Loopback only: Android emulator host alias or iOS simulator localhost.
+    expect(
+      Env.supabaseUrl,
+      anyOf('http://10.0.2.2:54321', 'http://127.0.0.1:54321'),
+    );
     expect(Env.stripePublishableKey, startsWith('pk_test_'));
     const email = String.fromEnvironment('LOCAL_TEST_EMAIL');
     const password = String.fromEnvironment('LOCAL_TEST_PASSWORD');
@@ -52,6 +56,22 @@ void main() {
         .single();
     final product = Product.fromMap(productMap);
     final originalStock = product.stockQuantity;
+    Future<int> paidOrdersForProduct() async {
+      final orders = await SupabaseService.client
+          .from('orders')
+          .select('id,status,order_items(product_id)')
+          .eq('user_id', SupabaseService.currentUser!.id)
+          .eq('status', 'paid');
+      return orders
+          .where(
+            (order) => (order['order_items'] as List).any(
+              (item) => item['product_id'] == productId,
+            ),
+          )
+          .length;
+    }
+
+    final paidBefore = await paidOrdersForProduct();
     await tester.pumpWidget(const ProviderScope(child: app.MarugenApp()));
     for (var i = 0; i < 60 && find.text('Shop').evaluate().isEmpty; i++) {
       await tester.pump(const Duration(seconds: 1));
@@ -117,19 +137,9 @@ void main() {
     container.read(routerProvider).go('/orders/${intent['orderId']}');
     await tester.pumpAndSettle();
     expect(find.byType(OrderDetailScreen), findsOneWidget);
-    final orders = await SupabaseService.client
-        .from('orders')
-        .select('id,status,order_items(product_id)')
-        .eq('user_id', SupabaseService.currentUser!.id)
-        .eq('status', 'paid');
-    expect(
-      orders.where(
-        (order) => (order['order_items'] as List).any(
-          (item) => item['product_id'] == productId,
-        ),
-      ),
-      hasLength(1),
-    );
+    // Relative to the count before paying, so the fixture can be reused
+    // across runs (e.g. Android then iOS) without resetting the database.
+    expect(await paidOrdersForProduct(), paidBefore + 1);
     final latest = await SupabaseService.client
         .from('products')
         .select('stock_quantity')

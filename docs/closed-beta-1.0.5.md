@@ -10,6 +10,8 @@ Prepared 2026-10-16 for the existing Closed testing — Alpha track. **Not uploa
 - Guide: Varieties / Care Guides / Services tabs are equal width on phone and tablet (regressed in 6bc95f4).
 - Admin: raw `Error: $e` text in 12 screens replaced with plain-language messages (`friendlyErrorMessage`); load failures offer Retry.
 - Local native acceptance tests now also run on iOS simulators.
+- Admin: products that have been ordered can be deleted (migration 0056, `ON DELETE SET NULL`; order rows keep their snapshot). Delete failures are shown instead of failing silently. Order detail skips Reorder/Review for deleted products.
+- Light theme: AlertDialog titles were white on white; now explicit.
 
 ## Verification
 
@@ -26,8 +28,12 @@ Not covered: interactive PaymentSheet card entry, 3DS, Google/Apple Pay, real Go
 Version 1.0.5+10, built with `env/prod.json` (same production client config as 1.0.3/1.0.4). It contains the **Stripe live publishable key**, so card payments by testers are real charges.
 
 - Bundle: `output/releases/marugen-1.0.5-10.aab` (83.8 MB)
-- SHA-256: `cee6cb972bca9e683c3e020c05537efb7ed8f8e74ae042ab496f8ae45e26fc9c`
+- SHA-256: `f72b0264a0de7456a7ee691b505d337be037e98b095c688387542c4cee711d25` (rebuilt after the product-delete fix, commit d125894)
 - `jarsigner -verify`: jar verified (same 1049 protobuf-entry warnings as the accepted 1.0.4 bundle)
 - Upload certificate SHA-1: `7E:9F:18:20:EC:82:F1:D8:47:35:F2:76:A9:7D:8F:84:4B:12:BC:17` (matches prior betas)
 
-No backend migration or Edge Function change is required for this release.
+## Backend rollout
+
+Migration **0056** must be applied to production before testers rely on product deletion. The CLI account lacks access to the linked project (403), and running production SQL was not permitted for the assistant, so the owner applies it in the Supabase SQL Editor. The statements are idempotent (`drop constraint if exists` / `add constraint`). Verified on the local stack: owner delete succeeds, customer delete is blocked by RLS, the paid order keeps product name, variant, price and total. No Edge Function change.
+
+Without 0056 the app still works. Deleting an ordered product then shows "This product has orders…" instead of silently failing.

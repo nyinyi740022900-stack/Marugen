@@ -11,6 +11,8 @@ import '../../../shared/widgets/notification_bell_button.dart';
 import '../../orders/presentation/orders_providers.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../admin_shell.dart';
+import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/empty_state.dart';
 
 class AdminDashboardScreen extends ConsumerWidget {
   const AdminDashboardScreen({super.key});
@@ -170,9 +172,13 @@ class AdminDashboardScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => Text(
-                'Error: $e',
-                style: TextStyle(color: AppPalette.of(context).error),
+              error: (e, _) => InlineErrorState(
+                message: friendlyErrorMessage(
+                  e,
+                  fallback: 'Could not load orders.',
+                  context: 'admin.dashboard',
+                ),
+                onRetry: () => ref.invalidate(adminOrdersProvider),
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -225,9 +231,13 @@ class AdminDashboardScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: 40),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => Text(
-                'Error: $e',
-                style: TextStyle(color: AppPalette.of(context).error),
+              error: (e, _) => InlineErrorState(
+                message: friendlyErrorMessage(
+                  e,
+                  fallback: 'Could not load orders.',
+                  context: 'admin.dashboard',
+                ),
+                onRetry: () => ref.invalidate(adminOrdersProvider),
               ),
             ),
           ],

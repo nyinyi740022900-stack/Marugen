@@ -48,7 +48,12 @@ class PushNotificationService {
   /// Initializes Firebase + FCM. Safe to call even when no Firebase config
   /// files are present — catches and logs instead of throwing, so app
   /// startup never crashes because push notifications aren't set up yet.
-  static Future<void> initialize() async {
+  static Future<void> initialize() => _initFuture ??= _initialize();
+
+  static Future<void>? _initFuture;
+  static bool _permissionRequested = false;
+
+  static Future<void> _initialize() async {
     try {
       // Hard timeouts on every native call below: without a real Firebase
       // project configured, these have been observed to hang waiting on a
@@ -65,13 +70,6 @@ class PushNotificationService {
       _initialized = true;
 
       final messaging = FirebaseMessaging.instance;
-      final settings = await messaging
-          .requestPermission(alert: true, badge: true, sound: true)
-          .timeout(const Duration(seconds: 8));
-      developer.log(
-        'Push permission status: ${settings.authorizationStatus}',
-        name: 'PushNotificationService',
-      );
 
       // Foreground display: FCM does not show a system banner while the
       // app is open, so surface it ourselves.
@@ -98,6 +96,32 @@ class PushNotificationService {
     }
   }
 
+  /// Shows the OS notification-permission prompt once per app session.
+  /// Deliberately not part of [initialize]: on first launch the iOS prompt
+  /// would otherwise appear on top of the promo popup. Shells call this
+  /// once their own launch dialogs are dismissed. Safe to call repeatedly.
+  static Future<void> requestPermission() async {
+    if (_permissionRequested) return;
+    _permissionRequested = true;
+    await initialize();
+    if (!_initialized) return;
+    try {
+      final settings = await FirebaseMessaging.instance
+          .requestPermission(alert: true, badge: true, sound: true)
+          .timeout(const Duration(seconds: 8));
+      developer.log(
+        'Push permission status: ${settings.authorizationStatus}',
+        name: 'PushNotificationService',
+      );
+      await registerTokenForCurrentUser();
+    } catch (e) {
+      developer.log(
+        'Could not request push permission: $e',
+        name: 'PushNotificationService',
+      );
+    }
+  }
+
   static void _showForegroundMessage(RemoteMessage message) {
     final title = message.notification?.title ?? 'Marugen Fish Farm';
     final body = message.notification?.body ?? '';
@@ -119,11 +143,15 @@ class PushNotificationService {
   static Future<void> registerTokenForCurrentUser() async {
     if (!_initialized) return;
     try {
-      final token =
-          await FirebaseMessaging.instance.getToken().timeout(const Duration(seconds: 8));
+      final token = await FirebaseMessaging.instance.getToken().timeout(
+        const Duration(seconds: 8),
+      );
       if (token != null) await _saveTokenIfLoggedIn(token);
     } catch (e) {
-      developer.log('Could not fetch FCM token: $e', name: 'PushNotificationService');
+      developer.log(
+        'Could not fetch FCM token: $e',
+        name: 'PushNotificationService',
+      );
     }
   }
 
@@ -133,9 +161,13 @@ class PushNotificationService {
     try {
       await SupabaseService.client
           .from('profiles')
-          .update({'fcm_token': token}).eq('id', user.id);
+          .update({'fcm_token': token})
+          .eq('id', user.id);
     } catch (e) {
-      developer.log('Could not save FCM token: $e', name: 'PushNotificationService');
+      developer.log(
+        'Could not save FCM token: $e',
+        name: 'PushNotificationService',
+      );
     }
   }
 
@@ -151,9 +183,13 @@ class PushNotificationService {
     try {
       await SupabaseService.client
           .from('profiles')
-          .update({'fcm_token': null}).eq('id', user.id);
+          .update({'fcm_token': null})
+          .eq('id', user.id);
     } catch (e) {
-      developer.log('Could not clear FCM token: $e', name: 'PushNotificationService');
+      developer.log(
+        'Could not clear FCM token: $e',
+        name: 'PushNotificationService',
+      );
     }
   }
 }

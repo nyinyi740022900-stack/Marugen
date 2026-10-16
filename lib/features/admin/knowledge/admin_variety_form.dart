@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/knowledge.dart';
 import '../../knowledge/presentation/knowledge_providers.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// One editable stage row (existing photo URL and/or a newly picked image
 /// not yet uploaded).
@@ -157,8 +158,17 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not save the variety. Please try again.',
+                context: 'admin.variety_form',
+              ),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

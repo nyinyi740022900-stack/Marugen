@@ -15,6 +15,7 @@ import '../../orders/presentation/orders_providers.dart';
 import '../../orders/utils/invoice_pdf.dart';
 import '../delivery/admin_delivery_screen.dart';
 import '../payments/admin_payments_screen.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// Orders hub: status list + fulfillment (ex-Delivery) + payments ledger.
 class AdminOrdersScreen extends StatelessWidget {
@@ -343,9 +344,17 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
       await shareReceipt(ref, widget.order);
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Could not share invoice: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not share the invoice.',
+                context: 'admin.orders',
+              ),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _sharing = false);
@@ -632,8 +641,17 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
       refreshAdminOrders(ref);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not update status: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: 'Could not update the order status.',
+              context: 'admin.orders',
+            ),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _updating = false);
     }

@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/knowledge.dart';
 import '../../knowledge/presentation/knowledge_providers.dart';
+import '../../../shared/utils/error_message.dart';
 
 Future<void> showArticleForm(
   BuildContext context,
@@ -85,8 +86,17 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not save the article. Please try again.',
+                context: 'admin.article_form',
+              ),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

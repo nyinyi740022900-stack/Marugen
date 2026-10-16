@@ -10,6 +10,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
 import '../../shop/data/product_repository.dart';
 import '../../shop/presentation/shop_providers.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// Create/edit form for a product. Pass `productId == null` to create new.
 class AdminProductEditScreen extends ConsumerStatefulWidget {
@@ -350,8 +351,17 @@ class _AdminProductEditScreenState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not save the product. Please try again.',
+                context: 'admin.product_edit',
+              ),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _loading = false);

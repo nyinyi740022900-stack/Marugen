@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../shared/widgets/content_width.dart';
 
@@ -71,6 +72,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppPalette.of(context).surface,
+      // Visible way back when Login was pushed from Buy Now / Checkout —
+      // iOS has no system back button, only the edge swipe.
+      extendBodyBehindAppBar: true,
+      appBar: Navigator.of(context).canPop()
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              foregroundColor: AppPalette.of(context).text,
+              leading: BackButton(
+                color: AppPalette.of(context).text,
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              systemOverlayStyle:
+                  Theme.of(context).brightness == Brightness.dark
+                  ? SystemUiOverlayStyle.light
+                  : SystemUiOverlayStyle.dark,
+            )
+          : null,
       body: ContentWidth(
         maxWidth: 560,
         child: SafeArea(

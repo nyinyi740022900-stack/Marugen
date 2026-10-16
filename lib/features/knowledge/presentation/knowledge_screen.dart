@@ -42,8 +42,10 @@ class KnowledgeScreen extends ConsumerWidget {
     final tablet = MediaQuery.sizeOf(context).width >= 700;
     final palette = AppPalette.of(context);
     final tabs = TabBar(
-      isScrollable: true,
-      tabAlignment: TabAlignment.start,
+      // Three equal-width tabs on every device, so "Services" never ends
+      // up with extra trailing space.
+      isScrollable: false,
+      tabAlignment: TabAlignment.fill,
       indicatorColor: palette.accent,
       labelColor: tablet ? palette.text : null,
       unselectedLabelColor: tablet ? palette.textMuted : null,
@@ -65,11 +67,7 @@ class KnowledgeScreen extends ConsumerWidget {
         ),
         body: Column(
           children: [
-            if (tablet)
-              Material(
-                color: palette.surface,
-                child: Align(alignment: Alignment.centerLeft, child: tabs),
-              ),
+            if (tablet) Material(color: palette.surface, child: tabs),
             const Expanded(key: ValueKey('guide-pages'), child: pages),
           ],
         ),

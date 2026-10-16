@@ -9,6 +9,7 @@ import '../../../shared/widgets/reviewer_identity.dart';
 import '../../reviews/data/review_repository.dart';
 import '../../reviews/presentation/review_providers.dart';
 import '../../../shared/models/review.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// Paged (infinite-scroll) admin reviews list — see PagedNotifier and
 /// AdminOrdersPagedNotifier (orders_providers.dart) for the same pattern.
@@ -137,8 +138,17 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
       if (mounted) setState(() => _replying = false);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Could not save reply: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not save the reply.',
+                context: 'admin.reviews',
+              ),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

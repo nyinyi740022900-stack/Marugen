@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 import '../../orders/presentation/orders_providers.dart';
+import '../../../shared/widgets/empty_state.dart';
 
 /// Payments ledger pane embedded in the Orders hub (no Scaffold).
 class AdminPaymentsPane extends ConsumerWidget {
@@ -124,7 +125,8 @@ class AdminPaymentsPane extends ConsumerWidget {
       loading: () => Center(
         child: CircularProgressIndicator(color: AppPalette.of(context).accent),
       ),
-      error: (e, _) => Center(child: Text('Error: $e')),
+      error: (e, _) =>
+          ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
     );
   }
 }

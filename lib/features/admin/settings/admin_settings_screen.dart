@@ -14,6 +14,7 @@ import '../../auth/presentation/auth_providers.dart';
 import '../delivery/easyparcel_providers.dart';
 import '../delivery/easyparcel_repository.dart';
 import 'settings_repository.dart';
+import '../../../shared/utils/error_message.dart';
 
 class AdminSettingsScreen extends ConsumerStatefulWidget {
   const AdminSettingsScreen({super.key});
@@ -78,7 +79,15 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start EasyParcel connection: $e')),
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not start EasyParcel connection.',
+                context: 'admin.settings',
+              ),
+            ),
+          ),
         );
       }
       return;
@@ -109,8 +118,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _signingOut = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not log out: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: 'Could not log out. Please try again.',
+              context: 'admin.settings',
+            ),
+          ),
+        ),
+      );
     }
   }
 

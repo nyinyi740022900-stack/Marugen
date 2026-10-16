@@ -9,6 +9,7 @@ import '../../../shared/models/service.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../services/presentation/service_providers.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// "Services" tab inside admin Knowledge — farm services like fish
 /// recovery/quarantine or pond-renovation boarding, shown to customers
@@ -205,8 +206,17 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Could not save the service. Please try again.',
+                context: 'admin.service_edit',
+              ),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _saving = false);

@@ -9,6 +9,7 @@ import '../../../shared/models/order.dart' show orderStatusLabel;
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import 'admin_customer_providers.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// Admin-only: a customer's profile, saved addresses, and full order
 /// history — reached by tapping the profile icon on an order that isn't
@@ -186,7 +187,14 @@ class _AddressesSection extends ConsumerWidget {
           ),
         ),
       ),
-      error: (e, _) => _EmptyCard(text: 'Could not load addresses: $e'),
+      error: (e, _) => InlineErrorState(
+        message: friendlyErrorMessage(
+          e,
+          fallback: 'Could not load addresses.',
+          context: 'admin.customer_profile',
+        ),
+        onRetry: () => ref.invalidate(customerAddressesProvider(userId)),
+      ),
     );
   }
 }
@@ -319,7 +327,14 @@ class _OrderHistorySection extends ConsumerWidget {
           ),
         ),
       ),
-      error: (e, _) => _EmptyCard(text: 'Could not load order history: $e'),
+      error: (e, _) => InlineErrorState(
+        message: friendlyErrorMessage(
+          e,
+          fallback: 'Could not load order history.',
+          context: 'admin.customer_profile',
+        ),
+        onRetry: () => ref.invalidate(customerOrdersProvider(userId)),
+      ),
     );
   }
 }

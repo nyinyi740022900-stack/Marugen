@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/notifications/push_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import 'analytics/admin_analytics_screen.dart';
 import 'dashboard/admin_dashboard_screen.dart';
@@ -152,6 +153,11 @@ class AdminShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final index = ref.watch(adminTabIndexProvider);
+    // Staff get new-order pushes; the admin shell has no launch popup, so
+    // ask after first paint. requestPermission() only prompts once.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => PushNotificationService.requestPermission(),
+    );
     return Scaffold(
       body: IndexedStack(
         index: index,

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/view_tracker.dart';
 import '../../../shared/widgets/promo_banner_dialog.dart';
@@ -36,8 +39,11 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     // Post-frame so the promo popup appears after this shell's first
     // paint, not mid-build; PromoBannerDialog itself enforces the
     // once-per-device-per-day gate.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) PromoBannerDialog.maybeShow(context, ref);
+    // The notification-permission prompt waits until the promo popup is
+    // closed (or skipped) so the two never stack on first launch.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (mounted) await PromoBannerDialog.maybeShow(context, ref);
+      unawaited(PushNotificationService.requestPermission());
     });
   }
 

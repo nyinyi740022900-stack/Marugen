@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import 'analytics_providers.dart';
 import 'analytics_repository.dart';
+import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/empty_state.dart';
 
 enum _Period { daily, weekly, monthly }
 
@@ -183,9 +185,13 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => Text(
-                'Error: $e',
-                style: TextStyle(color: AppPalette.of(context).error),
+              error: (e, _) => InlineErrorState(
+                message: friendlyErrorMessage(
+                  e,
+                  fallback: 'Could not load visits.',
+                  context: 'admin.analytics',
+                ),
+                onRetry: () => ref.invalidate(appVisitsProvider),
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -281,9 +287,13 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => Text(
-                'Error: $e',
-                style: TextStyle(color: AppPalette.of(context).error),
+              error: (e, _) => InlineErrorState(
+                message: friendlyErrorMessage(
+                  e,
+                  fallback: 'Could not load product views.',
+                  context: 'admin.analytics',
+                ),
+                onRetry: () => ref.invalidate(productViewsProvider),
               ),
             ),
           ],

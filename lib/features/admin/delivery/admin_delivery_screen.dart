@@ -17,6 +17,7 @@ import '../../orders/presentation/orders_providers.dart';
 import 'delivery_repository.dart';
 import 'easyparcel_providers.dart';
 import 'easyparcel_repository.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// 17TRACK carrier codes for couriers this shop actually uses — passed as
 /// `carrier_code` so 17TRACK doesn't have to guess from the tracking
@@ -150,7 +151,17 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
       if (mounted) {
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
-          ..showSnackBar(SnackBar(content: Text('EasyParcel error: $e')));
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                friendlyErrorMessage(
+                  e,
+                  fallback: 'EasyParcel request failed. Please try again.',
+                  context: 'admin.delivery',
+                ),
+              ),
+            ),
+          );
       }
     } finally {
       if (mounted) setState(() => _bookingShipment = false);
@@ -182,8 +193,17 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
       refreshAdminOrders(ref);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not update status: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: 'Could not update the delivery status.',
+              context: 'admin.delivery',
+            ),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _markingDelivered = false);
     }
@@ -211,8 +231,17 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('17TRACK error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              friendlyErrorMessage(
+                e,
+                fallback: 'Tracking request failed. Please try again.',
+                context: 'admin.delivery',
+              ),
+            ),
+          ),
+        );
       }
     }
   }

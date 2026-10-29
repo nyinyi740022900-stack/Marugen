@@ -8,6 +8,25 @@ import 'package:marugen_app/features/orders/data/order_repository.dart';
 import 'package:marugen_app/shared/models/order.dart';
 
 void main() {
+  test('refund refresh explicitly forbids creating a new refund', () async {
+    Map<String, dynamic>? sent;
+    final client = SupabaseClient(
+      'https://audit.invalid',
+      'fixture',
+      httpClient: MockClient((request) async {
+        sent = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          '{"refundStatus":"pending"}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+    addTearDown(client.dispose);
+    await OrderRepository(client: client)
+        .refundOrder('order-12345', refreshOnly: true);
+    expect(sent, {'order_id': 'order-12345', 'refresh_only': true});
+  });
   test('paid orders offer refund instead of unpaid cancellation', () {
     for (final status in [OrderStatus.paid, OrderStatus.packing]) {
       expect(validNextStatuses(status), isNot(contains(OrderStatus.cancelled)));

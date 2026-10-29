@@ -1,3 +1,6 @@
+import 'shipping_test_fixtures.dart';
+
+import 'package:marugen_app/features/orders/presentation/shipping_quote_providers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,6 +60,9 @@ void main() {
         ProviderScope(
           overrides: [
             currentUserIdProvider.overrideWith((ref) => 'customer'),
+            checkoutShippingQuoteProvider.overrideWith(
+              (ref, key) async => fixtureShippingQuote(key),
+            ),
             shopSettingsProvider.overrideWith(
               (ref) async => {'delivery_fee': 0, 'gst_registered': false},
             ),

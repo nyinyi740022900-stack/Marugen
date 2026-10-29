@@ -1,3 +1,5 @@
+import 'package:supabase_flutter/supabase_flutter.dart' show FunctionException;
+
 import '../../../core/supabase/supabase_client.dart';
 
 /// Talks to the `easyparcel-*` Supabase Edge Functions — the automated
@@ -43,10 +45,13 @@ class EasyParcelRepository {
 
   /// Rate quotes for an order's shipping address, using the shop's sender
   /// address + default parcel weight from Settings.
-  Future<List<EasyParcelRate>> getRates(String orderId) async {
+  Future<List<EasyParcelRate>> getRates(
+    String orderId, {
+    required ParcelDetails parcel,
+  }) async {
     final res = await _client.functions.invoke(
       'easyparcel-get-rates',
-      body: {'order_id': orderId},
+      body: {'order_id': orderId, 'parcel': parcel.toJson()},
     );
     if (res.status >= 400) {
       final data = res.data;
@@ -56,7 +61,9 @@ class EasyParcelRepository {
       throw Exception(message);
     }
     final rawRates = (res.data as Map)['rates'];
-    final list = rawRates is List ? rawRates : (rawRates as Map)['result'] as List? ?? [];
+    final list = rawRates is List
+        ? rawRates
+        : (rawRates as Map)['result'] as List? ?? [];
     return list
         .map((e) => EasyParcelRate.fromMap((e as Map).cast<String, dynamic>()))
         .toList();
@@ -64,10 +71,11 @@ class EasyParcelRepository {
 
   /// Books the shipment with the courier/service the admin picked from
   /// [getRates]. On success the order's tracking number is set server-side
-  /// (same columns 17TRACK uses) and its status advances to `shipped`.
+  /// (same columns 17TRACK uses). The order awaits pickup until collection is confirmed.
   Future<void> bookShipment({
     required String orderId,
     required String serviceId,
+    required ParcelDetails parcel,
     String? courierId,
   }) async {
     final res = await _client.functions.invoke(
@@ -75,6 +83,7 @@ class EasyParcelRepository {
       body: {
         'order_id': orderId,
         'service_id': serviceId,
+        'parcel': parcel.toJson(),
         'courier_id': ?courierId,
       },
     );
@@ -85,6 +94,71 @@ class EasyParcelRepository {
           : 'Could not book the shipment';
       throw Exception(message);
     }
+  }
+
+  /// Attaches an existing booking's verified AWB; never creates another shipment.
+  Future<void> reconcileShipment(String orderId, String trackingNumber) async {
+    final res = await _client.functions.invoke(
+      'easyparcel-reconcile-shipment',
+      body: {
+        'order_id': orderId,
+        'tracking_number': trackingNumber,
+        'confirmed_existing_shipment': true,
+      },
+    );
+    if (res.status >= 400) {
+      final data = res.data;
+      throw Exception(
+        data is Map && data['error'] != null
+            ? data['error'].toString()
+            : 'Could not recover the existing shipment',
+      );
+    }
+  }
+
+  /// Parcel planning/booking is owner-only; the backend owns all prices and claims.
+  Future<Map<String, dynamic>> parcelAction(
+    String action,
+    String orderId, {
+    Map<String, dynamic> data = const {},
+  }) async {
+    final dynamic response;
+    try {
+      response = await _client.functions
+          .invoke(
+            'order-parcels',
+            body: {...data, 'action': action, 'order_id': orderId},
+          )
+          .timeout(Duration(seconds: action == 'book' ? 90 : 45));
+    } on FunctionException catch (error) {
+      final details = error.details;
+      throw StateError(
+        details is Map && details['error'] is String
+            ? details['error'] as String
+            : 'Could not update parcels. Refresh and try again.',
+      );
+    }
+    if (response.status >= 400 || response.data is! Map) {
+      final body = response.data;
+      throw StateError(
+        body is Map && body['error'] is String
+            ? body['error'] as String
+            : 'Could not update parcels. Refresh and try again.',
+      );
+    }
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Read-only owner check: never pays, submits or retries a shipment.
+  Future<Map<String, dynamic>> pickupDiagnostics(String orderId) async {
+    final res = await _client.functions.invoke(
+      'easyparcel-pickup-diagnostics',
+      body: {'order_id': orderId},
+    );
+    if (res.status >= 400 || res.data is! Map) {
+      throw StateError('Could not verify pickup. Check EasyParcel.');
+    }
+    return Map<String, dynamic>.from(res.data as Map);
   }
 
   /// Pulls the shipment's current status straight from EasyParcel (pickup,
@@ -122,6 +196,8 @@ class EasyParcelRate {
   final String courierName;
   final double price;
   final String? currency;
+  final bool bookingAvailable;
+  final String? bookingMessage;
 
   const EasyParcelRate({
     required this.serviceId,
@@ -129,15 +205,53 @@ class EasyParcelRate {
     required this.courierName,
     required this.price,
     this.currency,
+    this.bookingAvailable = true,
+    this.bookingMessage,
   });
 
   factory EasyParcelRate.fromMap(Map<String, dynamic> map) {
+    final price = double.tryParse((map['price'] ?? '').toString());
+    if (map['currency'] != 'SGD' ||
+        price == null ||
+        !price.isFinite ||
+        price < 0 ||
+        (map['courier_name'] is! String ||
+            (map['courier_name'] as String).trim().isEmpty)) {
+      throw const FormatException(
+        'Could not verify the SGD courier rate. Refresh shipping rates.',
+      );
+    }
     return EasyParcelRate(
       serviceId: (map['service_id'] ?? '').toString(),
       courierId: map['courier_id']?.toString(),
       courierName: (map['courier_name'] ?? 'Courier').toString(),
-      price: double.tryParse((map['price'] ?? 0).toString()) ?? 0,
+      price: price,
       currency: map['currency']?.toString(),
+      bookingAvailable: map['booking_available'] == true,
+      bookingMessage: map['booking_message']?.toString(),
     );
   }
+}
+
+/// The same measurements and pickup date are used for both quoting and booking.
+class ParcelDetails {
+  final double weightKg;
+  final double lengthCm;
+  final double widthCm;
+  final double heightCm;
+  final String collectionDate;
+  const ParcelDetails({
+    required this.weightKg,
+    required this.lengthCm,
+    required this.widthCm,
+    required this.heightCm,
+    required this.collectionDate,
+  });
+  Map<String, dynamic> toJson() => {
+    'weight_kg': weightKg,
+    'length_cm': lengthCm,
+    'width_cm': widthCm,
+    'height_cm': heightCm,
+    'collection_date': collectionDate,
+  };
 }

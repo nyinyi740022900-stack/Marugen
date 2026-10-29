@@ -1,3 +1,7 @@
+import {
+  checkoutAmountCents,
+  checkoutMerchandiseCents,
+} from "../_shared/shipping_finance.ts";
 // Supabase Edge Function: create-payment-intent
 //
 // Validates cart against DB prices/stock, creates a pending order (stock
@@ -21,6 +25,22 @@ import {
   remarksRetryAction,
 } from "./order_remarks.ts";
 
+import {
+  classifyFulfillment,
+  validateSingaporeAddress,
+} from "../_shared/delivery.ts";
+
+import {
+  canonicalCheckout,
+  requireQuote,
+  retryShippingError,
+  signature,
+} from "../_shared/shipping_finance.ts";
+import {
+  checkoutBinding,
+  orderShippingFields,
+} from "../_shared/shipping_api.ts";
+
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
   apiVersion: "2024-06-20",
 });
@@ -41,6 +61,7 @@ type CartLineIn = {
 type BuiltLine = {
   product_id: string;
   product_name: string;
+  product_category: string;
   quantity: number;
   unit_price: number;
   variant_id?: string;
@@ -131,6 +152,32 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Cart is empty" }, 400);
     }
 
+    let checkoutSignature: string;
+    let shippingQuote: Record<string, unknown> | null = null;
+    try {
+      checkoutSignature = await signature(
+        canonicalCheckout(itemsIn, shippingIn, promoCodeRaw),
+      );
+      if (body.shipping_quote_id != null) {
+        if (typeof body.shipping_quote_id !== "string") {
+          throw new Error("Invalid shipping quote");
+        }
+        const { data, error } = await admin.from("shipping_quotes").select("*")
+          .eq("id", body.shipping_quote_id).eq("user_id", user.id)
+          .maybeSingle();
+        if (error || !data || data.checkout_signature !== checkoutSignature) {
+          throw new Error(
+            "Shipping quote does not match this checkout. Refresh delivery pricing",
+          );
+        }
+        shippingQuote = data;
+      }
+    } catch (error) {
+      return jsonResponse({
+        error: error instanceof Error ? error.message : "Invalid checkout",
+      }, 400);
+    }
+
     // Client sends the same idempotency_key for every retry of one checkout
     // attempt (see checkout_screen.dart). If an earlier call already got as
     // far as creating a pending order + PaymentIntent for this exact key —
@@ -143,7 +190,7 @@ Deno.serve(async (req) => {
       const { data: existing, error: lookupError } = await admin
         .from("orders")
         .select(
-          "id, user_id, status, stripe_payment_intent_id, total, customer_remarks, customer_remarks_revision",
+          "id, user_id, status, stripe_payment_intent_id, total, customer_remarks, customer_remarks_revision, shipping_checkout_signature, shipping_quote_id, shipping_service_id, shipping_carrier_name, total_shipping_cents, buyer_shipping_cents, seller_shipping_cents",
         )
         .eq("user_id", userId)
         .eq("idempotency_key", idempotencyKey)
@@ -153,6 +200,25 @@ Deno.serve(async (req) => {
       if (!existing) return null;
       const completed = completedCheckoutResponse(existing);
       if (completed) return jsonResponse(completed);
+
+      const shippingRetryError = retryShippingError(
+        existing,
+        checkoutSignature,
+        shippingQuote,
+      );
+      if (shippingRetryError) {
+        return jsonResponse({ error: shippingRetryError }, 409);
+      }
+      // The accepted quote itself survives expiry for this exact pending payment.
+      // An alternative quote must still be current before reusing its fee consent.
+      if (
+        shippingQuote && shippingQuote.id !== existing.shipping_quote_id &&
+        Date.parse(String(shippingQuote.expires_at)) <= Date.now()
+      ) {
+        return jsonResponse({
+          error: "Shipping quote expired. Refresh delivery pricing",
+        }, 409);
+      }
       if (!existing.stripe_payment_intent_id) {
         return jsonResponse({
           error: "Your checkout is still being prepared. Retry shortly.",
@@ -219,14 +285,21 @@ Deno.serve(async (req) => {
     const existingResponse = await findExistingCheckout();
     if (existingResponse) return existingResponse;
 
-    // Delivery-only: the shop hand-delivers every order (see
-    // delivery_repository.dart for how live fish are routed to
-    // self-delivery instead of a courier). There is no self-collection/
-    // pickup flow anymore.
+    // Every order requires a Singapore delivery address. Live fish and
+    // mixed baskets use seller-covered shop delivery; dry goods use TracX.
     if (!shippingIn) {
       return jsonResponse({ error: "Shipping address required" }, 400);
     }
-    const shippingAddress: Record<string, unknown> = { ...shippingIn };
+    let shippingAddress: Record<string, unknown>;
+    try {
+      shippingAddress = validateSingaporeAddress(shippingIn);
+    } catch (error) {
+      return jsonResponse({
+        error: error instanceof Error
+          ? error.message
+          : "Invalid shipping address",
+      }, 400);
+    }
 
     const builtLines: BuiltLine[] = [];
     let subtotal = 0;
@@ -340,6 +413,7 @@ Deno.serve(async (req) => {
         builtLines.push({
           product_id: product.id,
           product_name: product.name,
+          product_category: product.category,
           quantity: qty,
           unit_price: unit,
           variant_id: variant.id,
@@ -397,6 +471,7 @@ Deno.serve(async (req) => {
         builtLines.push({
           product_id: product.id,
           product_name: product.name,
+          product_category: product.category,
           quantity: qty,
           unit_price: unit,
           size_label: sizeLabel,
@@ -455,8 +530,6 @@ Deno.serve(async (req) => {
       promoId = promo.id;
     }
 
-    const netSubtotal = roundMoney(subtotal - discountAmount);
-
     const { data: settings } = await admin
       .from("settings")
       .select("gst_percent, gst_included_in_price")
@@ -466,9 +539,52 @@ Deno.serve(async (req) => {
     const gstPercent = Number(settings?.gst_percent ?? 9);
     const gstIncluded = settings?.gst_included_in_price !== false;
 
-    let payableTotal = netSubtotal;
-    if (!gstIncluded && gstPercent > 0) {
-      payableTotal = roundMoney(netSubtotal + netSubtotal * gstPercent / 100);
+    let payableTotal = checkoutMerchandiseCents(
+      subtotal,
+      discountAmount,
+      gstPercent,
+      gstIncluded,
+    ) / 100;
+
+    let shippingFields: Record<string, unknown>;
+    try {
+      const binding = await checkoutBinding(
+        admin,
+        itemsIn,
+        shippingIn,
+        promoCodeRaw,
+      );
+      if (binding.fulfillment === "courier" && !shippingQuote) {
+        throw new Error("Refresh delivery pricing before payment");
+      }
+      if (shippingQuote) {
+        requireQuote(
+          shippingQuote,
+          user.id,
+          checkoutSignature,
+          binding.pricing_signature,
+        );
+        if (
+          shippingQuote.fulfillment_method !== classifyFulfillment(builtLines)
+        ) throw new Error("Delivery method changed. Refresh delivery pricing");
+      }
+      shippingFields = orderShippingFields(
+        shippingQuote,
+        checkoutSignature,
+        binding.fulfillment,
+      );
+      // Provider total includes its taxes. Add only the buyer's share, once,
+      // after the existing merchandise GST computation above.
+      payableTotal = checkoutAmountCents(
+        payableTotal,
+        Number(shippingFields.buyer_shipping_cents),
+      ) / 100;
+    } catch (error) {
+      return jsonResponse({
+        error: error instanceof Error
+          ? error.message
+          : "Shipping quote invalid",
+      }, 409);
     }
 
     if (payableTotal <= 0) {
@@ -481,9 +597,11 @@ Deno.serve(async (req) => {
       .from("orders")
       .insert({
         user_id: user.id,
+        ...shippingFields,
         status: "pending",
         total: payableTotal,
         shipping_address: shippingAddress,
+        fulfillment_method: classifyFulfillment(builtLines),
         customer_remarks: customerRemarks,
         customer_remarks_revision: customerRemarksRevision,
         promo_code: promoCode,
@@ -514,6 +632,7 @@ Deno.serve(async (req) => {
         order_id: orderId,
         product_id: line.product_id,
         product_name: line.product_name,
+        product_category: line.product_category,
         quantity: line.quantity,
         unit_price: line.unit_price,
         variant_id: line.variant_id ?? null,

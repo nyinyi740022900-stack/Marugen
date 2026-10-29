@@ -31,6 +31,8 @@ import {
   applyPaymentEvent,
   cancelPendingPayment,
 } from "../_shared/payment_lifecycle.ts";
+import { syncOrderRefunds } from "../_shared/refund_lifecycle.ts";
+import { createRefundPort } from "../_shared/refund_port.ts";
 import { createPaymentPort } from "../_shared/payment_port.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -71,6 +73,7 @@ Deno.serve(async (req) => {
   }
 
   let reconciled = 0;
+  let failures = 0;
   for (const order of staleOrders ?? []) {
     try {
       const intent = await stripe.paymentIntents.retrieve(
@@ -94,6 +97,7 @@ Deno.serve(async (req) => {
         reconciled++;
       }
     } catch (err) {
+      failures++;
       console.error(
         "[reconcile-pending-orders] stripe lookup failed",
         order.id,
@@ -102,8 +106,39 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Recover asynchronous refund completions when webhook delivery is delayed.
+  // This path only reads Stripe; it never creates or retries a refund.
+  const { data: pendingRefunds, error: refundQueryError } = await admin
+    .from("orders").select("id, stripe_payment_intent_id")
+    .in("refund_status", ["pending", "requires_action"])
+    .not("stripe_payment_intent_id", "is", null);
+  if (refundQueryError) {
+    failures++;
+    console.error("Refund reconciliation query failed", refundQueryError);
+  }
+  let refundsReconciled = 0;
+  for (const order of pendingRefunds ?? []) {
+    try {
+      await syncOrderRefunds(
+        order.stripe_payment_intent_id,
+        createRefundPort(admin, stripe, supabaseUrl, serviceRoleKey),
+      );
+      refundsReconciled++;
+    } catch (error) {
+      failures++;
+      console.error("Refund reconciliation failed", order.id, error);
+    }
+  }
   return new Response(
-    JSON.stringify({ checked: staleOrders?.length ?? 0, reconciled }),
-    { headers: { "Content-Type": "application/json" } },
+    JSON.stringify({
+      checked: staleOrders?.length ?? 0,
+      reconciled,
+      refundsReconciled,
+      failures,
+    }),
+    {
+      status: failures > 0 ? 500 : 200,
+      headers: { "Content-Type": "application/json" },
+    },
   );
 });

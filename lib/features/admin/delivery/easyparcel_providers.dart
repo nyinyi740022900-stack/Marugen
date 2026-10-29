@@ -14,7 +14,9 @@ final easyParcelRepositoryProvider = Provider<EasyParcelRepository>(
 /// browser OAuth flow", so callers re-check on demand instead).
 final easyParcelConnectedProvider = FutureProvider<bool>((ref) async {
   try {
-    final status = await ref.watch(easyParcelRepositoryProvider).connectionStatus();
+    final status = await ref
+        .watch(easyParcelRepositoryProvider)
+        .connectionStatus();
     return status.connected;
   } catch (_) {
     return false;

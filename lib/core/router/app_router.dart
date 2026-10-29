@@ -28,6 +28,7 @@ import '../../features/support/faq_screen.dart';
 import '../../shared/models/app_user.dart';
 import '../../shared/models/order.dart';
 import 'splash_screen.dart';
+import 'unknown_route_screen.dart';
 
 /// Routes that require the user to be logged in — everyone else can
 /// browse the shop, product pages and cart as a guest. Login is only
@@ -188,8 +189,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             AdminProductEditScreen(productId: state.pathParameters['id']),
       ),
     ],
-    errorBuilder: (_, state) =>
-        Scaffold(body: Center(child: Text('Route not found: ${state.uri}'))),
+    errorBuilder: (_, state) => UnknownRouteScreen(uri: state.uri),
   );
 });
 

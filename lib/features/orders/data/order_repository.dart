@@ -5,6 +5,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/order.dart';
 
+class CancellationRefundNeedsAttention implements Exception {
+  const CancellationRefundNeedsAttention();
+}
+
 class OrderRepository {
   final SupabaseClient _client;
   OrderRepository({SupabaseClient? client})
@@ -15,7 +19,9 @@ class OrderRepository {
     if (user == null) return [];
     final data = await _client
         .from('orders')
-        .select('*, items:order_items(*)')
+        .select(
+          '*, items:order_items(*), parcels:order_parcels(*), order_cancellation_requests(*)',
+        )
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
     return (data as List)
@@ -29,7 +35,9 @@ class OrderRepository {
   Future<List<Order>> fetchOrdersForUser(String userId) async {
     final data = await _client
         .from('orders')
-        .select('*, items:order_items(*)')
+        .select(
+          '*, items:order_items(*), parcels:order_parcels(*), order_cancellation_requests(*)',
+        )
         .eq('user_id', userId)
         .order('created_at', ascending: false);
     return (data as List)
@@ -43,7 +51,11 @@ class OrderRepository {
   /// aren't yet large enough for full-table search to be a real problem,
   /// only for scrolling the default unfiltered list to be.
   Future<List<Order>> fetchAllOrders({OrderStatus? status}) async {
-    var query = _client.from('orders').select('*, items:order_items(*)');
+    var query = _client
+        .from('orders')
+        .select(
+          '*, items:order_items(*), parcels:order_parcels(*), order_cancellation_requests(*)',
+        );
     if (status != null) {
       query = query.eq('status', status.name);
     }
@@ -51,6 +63,25 @@ class OrderRepository {
     return (data as List)
         .map((e) => Order.fromMap(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Outstanding deliveries have their own query, independent of browse filters.
+  Future<List<Order>> fetchFulfillmentOrders() async {
+    const pageSize = 200;
+    final orders = <Order>[];
+    for (var offset = 0; ; offset += pageSize) {
+      final data = await _client
+          .from('orders')
+          .select(
+            '*, items:order_items(*), parcels:order_parcels(*), order_cancellation_requests(*)',
+          )
+          .inFilter('status', ['paid', 'packing', 'shipped'])
+          .order('created_at')
+          .order('id')
+          .range(offset, offset + pageSize - 1);
+      orders.addAll(data.map(Order.fromMap));
+      if (data.length < pageSize) return orders;
+    }
   }
 
   /// Admin: one page of orders (`[offset, offset+limit)`), optionally
@@ -62,7 +93,11 @@ class OrderRepository {
     required int offset,
     required int limit,
   }) async {
-    var query = _client.from('orders').select('*, items:order_items(*)');
+    var query = _client
+        .from('orders')
+        .select(
+          '*, items:order_items(*), parcels:order_parcels(*), order_cancellation_requests(*)',
+        );
     if (status != null) {
       query = query.eq('status', status.name);
     }
@@ -72,6 +107,18 @@ class OrderRepository {
     return (data as List)
         .map((e) => Order.fromMap(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<void> confirmShopDelivery(String orderId) async {
+    final confirmed = await _client.rpc(
+      'confirm_shop_delivery',
+      params: {'order_id': orderId},
+    );
+    if (confirmed != true) {
+      throw StateError(
+        'Order changed. Refresh before confirming shop delivery.',
+      );
+    }
   }
 
   Future<void> updateOrderStatus(String orderId, OrderStatus status) async {
@@ -116,17 +163,20 @@ class OrderRepository {
     }
   }
 
-  /// Admin-only. Issues a real Stripe refund for the order's payment (via
-  /// the `stripe-refund` Edge Function) and flips its status to
-  /// `refunded` — replaces the old behaviour where picking "Refunded" in
-  /// admin_orders_screen.dart's status selector just relabeled the status
-  /// column with no money ever moving. Throws with the server's error
-  /// message on failure (already-refunded, no payment on the order,
-  /// Stripe error, etc.) — the caller shows it as-is.
-  Future<void> refundOrder(String orderId, {String? reason}) async {
+  /// Admin-only refund request/status refresh. Only the backend may mark
+  /// the order refunded, after Stripe confirms that the refund succeeded.
+  Future<void> refundOrder(
+    String orderId, {
+    String? reason,
+    bool refreshOnly = false,
+  }) async {
     final res = await _client.functions.invoke(
       'stripe-refund',
-      body: {'order_id': orderId, 'reason': ?reason},
+      body: {
+        'order_id': orderId,
+        'reason': ?reason,
+        'refresh_only': refreshOnly,
+      },
     );
     if (res.status >= 400) {
       final data = res.data;
@@ -134,6 +184,42 @@ class OrderRepository {
           ? data['error'].toString()
           : 'Could not process the refund';
       throw Exception(message);
+    }
+  }
+
+  /// The backend owns eligibility, fulfillment holds and Stripe verification.
+  Future<void> manageCancellation(
+    String orderId,
+    String action, {
+    String? reason,
+  }) async {
+    final response = await _client.functions
+        .invoke(
+          'order-cancellation',
+          body: {'order_id': orderId, 'action': action, 'reason': ?reason},
+        )
+        .timeout(const Duration(seconds: 45));
+    if (response.status >= 400) {
+      throw StateError(
+        'Cancellation could not be confirmed. Refresh the order or contact support.',
+      );
+    }
+    final data = response.data;
+    final request = data is Map ? data['request'] : null;
+    final expected = switch (action) {
+      'request' => const {'requested', 'approved'},
+      'reject' => const {'rejected'},
+      _ => const {'approved'},
+    };
+    if (request is! Map ||
+        request['order_id'] != orderId ||
+        !expected.contains(request['status'])) {
+      throw StateError(
+        'The cancellation decision was not confirmed. Refresh the order.',
+      );
+    }
+    if (data is Map && data['refund_error'] != null) {
+      throw const CancellationRefundNeedsAttention();
     }
   }
 
@@ -157,7 +243,9 @@ class OrderRepository {
   Future<Order?> fetchOrderById(String id) async {
     final data = await _client
         .from('orders')
-        .select('*, items:order_items(*)')
+        .select(
+          '*, items:order_items(*), parcels:order_parcels(*), order_cancellation_requests(*), status_history:order_status_history(to_status,changed_at)',
+        )
         .eq('id', id)
         .maybeSingle();
     if (data == null) return null;

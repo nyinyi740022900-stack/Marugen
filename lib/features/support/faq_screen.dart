@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../shared/providers/settings_providers.dart';
-import '../../shared/utils/contact_launcher.dart';
+import '../../shared/widgets/support_contact_picker.dart';
 
 class _Faq {
   final String question;
@@ -14,15 +13,14 @@ class _Faq {
 const _faqs = [
   _Faq(
     'Where do you deliver?',
-    'We currently deliver island-wide across Singapore via our courier partner. '
-        'Delivery timelines may vary slightly for live fish due to weather and '
-        'health/quarantine considerations.',
+    'We deliver within Singapore. Available delivery services, fees and estimated '
+        'arrival dates are shown at checkout. Timing may vary due to order preparation, '
+        'weather or delivery partner delays.',
   ),
   _Faq(
-    'Do you guarantee live fish on arrival?',
-    'Yes — we package every koi and arowana carefully for transit. If a fish arrives '
-        'unwell, please contact us with photos/video within 24 hours of delivery so we '
-        'can help make it right.',
+    'What if an item is missing or damaged?',
+    'Contact the shop with your order number, a description of the issue and relevant '
+        'photos. We will review the issue and explain the available next steps.',
   ),
   _Faq(
     'What payment methods do you accept?',
@@ -37,9 +35,10 @@ const _faqs = [
   ),
   _Faq(
     'Can I cancel my order?',
-    'Yes, as long as it hasn\'t been packed yet. Open the order from your Order History '
-        'and tap "Cancel Order". Once an order is packing/shipped, please contact us '
-        'directly.',
+    'Open the order from Order History. Unpaid orders can be cancelled with Cancel Order. '
+        'For paid or packing orders without a delivery booking, use Request cancellation. '
+        'A request needs shop review; submitting it does not cancel the order or issue a refund. '
+        'Refund progress is shown separately. For booked or shipped orders, contact support.',
   ),
   _Faq(
     'How do I track my order?',
@@ -80,34 +79,37 @@ class FaqScreen extends ConsumerWidget {
                 boxShadow: AppShadows.card,
               ),
               clipBehavior: Clip.antiAlias,
-              child: Theme(
-                data: Theme.of(context)
-                    .copyWith(dividerColor: Colors.transparent),
-                child: ExpansionTile(
-                  title: Text(
-                    faq.question,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13.5,
-                    ),
-                  ),
-                  childrenPadding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    0,
-                    AppSpacing.lg,
-                    AppSpacing.lg,
-                  ),
-                  expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      faq.answer,
-                      style: TextStyle(
-                        fontSize: 13,
-                        height: 1.5,
-                        color: AppPalette.of(context).textMuted,
+              child: Material(
+                color: Colors.transparent,
+                child: Theme(
+                  data: Theme.of(context)
+                      .copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    title: Text(
+                      faq.question,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
                       ),
                     ),
-                  ],
+                    childrenPadding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      0,
+                      AppSpacing.lg,
+                      AppSpacing.lg,
+                    ),
+                    expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        faq.answer,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.5,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -123,33 +125,14 @@ class FaqScreen extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Still need help? Message the shop directly.',
+                  'Still need help? Choose a support contact.',
                   style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 ElevatedButton.icon(
-                  onPressed: () async {
-                    try {
-                      final settings = await ref.read(
-                        shopSettingsProvider.future,
-                      );
-                      if (!context.mounted) return;
-                      final phone = settings['shop_phone'] as String? ?? '';
-                      await contactShop(context, phone);
-                    } catch (_) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Could not load shop contact. Check your connection and try again.',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  },
+                  onPressed: () => showSupportContactPicker(context),
                   icon: const Icon(Icons.chat_bubble_outline, size: 16),
-                  label: const Text('Contact Us'),
+                  label: const Text('Contact Support'),
                 ),
               ],
             ),

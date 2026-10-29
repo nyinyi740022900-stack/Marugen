@@ -1,132 +1,106 @@
-// Supabase Edge Function: track-register
-//
-// Registers an order's courier tracking number with 17TRACK (any carrier —
-// Qxpress or otherwise; 17TRACK auto-detects the carrier from the number
-// format if you don't pass one). Once registered, 17TRACK starts polling
-// the carrier and will push status updates to `track-webhook`.
-//
-// Only admins (staff/owner) may call this — enforced via the caller's JWT
-// + a `profiles.role` check, same pattern as the app's `is_admin()` RLS.
-//
-// Deploy:  supabase functions deploy track-register
-// Secrets: supabase secrets set TRACK17_API_KEY=xxx
-//          (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are already set for every project)
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const track17ApiKey = Deno.env.get('TRACK17_API_KEY') ?? '';
-const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-// Prefer the new publishable/secret key pair (set explicitly via
-// `supabase secrets set`) over the legacy JWT anon/service_role names the
-// platform auto-injects, so this keeps working whether or not legacy
-// JWT-based API keys are later disabled project-wide.
-const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const serviceRoleKey =
-  Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
+// Admin attests physical handover before manual 17TRACK registration.
+import { manualCarrier, manualRegistrationError } from "../_shared/delivery.ts";
+import {
+  authenticated,
+  claimShipment,
+  corsHeaders,
+  DeliveryError,
+  failure,
+  json,
+  loadOrder,
+  notifyOrder,
+} from "../_shared/delivery_api.ts";
+const track17ApiKey = Deno.env.get("TRACK17_API_KEY") ?? "";
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
-
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return jsonError('Missing Authorization header', 401);
-
-    // Verify the caller is a signed-in admin (staff/owner), not just any user.
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user }, error: userError } = await userClient.auth.getUser();
-    if (userError || !user) return jsonError('Unauthorized', 401);
-
-    const admin = createClient(supabaseUrl, serviceRoleKey);
-    const { data: profile } = await admin
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (!profile || (profile.role !== 'staff' && profile.role !== 'owner')) {
-      return jsonError('Admin access required', 403);
+    const { admin } = await authenticated(req);
+    const { order_id, tracking_number, carrier_code, confirmed_handover } =
+      await req.json();
+    if (
+      typeof tracking_number !== "string" ||
+      !/^[A-Za-z0-9-]{3,100}$/.test(tracking_number.trim())
+    ) throw new DeliveryError("Enter a valid courier tracking number");
+    const number = tracking_number.trim();
+    if (
+      carrier_code != null &&
+      (!Number.isInteger(carrier_code) || carrier_code <= 0)
+    ) throw new DeliveryError("Carrier code must be a positive integer");
+    const order = await loadOrder(admin, order_id);
+    const carrier = manualCarrier(carrier_code, order.tracking_carrier_code);
+    const reason = manualRegistrationError(order, confirmed_handover, number);
+    if (reason) throw new DeliveryError(reason, 409);
+    const retry = order.tracking_provider === "seventeentrack" &&
+      order.qxpress_tracking_no === number;
+    if (
+      !retry &&
+      !await claimShipment(
+        admin,
+        order.id,
+        "seventeentrack",
+        number,
+        carrier,
+      )
+    ) {
+      throw new DeliveryError(
+        "Order changed or another booking claimed it. Refresh first.",
+        409,
+      );
     }
-
-    const { order_id, tracking_number, carrier_code } = await req.json();
-    if (!order_id || !tracking_number) {
-      return jsonError('order_id and tracking_number are required', 400);
+    // Claim + candidate AWB + confirmed shipped handover are one database
+    // mutation, so a concurrent packing update cannot strand a blank claim.
+    if (!retry && order.status !== "shipped") {
+      await notifyOrder(order.id, { status: "shipped" });
     }
-
-    // 17TRACK v2.4 register — https://api.17track.net/track/v2.4/register
-    const payload: Record<string, unknown> = { number: tracking_number };
-    if (carrier_code) payload.carrier = carrier_code;
-
-    const trackRes = await fetch('https://api.17track.net/track/v2.4/register', {
-      method: 'POST',
-      headers: {
-        '17token': track17ApiKey,
-        'Content-Type': 'application/json',
+    const response = await fetch(
+      "https://api.17track.net/track/v2.4/register",
+      {
+        method: "POST",
+        headers: {
+          "17token": track17ApiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify([{
+          number,
+          ...(carrier ? { carrier } : {}),
+        }]),
       },
-      body: JSON.stringify([payload]),
-    });
-
-    const trackData = await trackRes.json();
-    const accepted = trackData?.data?.accepted?.[0];
-    const rejected = trackData?.data?.rejected?.[0];
-
-    if (!trackRes.ok || rejected) {
-      const reason = rejected?.error?.message ?? `17TRACK register failed (${trackRes.status})`;
-      // A "number already registered" rejection is fine — it's already being
-      // tracked from an earlier attempt. Anything else is a real failure.
-      if (!String(reason).toLowerCase().includes('already')) {
-        return jsonError(reason, 502);
-      }
+    );
+    const body = await response.json();
+    const accepted = body?.data?.accepted?.[0],
+      rejected = body?.data?.rejected?.[0];
+    if (
+      !response.ok ||
+      (!accepted &&
+        !String(rejected?.error?.message ?? "").toLowerCase().includes(
+          "already",
+        ))
+    ) {
+      throw new DeliveryError(
+        "Handover saved, but 17TRACK registration needs attention. Do not book another shipment.",
+        502,
+      );
     }
-
-    // A tracking number being registered means the parcel has physically
-    // left the shop — advance the order's own lifecycle status to
-    // `shipped` to match (unless it's already past that point, or is
-    // cancelled/refunded). This is what the timeline UI reads, and it's
-    // also the gate track-webhook checks before auto-advancing to
-    // `delivered` / notifying admin of "out for delivery" — without it,
-    // those never fire because the order looks like it's still `paid`.
-    const { data: currentOrder } = await admin
-      .from('orders')
-      .select('status')
-      .eq('id', order_id)
-      .maybeSingle();
-    const statusUpdate =
-      currentOrder &&
-      (currentOrder.status === 'paid' || currentOrder.status === 'packing')
-        ? { status: 'shipped' }
-        : {};
-
-    await admin
-      .from('orders')
-      .update({
-        qxpress_tracking_no: tracking_number,
-        tracking_carrier_code: accepted?.carrier ?? carrier_code ?? null,
-        tracking_registered: true,
-        tracking_status: 'Registered',
-        tracking_updated_at: new Date().toISOString(),
-        ...statusUpdate,
-      })
-      .eq('id', order_id);
-
-    return new Response(JSON.stringify({ ok: true, carrier: accepted?.carrier ?? carrier_code ?? null }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const { data, error } = await admin.from("orders").update({
+      tracking_carrier_code: carrier,
+      tracking_status: "Registered",
+      tracking_updated_at: new Date().toISOString(),
+    })
+      .eq("id", order.id).eq("tracking_provider", "seventeentrack").eq(
+        "qxpress_tracking_no",
+        number,
+      ).in("status", ["paid", "packing", "shipped"]).select("id").maybeSingle();
+    if (error || !data) {
+      throw error ??
+        new Error("Tracking registration metadata could not be saved");
+    }
+    return json({
+      ok: true,
+      carrier,
     });
-  } catch (err) {
-    return jsonError(`${err}`, 500);
+  } catch (error) {
+    return failure(error);
   }
 });
-
-function jsonError(message: string, status: number) {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}

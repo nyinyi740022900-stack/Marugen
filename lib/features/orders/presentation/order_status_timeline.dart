@@ -3,42 +3,31 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 
-/// A simple horizontal stepper for the order lifecycle: Placed → Paid →
-/// Packed → (Collected, EasyParcel orders only) → Shipped → Delivered.
-/// Cancelled/refunded orders get a distinct terminal-state banner instead,
-/// since they never reach "Delivered".
-///
-/// "Collected" is a single extra step layered onto the same row rather than
-/// a second row: it reflects [trackingStatusCode] (the courier having
-/// physically picked up the parcel), which is a finer-grained signal than
-/// [status] alone — [status] already flips to `shipped` the moment the shop
-/// books/dispatches it (same as the manual 17TRACK path), which can be
-/// before the courier actually collects it, so "Shipped" can legitimately
-/// show done slightly ahead of "Collected".
+/// Shows recorded milestones and the next stages without inventing completed
+/// packing/dispatch events for orders that skipped them.
 class OrderStatusTimeline extends StatelessWidget {
   final OrderStatus status;
 
-  /// Pass 'easyparcel' to show the extra "Collected" step; omit for manual
-  /// 17TRACK orders and orders with no tracking yet, which have no
-  /// per-pickup signal to show it from.
   final String? trackingProvider;
-
-  /// EasyParcel's numeric shipment status code (migration 0043) — 3+ means
-  /// the courier has collected the parcel. Only meaningful alongside
-  /// trackingProvider == 'easyparcel'.
   final int? trackingStatusCode;
+  final int trackingProgress;
+  final String? fulfillmentMethod;
+  final List<String> statusHistory;
 
   const OrderStatusTimeline({
     super.key,
     required this.status,
     this.trackingProvider,
     this.trackingStatusCode,
+    this.trackingProgress = 0,
+    this.fulfillmentMethod,
+    this.statusHistory = const [],
   });
 
   static const _steps = [
     (OrderStatus.pending, 'Placed', Icons.receipt_long_outlined),
     (OrderStatus.paid, 'Paid', Icons.payments_outlined),
-    (OrderStatus.packing, 'Packed', Icons.inventory_2_outlined),
+    (OrderStatus.packing, 'Packing', Icons.inventory_2_outlined),
     (OrderStatus.shipped, 'Shipped', Icons.local_shipping_outlined),
     (OrderStatus.delivered, 'Delivered', Icons.home_outlined),
   ];
@@ -62,14 +51,16 @@ class OrderStatusTimeline extends StatelessWidget {
               size: 20,
             ),
             const SizedBox(width: AppSpacing.sm),
-            Text(
-              isCancelled
-                  ? 'This order was cancelled.'
-                  : 'This order was refunded.',
-              style: TextStyle(
-                color: AppPalette.of(context).error,
-                fontWeight: FontWeight.w600,
-                fontSize: 13.5,
+            Expanded(
+              child: Text(
+                isCancelled
+                    ? 'This order was cancelled.'
+                    : 'This order was refunded.',
+                style: TextStyle(
+                  color: AppPalette.of(context).error,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                ),
               ),
             ),
           ],
@@ -77,59 +68,49 @@ class OrderStatusTimeline extends StatelessWidget {
       );
     }
 
-    final showCollected = trackingProvider == 'easyparcel';
-
-    // Build the merged step list (with "Collected" spliced in right after
-    // "Packed" for EasyParcel orders), then pick a single "current"
-    // position by its place IN THAT MERGED LIST — everything before it is
-    // done, everything after is upcoming. This is deliberately positional
-    // rather than deriving each step's done/current state from its own
-    // independent signal (status-index for the base steps,
-    // trackingStatusCode for Collected): those two signals disagree in the
-    // common case where an order is already `shipped` in the DB (set the
-    // moment it's booked) but not yet physically collected, and computing
-    // each step's state independently from whichever signal it happens to
-    // track could mark two steps "current" at once. Anchoring everything
-    // to one merged index guarantees exactly one current step, and also
-    // means "Shipped" intentionally doesn't show done until collection
-    // is confirmed — a more accurate label than the raw DB status alone.
-    final baseIndex = _steps.indexWhere((s) => s.$1 == status);
-    final packingIndex = _steps.indexWhere((s) => s.$1 == OrderStatus.packing);
-    final shippedIndex = _steps.indexWhere((s) => s.$1 == OrderStatus.shipped);
-    final collected = trackingStatusCode != null && trackingStatusCode! >= 3;
-
-    final labels = <String>[];
-    final icons = <IconData>[];
-    int? collectedMergedIndex;
-    int? shippedMergedIndex;
-    for (var i = 0; i < _steps.length; i++) {
-      if (i == shippedIndex) shippedMergedIndex = labels.length;
-      labels.add(_steps[i].$2);
-      icons.add(_steps[i].$3);
-      if (i == packingIndex && showCollected) {
-        collectedMergedIndex = labels.length;
-        labels.add('Collected');
-        icons.add(Icons.local_shipping_outlined);
-      }
-    }
-
-    final currentIndex = switch (baseIndex) {
-      // Steps at or before "Packed" are never preceded by the spliced-in
-      // Collected step, so their merged index still equals their original
-      // index in _steps.
-      _ when baseIndex <= packingIndex => baseIndex,
-      _ when baseIndex == shippedIndex =>
-        (showCollected && !collected)
-            ? collectedMergedIndex!
-            : shippedMergedIndex!,
-      _ => labels.length - 1, // delivered — last step
-    };
-
+    final courier = trackingProvider == 'easyparcel';
+    final shop = fulfillmentMethod == 'shop_delivery';
+    final collected =
+        trackingProgress > 0 ||
+        const {3, 4, 5, 11}.contains(trackingStatusCode);
+    final booked = courier && !collected && status != OrderStatus.delivered;
+    final current = booked ? 3 : _steps.indexWhere((s) => s.$1 == status);
+    final all = courier
+        ? <(OrderStatus, String, IconData)>[
+            _steps[0],
+            _steps[1],
+            _steps[2],
+            (OrderStatus.packing, 'Awaiting pickup', Icons.schedule),
+            (OrderStatus.shipped, 'In transit', Icons.local_shipping_outlined),
+            _steps.last,
+          ]
+        : <(OrderStatus, String, IconData)>[
+            _steps[0],
+            _steps[1],
+            _steps[2],
+            (
+              OrderStatus.shipped,
+              shop ? 'Out for delivery' : 'Shipped',
+              Icons.local_shipping_outlined,
+            ),
+            _steps.last,
+          ];
+    final currentIndex = courier && !booked && current >= 3
+        ? current + 1
+        : current;
     final steps = <(String, IconData, _StepState)>[];
-    for (var i = 0; i < labels.length; i++) {
+    for (var i = 0; i < all.length; i++) {
+      final stage = all[i];
+      final recorded =
+          i == 0 ||
+          (i == 1 && status.index >= OrderStatus.paid.index) ||
+          statusHistory.contains(stage.$1.name);
+      // A booked label is not proof of pickup. Earlier booking stages are
+      // omitted once moving if no event recorded them.
+      if (i < currentIndex && (!recorded || (courier && i == 3))) continue;
       steps.add((
-        labels[i],
-        icons[i],
+        stage.$2,
+        stage.$3,
         i < currentIndex
             ? _StepState.done
             : i == currentIndex
@@ -149,29 +130,67 @@ class OrderStatusTimeline extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
-      child: Row(
-        children: [
-          for (var i = 0; i < steps.length; i++) ...[
-            Expanded(
-              child: _StepDot(
-                label: steps[i].$1,
-                icon: steps[i].$2,
-                state: steps[i].$3,
-              ),
-            ),
-            if (i != steps.length - 1)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: Container(
-                  width: 10,
-                  height: 2,
-                  color: steps[i].$3 == _StepState.done
-                      ? AppPalette.of(context).accent
-                      : AppPalette.of(context).border,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 600 ||
+              MediaQuery.textScalerOf(context).scale(14) > 18) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < steps.length; i++) ...[
+                  _StepDot(
+                    label: steps[i].$1,
+                    icon: steps[i].$2,
+                    state: steps[i].$3,
+                    horizontal: true,
+                  ),
+                  if (i != steps.length - 1)
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        left: 15,
+                        top: 4,
+                        bottom: 4,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Container(
+                          width: 2,
+                          height: 12,
+                          color: steps[i].$3 == _StepState.done
+                              ? AppPalette.of(context).accent
+                              : AppPalette.of(context).border,
+                        ),
+                      ),
+                    ),
+                ],
+              ],
+            );
+          }
+          return Row(
+            children: [
+              for (var i = 0; i < steps.length; i++) ...[
+                Expanded(
+                  child: _StepDot(
+                    label: steps[i].$1,
+                    icon: steps[i].$2,
+                    state: steps[i].$3,
+                  ),
                 ),
-              ),
-          ],
-        ],
+                if (i != steps.length - 1)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: Container(
+                      width: 10,
+                      height: 2,
+                      color: steps[i].$3 == _StepState.done
+                          ? AppPalette.of(context).accent
+                          : AppPalette.of(context).border,
+                    ),
+                  ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -183,10 +202,12 @@ class _StepDot extends StatelessWidget {
   final String label;
   final IconData icon;
   final _StepState state;
+  final bool horizontal;
   const _StepDot({
     required this.label,
     required this.icon,
     required this.state,
+    this.horizontal = false,
   });
 
   @override
@@ -195,38 +216,46 @@ class _StepDot extends StatelessWidget {
     final color = active
         ? AppPalette.of(context).accent
         : AppPalette.of(context).textMuted;
+    final dot = Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: active ? AppColors.red : AppPalette.of(context).background,
+        shape: BoxShape.circle,
+        border: active
+            ? null
+            : Border.all(color: AppPalette.of(context).border),
+      ),
+      child: Icon(
+        state == _StepState.done ? Icons.check : icon,
+        size: 16,
+        color: active ? AppColors.white : AppPalette.of(context).textMuted,
+      ),
+    );
+    final text = Text(
+      label,
+      textAlign: horizontal ? TextAlign.start : TextAlign.center,
+      style: TextStyle(
+        fontSize: 10.5,
+        fontWeight: state == _StepState.current
+            ? FontWeight.w700
+            : FontWeight.w500,
+        color: color,
+      ),
+    );
+    if (horizontal) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          dot,
+          const SizedBox(width: AppSpacing.md),
+          Expanded(child: text),
+        ],
+      );
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: active ? AppColors.red : AppPalette.of(context).background,
-            shape: BoxShape.circle,
-            border: active
-                ? null
-                : Border.all(color: AppPalette.of(context).border),
-          ),
-          child: Icon(
-            state == _StepState.done ? Icons.check : icon,
-            size: 16,
-            color: active ? AppColors.white : AppPalette.of(context).textMuted,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: state == _StepState.current
-                ? FontWeight.w700
-                : FontWeight.w500,
-            color: color,
-          ),
-        ),
-      ],
+      children: [dot, const SizedBox(height: 6), text],
     );
   }
 }

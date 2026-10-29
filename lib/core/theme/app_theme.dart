@@ -119,6 +119,59 @@ class AppShadows {
 class AppTheme {
   AppTheme._();
 
+  /// Compact content roles for narrow Android phones. Keep the system text
+  /// scaler and touch targets intact; authentication has its own fitted layout.
+  static ThemeData forViewport(
+    ThemeData base, {
+    required double width,
+    bool authentication = false,
+  }) {
+    if (base.platform != TargetPlatform.android ||
+        width >= 600 ||
+        authentication) {
+      return base;
+    }
+    final text = base.textTheme;
+    ButtonStyle compactButton(ButtonStyle? style) =>
+        (style ?? const ButtonStyle()).copyWith(
+          minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          ),
+          textStyle: WidgetStatePropertyAll(
+            text.labelLarge?.copyWith(fontSize: 14),
+          ),
+        );
+    return base.copyWith(
+      textTheme: text.copyWith(
+        headlineMedium: text.headlineMedium?.copyWith(fontSize: 22),
+        titleLarge: text.titleLarge?.copyWith(fontSize: 18),
+        titleMedium: text.titleMedium?.copyWith(fontSize: 15),
+        bodyLarge: text.bodyLarge?.copyWith(fontSize: 14),
+        bodyMedium: text.bodyMedium?.copyWith(fontSize: 13),
+        labelLarge: text.labelLarge?.copyWith(fontSize: 14),
+      ),
+      appBarTheme: base.appBarTheme.copyWith(
+        titleTextStyle: base.appBarTheme.titleTextStyle?.copyWith(fontSize: 16),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: compactButton(base.elevatedButtonTheme.style),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: compactButton(base.outlinedButtonTheme.style),
+      ),
+      inputDecorationTheme: base.inputDecorationTheme.copyWith(
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+      ),
+      chipTheme: base.chipTheme.copyWith(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      ),
+    );
+  }
+
   static ThemeData get dark {
     final colors = AppPalette.dark;
     final base = light;

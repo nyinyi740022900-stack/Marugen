@@ -10,10 +10,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/providers/settings_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../delivery/easyparcel_providers.dart';
 import '../delivery/easyparcel_repository.dart';
 import 'settings_repository.dart';
+import '../../support/support_directory_settings.dart';
 import '../../../shared/utils/error_message.dart';
 
 class AdminSettingsScreen extends ConsumerStatefulWidget {
@@ -37,10 +40,13 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _shopPostcodeCtrl = TextEditingController();
   final _shopCityCtrl = TextEditingController();
   final _shopStateCtrl = TextEditingController();
-  final _defaultWeightCtrl = TextEditingController();
+  final _parcelLengthCtrl = TextEditingController();
+  final _parcelWidthCtrl = TextEditingController();
+  final _parcelHeightCtrl = TextEditingController();
   bool _gstIncluded = true;
   bool _showPriceDefault = true;
   bool _loading = true;
+  bool _loadFailed = false;
   bool _saving = false;
   bool _signingOut = false;
   XFile? _pickedBannerImage;
@@ -139,28 +145,63 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _checkEasyParcelStatus();
   }
 
+  @override
+  void dispose() {
+    _parcelLengthCtrl.dispose();
+    _parcelWidthCtrl.dispose();
+    _parcelHeightCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    final s = await _repo.fetchSettings();
-    _shopNameCtrl.text = s['shop_name']?.toString() ?? '';
-    _phoneCtrl.text = s['shop_phone']?.toString() ?? '';
-    _addressCtrl.text = s['shop_address']?.toString() ?? '';
-    _gstCtrl.text = s['gst_percent']?.toString() ?? '9';
-    _gstIncluded = s['gst_included_in_price'] as bool? ?? true;
-    _showPriceDefault = s['show_price_default'] as bool? ?? true;
-    _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
-    _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
-    _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
-    _existingBannerImageUrl = s['promo_banner_image_url']?.toString();
-    _bannerLinkCtrl.text = s['promo_banner_link_url']?.toString() ?? '';
-    _bannerActive = s['promo_banner_active'] as bool? ?? false;
-    _shopPostcodeCtrl.text = s['shop_postcode']?.toString() ?? '';
-    _shopCityCtrl.text = s['shop_city']?.toString() ?? '';
-    _shopStateCtrl.text = s['shop_state']?.toString() ?? '';
-    _defaultWeightCtrl.text = s['default_parcel_weight_kg']?.toString() ?? '1';
-    if (mounted) setState(() => _loading = false);
+    setState(() {
+      _loading = true;
+      _loadFailed = false;
+    });
+    try {
+      final s = await _repo.fetchSettings();
+      _shopNameCtrl.text = s['shop_name']?.toString() ?? '';
+      _phoneCtrl.text = s['shop_phone']?.toString() ?? '';
+      _addressCtrl.text = s['shop_address']?.toString() ?? '';
+      _gstCtrl.text = s['gst_percent']?.toString() ?? '9';
+      _gstIncluded = s['gst_included_in_price'] as bool? ?? true;
+      _showPriceDefault = s['show_price_default'] as bool? ?? true;
+      _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
+      _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
+      _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
+      _existingBannerImageUrl = s['promo_banner_image_url']?.toString();
+      _bannerLinkCtrl.text = s['promo_banner_link_url']?.toString() ?? '';
+      _bannerActive = s['promo_banner_active'] as bool? ?? false;
+      _shopPostcodeCtrl.text = s['shop_postcode']?.toString() ?? '';
+      _shopCityCtrl.text = s['shop_city']?.toString() ?? '';
+      _shopStateCtrl.text = s['shop_state']?.toString() ?? '';
+      _parcelLengthCtrl.text = s['default_parcel_length_cm']?.toString() ?? '';
+      _parcelWidthCtrl.text = s['default_parcel_width_cm']?.toString() ?? '';
+      _parcelHeightCtrl.text = s['default_parcel_height_cm']?.toString() ?? '';
+    } catch (_) {
+      if (mounted) setState(() => _loadFailed = true);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _save() async {
+    final dimensions = [_parcelLengthCtrl, _parcelWidthCtrl, _parcelHeightCtrl];
+    final entered = dimensions.any((c) => c.text.trim().isNotEmpty);
+    final valid = dimensions.every((c) {
+      final n = double.tryParse(c.text.trim());
+      return n != null && n.isFinite && n > 0;
+    });
+    if (entered && !valid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Enter all three positive dimensions, or leave all dimensions blank.',
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
       var bannerImageUrl = _existingBannerImageUrl;
@@ -198,9 +239,17 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         'shop_postcode': _shopPostcodeCtrl.text.trim(),
         'shop_city': _shopCityCtrl.text.trim(),
         'shop_state': _shopStateCtrl.text.trim(),
-        'default_parcel_weight_kg':
-            double.tryParse(_defaultWeightCtrl.text.trim()) ?? 1.0,
+        'default_parcel_length_cm': double.tryParse(
+          _parcelLengthCtrl.text.trim(),
+        ),
+        'default_parcel_width_cm': double.tryParse(
+          _parcelWidthCtrl.text.trim(),
+        ),
+        'default_parcel_height_cm': double.tryParse(
+          _parcelHeightCtrl.text.trim(),
+        ),
       });
+      ref.invalidate(shopSettingsProvider);
       if (mounted) {
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
@@ -215,6 +264,12 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   Widget build(BuildContext context) {
     if (_loading) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_loadFailed) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Settings')),
+        body: ErrorState(onRetry: _load),
+      );
     }
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -248,6 +303,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             decoration: const InputDecoration(labelText: 'Address'),
             maxLines: 2,
           ),
+          const SizedBox(height: AppSpacing.xl),
+          const SupportDirectorySettingsTile(),
           const SizedBox(height: AppSpacing.xl),
           const _SectionLabel('PRICING'),
           const SizedBox(height: AppSpacing.sm),
@@ -319,40 +376,53 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               color: AppPalette.of(context).surfaceMuted,
               borderRadius: BorderRadius.circular(AppRadius.md),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  _easyParcelStatus?.connected == true
-                      ? Icons.check_circle
-                      : Icons.link_off,
-                  color: _easyParcelStatus?.connected == true
-                      ? AppPalette.of(context).success
-                      : AppPalette.of(context).textMuted,
-                  size: 20,
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    _checkingEasyParcel
-                        ? 'Checking connection…'
-                        : _easyParcelStatus?.connected == true
-                        ? 'Connected'
-                              '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
-                        : 'Not connected',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13.5,
+                Row(
+                  children: [
+                    Icon(
+                      _easyParcelStatus?.connected == true
+                          ? Icons.check_circle
+                          : Icons.link_off,
+                      color: _easyParcelStatus?.connected == true
+                          ? AppPalette.of(context).success
+                          : AppPalette.of(context).textMuted,
+                      size: 20,
                     ),
-                  ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        _checkingEasyParcel
+                            ? 'Checking connection…'
+                            : _easyParcelStatus?.connected == true
+                            ? 'Connected'
+                                  '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
+                            : 'Not connected',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                TextButton(
-                  onPressed: _checkingEasyParcel
-                      ? null
-                      : _checkEasyParcelStatus,
-                  child: const Text('Refresh'),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _checkingEasyParcel
+                        ? null
+                        : _checkEasyParcelStatus,
+                    child: const Text('Refresh'),
+                  ),
                 ),
               ],
             ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Text(
+            'For real pickups, select your live Singapore account when reconnecting. '
+            'Connected only confirms authorization; a sandbox account does not arrange real pickups.',
           ),
           const SizedBox(height: AppSpacing.sm),
           OutlinedButton.icon(
@@ -401,15 +471,40 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          TextField(
-            controller: _defaultWeightCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Default parcel weight (kg)',
-              hintText:
-                  'Used for every order — per-item weight isn\'t tracked yet',
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('SHIPPING POLICY'),
+          const SizedBox(height: AppSpacing.sm),
+          const Text('All available couriers · Currency: SGD (S\$)'),
+          const Text(
+            'Courier delivery: buyer 50%, shop 50%. The shop covers any rounding cent.',
           ),
+          const Text(
+            'Live fish and mixed shop-delivery orders: the shop covers delivery in full.',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Text(
+            'Packed parcel dimensions (optional)',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const Text(
+            'Shipping weight comes from each product option × quantity. Leave dimensions blank for weight-based quotes; enter the actual packed dimensions before booking. Only configure these if they apply to every courier parcel.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final entry in [
+            (_parcelLengthCtrl, 'Length (cm)'),
+            (_parcelWidthCtrl, 'Width (cm)'),
+            (_parcelHeightCtrl, 'Height (cm)'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: TextField(
+                controller: entry.$1,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(labelText: entry.$2),
+              ),
+            ),
           const SizedBox(height: AppSpacing.xl),
           const _SectionLabel('INVENTORY'),
           const SizedBox(height: AppSpacing.sm),

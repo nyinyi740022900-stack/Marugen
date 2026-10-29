@@ -15,6 +15,7 @@ class AppNotification {
   final String type;
   final bool read;
   final DateTime createdAt;
+  final DateTime? dismissedAt;
 
   const AppNotification({
     required this.id,
@@ -24,17 +25,19 @@ class AppNotification {
     required this.type,
     required this.read,
     required this.createdAt,
+    this.dismissedAt,
   });
 
   AppNotification copyWith({bool? read}) => AppNotification(
-        id: id,
-        title: title,
-        body: body,
-        orderId: orderId,
-        type: type,
-        read: read ?? this.read,
-        createdAt: createdAt,
-      );
+    id: id,
+    title: title,
+    body: body,
+    orderId: orderId,
+    type: type,
+    read: read ?? this.read,
+    createdAt: createdAt,
+    dismissedAt: dismissedAt,
+  );
 
   factory AppNotification.fromMap(Map<String, dynamic> map) {
     return AppNotification(
@@ -45,6 +48,7 @@ class AppNotification {
       type: map['type'] as String? ?? 'order_status',
       read: map['read'] as bool? ?? false,
       createdAt: DateTime.parse(map['created_at'] as String),
+      dismissedAt: DateTime.tryParse(map['dismissed_at'] as String? ?? ''),
     );
   }
 }

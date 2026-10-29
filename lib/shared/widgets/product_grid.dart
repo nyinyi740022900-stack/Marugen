@@ -5,7 +5,19 @@ import 'package:flutter/material.dart';
 /// Includes the square image and enough space for scaled card content.
 double productCardExtent(BuildContext context, double cardWidth) {
   final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
-  return cardWidth + 80 + 85 * scale;
+  // Dates spanning two months can wrap beside the 48px cart action. Measure
+  // that complete range instead of assuming the delivery row is one line.
+  final delivery = TextPainter(
+    text: TextSpan(
+      text: '30 Sep – 30 Nov',
+      style: Theme.of(context).textTheme.bodyMedium!.copyWith(fontSize: 10.5),
+    ),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout(maxWidth: math.max(1, cardWidth - 24 - 48 - 15));
+  final extra = math.max(0.0, delivery.height - 48);
+  delivery.dispose();
+  return cardWidth + 80 + 100 * scale + extra;
 }
 
 /// Shares real card geometry with loading states and saved products.

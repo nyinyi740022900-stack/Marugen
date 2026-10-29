@@ -1,3 +1,5 @@
+import '../../../shared/widgets/parcel_tracking_list.dart';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -15,8 +17,7 @@ import '../../../shared/models/product.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
-import '../../admin/delivery/delivery_repository.dart';
-import '../../admin/delivery/easyparcel_repository.dart';
+import '../../../shared/widgets/shipping_cost_summary.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/review_providers.dart';
@@ -26,6 +27,8 @@ import '../../shop/presentation/shop_providers.dart';
 import '../utils/invoice_pdf.dart';
 import 'order_status_timeline.dart';
 import 'orders_providers.dart';
+import 'order_pull_to_refresh.dart';
+import 'order_cancellation_panel.dart';
 
 /// Router extras provide a preview while the current session fetches the order.
 /// Only a successful authoritative fetch enables actions.
@@ -114,15 +117,22 @@ class OrderDetailScreen extends ConsumerWidget {
                           context.canPop() ? context.pop() : context.go('/'),
                     );
                   }
-                  return RefreshIndicator(
+                  return OrderPullToRefresh(
                     onRefresh: () async {
+                      final container = ProviderScope.containerOf(
+                        context,
+                        listen: false,
+                      );
                       try {
-                        final refreshed = ref.refresh(
-                          orderByIdProvider(orderId).future,
+                        await container.read(orderTrackingRefreshProvider)(
+                          authoritative,
                         );
-                        await refreshed;
-                      } catch (_) {
-                        // The provider's error state offers an actionable retry.
+                      } finally {
+                        container.invalidate(orderByIdProvider(orderId));
+                        container.invalidate(myOrdersProvider);
+                        container.invalidate(adminOrdersProvider);
+                        container.invalidate(fulfillmentOrdersProvider);
+                        await container.read(orderByIdProvider(orderId).future);
                       }
                     },
                     child: _OrderDetailBody(
@@ -250,8 +260,9 @@ class _OrderDetailBody extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
                 children: [
                   Text(
                     'Order #${order.displayNumber}',
@@ -260,7 +271,10 @@ class _OrderDetailBody extends ConsumerWidget {
                       fontSize: 16,
                     ),
                   ),
-                  _StatusBadge(status: order.status),
+                  _StatusBadge(
+                    status: order.status,
+                    label: order.fulfillmentStatusLabel,
+                  ),
                 ],
               ),
               const SizedBox(height: 6),
@@ -282,6 +296,19 @@ class _OrderDetailBody extends ConsumerWidget {
                   ),
                 ),
               ],
+              if (order.refundStatusLabel != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  order.refundStatusLabel!,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                if (order.refundAmount > 0)
+                  Text('Returned: S\$${order.refundAmount.toStringAsFixed(2)}'),
+                if (order.refundPendingAmount > 0)
+                  Text(
+                    'Awaiting confirmation: S\$${order.refundPendingAmount.toStringAsFixed(2)}',
+                  ),
+              ],
               if (order.qxpressTrackingNo != null) ...[
                 const SizedBox(height: 6),
                 Row(
@@ -292,11 +319,13 @@ class _OrderDetailBody extends ConsumerWidget {
                       color: AppPalette.of(context).accent,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      'Tracking: ${order.qxpressTrackingNo}',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
+                    Expanded(
+                      child: SelectableText(
+                        'Tracking: ${order.qxpressTrackingNo}',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ],
@@ -306,6 +335,7 @@ class _OrderDetailBody extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
+        OrderCancellationPanel(order: order),
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
@@ -328,20 +358,36 @@ class _OrderDetailBody extends ConsumerWidget {
             label: const Text('View / Download Invoice'),
           ),
         ),
-        if (order.qxpressTrackingNo != null) ...[
+        if (order.hasParcelPlan) ...[
+          const SizedBox(height: AppSpacing.lg),
+          ParcelTrackingList(parcels: order.parcels),
+        ],
+        if (!order.hasParcelPlan && order.qxpressTrackingNo != null) ...[
           const SizedBox(height: AppSpacing.lg),
           _TrackingStatusCard(order: order),
         ],
         const SizedBox(height: AppSpacing.lg),
-        OrderStatusTimeline(
-          status: order.status,
-          trackingProvider: order.trackingProvider,
-          trackingStatusCode: order.trackingStatusCode,
-        ),
+        ShippingCostSummary(order: order),
+        const SizedBox(height: AppSpacing.sm),
+        if (order.needsRefundReview)
+          const Text(
+            'The shop is reviewing this refund. Contact us for the current delivery status.',
+          )
+        else
+          OrderStatusTimeline(
+            status: order.status,
+            trackingProvider: order.trackingProvider,
+            trackingStatusCode: order.trackingStatusCode,
+            trackingProgress: order.trackingProgress,
+            fulfillmentMethod: order.fulfillmentMethod,
+            statusHistory: order.statusHistory,
+          ),
         const SizedBox(height: AppSpacing.lg),
         if (shipping != null) ...[
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.sm,
             children: [
               Text(
                 'SHIPPING ADDRESS',
@@ -527,8 +573,10 @@ class _OrderDetailBody extends ConsumerWidget {
                 ),
               Padding(
                 padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: AppSpacing.md,
+                  runSpacing: AppSpacing.sm,
                   children: [
                     Text(
                       'Total',
@@ -642,8 +690,6 @@ class _OrderItemTile extends ConsumerWidget {
                   children: [
                     Text(
                       item.productName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         fontSize: 14.5,
@@ -677,15 +723,15 @@ class _OrderItemTile extends ConsumerWidget {
                         color: AppPalette.of(context).textMuted,
                       ),
                     ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      formatPrice(item.subtotal),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
                   ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Text(
-                formatPrice(item.subtotal),
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
                 ),
               ),
             ],
@@ -889,10 +935,8 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
   }
 }
 
-/// Lets the customer cancel their own order while it's still `pending` or
-/// `paid` — RLS (0007_customer_order_cancel.sql) only allows the update to
-/// land once it's already `packing`/`shipped`/`delivered`, so this button
-/// only ever shows for the earlier statuses (see the caller's guard).
+/// Unpaid orders can be cancelled directly. Paid orders use the reviewed
+/// cancellation request above and the verified refund backend.
 class _CancelOrderButton extends ConsumerStatefulWidget {
   final Order order;
   const _CancelOrderButton({required this.order});
@@ -1086,48 +1130,16 @@ class _ShareReceiptButton extends ConsumerWidget {
 /// — the refresh button below routes to whichever one actually owns this
 /// shipment instead of always asking 17TRACK, which doesn't know about
 /// EasyParcel's tracking numbers at all.
-class _TrackingStatusCard extends ConsumerStatefulWidget {
+class _TrackingStatusCard extends StatelessWidget {
   final Order order;
   const _TrackingStatusCard({required this.order});
-
-  @override
-  ConsumerState<_TrackingStatusCard> createState() =>
-      _TrackingStatusCardState();
-}
-
-class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
-  bool _refreshing = false;
-
-  Future<void> _refresh() async {
-    setState(() => _refreshing = true);
-    try {
-      if (widget.order.trackingProvider == 'easyparcel') {
-        await EasyParcelRepository().refreshStatus(widget.order.id);
-      } else {
-        await DeliveryRepository().refreshTrackingStatus(widget.order.id);
-      }
-      ref.invalidate(orderByIdProvider(widget.order.id));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not refresh the order. Check your connection and try again.',
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _refreshing = false);
-    }
-  }
 
   /// Maps EasyParcel's numeric shipment status code (migration 0043) to an
   /// icon + color so the card visually distinguishes "booked, courier
   /// hasn't collected it yet" from "actually moving" instead of showing the
   /// same truck-ish icon throughout. Null (17TRACK orders, or before the
   /// first refresh) keeps the original generic icon.
-  (IconData, Color) _iconForStatusCode(int? code) {
+  (IconData, Color) _iconForStatusCode(BuildContext context, int? code) {
     switch (code) {
       case 2: // To Be Collected
       case 7: // Schedule In Arrangement
@@ -1151,10 +1163,10 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
 
   @override
   Widget build(BuildContext context) {
-    final order = widget.order;
     final hasStatus =
         order.trackingStatus != null && order.trackingStatus!.isNotEmpty;
     final (statusIcon, statusColor) = _iconForStatusCode(
+      context,
       order.trackingStatusCode,
     );
     return Container(
@@ -1203,7 +1215,7 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
                 if (order.trackingUpdatedAt != null) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'Updated ${DateFormat.yMMMd().add_jm().format(order.trackingUpdatedAt!)}',
+                    'Updated ${DateFormat.yMMMd().add_jm().format(order.trackingUpdatedAt!.toLocal())}',
                     style: TextStyle(
                       fontSize: 11,
                       color: AppPalette.of(context).textMuted,
@@ -1213,24 +1225,6 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
               ],
             ),
           ),
-          IconButton(
-            tooltip: 'Refresh tracking',
-            onPressed: _refreshing ? null : _refresh,
-            icon: _refreshing
-                ? SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppPalette.of(context).accent,
-                    ),
-                  )
-                : Icon(
-                    Icons.refresh,
-                    size: 20,
-                    color: AppPalette.of(context).textMuted,
-                  ),
-          ),
         ],
       ),
     );
@@ -1239,7 +1233,8 @@ class _TrackingStatusCardState extends ConsumerState<_TrackingStatusCard> {
 
 class _StatusBadge extends StatelessWidget {
   final OrderStatus status;
-  const _StatusBadge({required this.status});
+  final String label;
+  const _StatusBadge({required this.status, required this.label});
 
   Color _color(BuildContext context) {
     switch (status) {
@@ -1264,7 +1259,7 @@ class _StatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        orderStatusLabel(status),
+        label,
         style: TextStyle(
           color: _color(context),
           fontSize: 11,

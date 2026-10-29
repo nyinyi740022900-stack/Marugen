@@ -38,10 +38,13 @@ class AddressBookScreen extends ConsumerWidget {
           data: (addresses) {
             addresses = addresses.where((a) => a.userId == owner).toList();
             if (addresses.isEmpty) {
-              return const EmptyState(
-                icon: Icons.location_on_outlined,
-                title: 'No saved addresses yet',
-                subtitle: 'Add one so checkout is faster next time.',
+              return const Padding(
+                padding: EdgeInsets.only(bottom: 96),
+                child: EmptyState(
+                  icon: Icons.location_on_outlined,
+                  title: 'No saved addresses yet',
+                  subtitle: 'Add one so checkout is faster next time.',
+                ),
               );
             }
             return ListView.separated(
@@ -62,8 +65,12 @@ class AddressBookScreen extends ConsumerWidget {
             separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
             itemBuilder: (context, i) => const ListRowSkeleton(),
           ),
-          error: (e, _) =>
-              ErrorState(onRetry: () => ref.invalidate(myAddressesProvider)),
+          error: (e, _) => Padding(
+            padding: const EdgeInsets.only(bottom: 96),
+            child: ErrorState(
+              onRetry: () => ref.invalidate(myAddressesProvider),
+            ),
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(

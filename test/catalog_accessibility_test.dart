@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -42,10 +43,23 @@ void main() {
                 overrides: [
                   isLoggedInProvider.overrideWithValue(false),
                   wishlistProductIdsProvider.overrideWith(_EmptyWishlist.new),
-                  shopSettingsProvider.overrideWith((ref) async => {}),
+                  shopSettingsProvider.overrideWith((ref) async {
+                    final now = DateTime.now();
+                    final nextMonth = DateTime(now.year, now.month + 1, 1);
+                    final days = nextMonth
+                        .difference(DateTime(now.year, now.month, now.day))
+                        .inDays;
+                    return {
+                      'delivery_lead_days_min': days - 1,
+                      'delivery_lead_days_max': days + 2,
+                    };
+                  }),
                 ],
                 child: MaterialApp(
-                  theme: ThemeData(platform: platform),
+                  theme: AppTheme.forViewport(
+                    AppTheme.light.copyWith(platform: platform),
+                    width: width,
+                  ),
                   builder: (context, child) => MediaQuery(
                     data: MediaQuery.of(context)
                         .copyWith(textScaler: TextScaler.linear(scale)),

@@ -108,7 +108,9 @@ class OrderSuccessScreen extends ConsumerWidget {
                                         const SizedBox(height: AppSpacing.sm),
                                         _SummaryRow(
                                           label: 'Status',
-                                          value: orderStatusLabel(order.status),
+                                          value:
+                                              (order.refundStatusLabel ??
+                                              orderStatusLabel(order.status)),
                                         ),
                                       ],
                                     ),

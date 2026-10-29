@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/notifications/push_notification_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../orders/presentation/orders_providers.dart';
 import 'analytics/admin_analytics_screen.dart';
 import 'dashboard/admin_dashboard_screen.dart';
 import 'knowledge/admin_knowledge_screen.dart';
@@ -89,60 +90,9 @@ class AdminShell extends ConsumerWidget {
     final selected = await showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.sm,
-              ),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'More',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                    color: AppPalette.of(context).textMuted,
-                  ),
-                ),
-              ),
-            ),
-            for (final item in _moreItems)
-              ListTile(
-                leading: Icon(
-                  item.icon,
-                  color: index == item.index
-                      ? AppPalette.of(sheetContext).accent
-                      : AppPalette.of(sheetContext).text,
-                ),
-                title: Text(
-                  item.label,
-                  style: TextStyle(
-                    fontWeight: index == item.index
-                        ? FontWeight.w700
-                        : FontWeight.w500,
-                    color: index == item.index
-                        ? AppPalette.of(sheetContext).accent
-                        : AppPalette.of(sheetContext).text,
-                  ),
-                ),
-                trailing: index == item.index
-                    ? Icon(
-                        Icons.check,
-                        color: AppPalette.of(sheetContext).accent,
-                      )
-                    : null,
-                onTap: () => Navigator.of(sheetContext).pop(item.index),
-              ),
-            const SizedBox(height: AppSpacing.sm),
-          ],
-        ),
+      builder: (sheetContext) => AdminMoreMenu(
+        selectedIndex: index,
+        onSelected: (value) => Navigator.of(sheetContext).pop(value),
       ),
     );
     if (selected != null) {
@@ -175,6 +125,7 @@ class AdminShell extends ConsumerWidget {
           if (i == 3) {
             _openMoreSheet(context, ref, index);
           } else {
+            if (i == 2) refreshAdminOrders(ref);
             ref.read(adminTabIndexProvider.notifier).state = i;
           }
         },
@@ -188,4 +139,71 @@ class AdminShell extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Scrollable owner destinations stay reachable in landscape and large text.
+class AdminMoreMenu extends StatelessWidget {
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  const AdminMoreMenu({
+    super.key,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+    child: SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.sm,
+              AppSpacing.lg,
+              AppSpacing.sm,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'More',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
+            ),
+          ),
+          for (final item in AdminShell._moreItems)
+            ListTile(
+              leading: Icon(
+                item.icon,
+                color: selectedIndex == item.index
+                    ? AppPalette.of(context).accent
+                    : AppPalette.of(context).text,
+              ),
+              title: Text(
+                item.label,
+                style: TextStyle(
+                  fontWeight: selectedIndex == item.index
+                      ? FontWeight.w700
+                      : FontWeight.w500,
+                  color: selectedIndex == item.index
+                      ? AppPalette.of(context).accent
+                      : AppPalette.of(context).text,
+                ),
+              ),
+              trailing: selectedIndex == item.index
+                  ? Icon(Icons.check, color: AppPalette.of(context).accent)
+                  : null,
+              onTap: () => onSelected(item.index),
+            ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+      ),
+    ),
+  );
 }

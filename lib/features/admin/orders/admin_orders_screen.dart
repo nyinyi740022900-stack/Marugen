@@ -12,28 +12,57 @@ import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../orders/presentation/orders_providers.dart';
+import '../../orders/presentation/order_pull_to_refresh.dart';
 import '../../orders/utils/invoice_pdf.dart';
 import '../delivery/admin_delivery_screen.dart';
 import '../payments/admin_payments_screen.dart';
 import '../../../shared/utils/error_message.dart';
 
 /// Orders hub: status list + fulfillment (ex-Delivery) + payments ledger.
-class AdminOrdersScreen extends StatelessWidget {
+class AdminOrdersScreen extends ConsumerWidget {
   const AdminOrdersScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return DefaultTabController(
       length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Orders'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'All'),
-              Tab(text: 'Fulfillment'),
-              Tab(text: 'Payments'),
-            ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(kTextTabBarHeight),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                const labels = ['All', 'Fulfillment', 'Payments'];
+                final theme = Theme.of(context);
+                final style = theme.textTheme.titleSmall!.merge(
+                  theme.tabBarTheme.labelStyle,
+                );
+                var widestLabel = 0.0;
+                for (final label in labels) {
+                  final painter = TextPainter(
+                    text: TextSpan(text: label, style: style),
+                    textDirection: Directionality.of(context),
+                    textScaler: MediaQuery.textScalerOf(context),
+                    maxLines: 1,
+                  )..layout();
+                  if (painter.width > widestLabel) widestLabel = painter.width;
+                  painter.dispose();
+                }
+                // Keep ordinary tabs evenly spaced; scroll only when equal
+                // columns would truncate a label at the user's text size.
+                final scrollable =
+                    (widestLabel + 32) * labels.length > constraints.maxWidth;
+                return TabBar(
+                  isScrollable: scrollable,
+                  tabAlignment: scrollable
+                      ? TabAlignment.start
+                      : TabAlignment.fill,
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  tabs: [for (final label in labels) Tab(text: label)],
+                );
+              },
+            ),
           ),
         ),
         body: const TabBarView(
@@ -85,168 +114,189 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
     // page, not just whatever's been scrolled into view so far.
     final searching = query.isNotEmpty;
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.sm,
-            AppSpacing.lg,
-            0,
-          ),
-          child: _AdminOrderSearchField(),
-        ),
-        SizedBox(
-          height: 52,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.lg,
-              vertical: AppSpacing.sm,
+    return OrderPullToRefresh(
+      onRefresh: () => refreshAdminOrdersFromCarrier(
+        ProviderScope.containerOf(context, listen: false),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.sm,
+              AppSpacing.lg,
+              0,
             ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: AppSpacing.sm),
-                child: ChoiceChip(
-                  label: const Text('All'),
-                  selected: filter == null,
-                  onSelected: (_) =>
-                      ref.read(adminOrderStatusFilterProvider.notifier).state =
-                          null,
-                ),
+            child: _AdminOrderSearchField(),
+          ),
+          SizedBox(
+            height: 52,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.sm,
               ),
-              for (final s in OrderStatus.values)
+              children: [
                 Padding(
                   padding: const EdgeInsets.only(right: AppSpacing.sm),
                   child: ChoiceChip(
-                    label: Text(orderStatusLabel(s)),
-                    selected: filter == s,
+                    label: const Text('All'),
+                    selected: filter == null,
                     onSelected: (_) =>
                         ref
                                 .read(adminOrderStatusFilterProvider.notifier)
                                 .state =
-                            s,
+                            null,
                   ),
                 ),
-            ],
+                for (final s in OrderStatus.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.sm),
+                    child: ChoiceChip(
+                      label: Text(orderStatusLabel(s)),
+                      selected: filter == s,
+                      onSelected: (_) =>
+                          ref
+                                  .read(adminOrderStatusFilterProvider.notifier)
+                                  .state =
+                              s,
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
-        Expanded(
-          child: searching
-              ? ref
-                    .watch(adminOrdersProvider)
-                    .when(
-                      data: (orders) {
-                        final filtered = orders.where((o) {
-                          if (o.displayNumber.toLowerCase().contains(query)) {
-                            return true;
-                          }
-                          final name =
-                              o.shippingAddress?['recipient_name'] as String?;
-                          if (name != null &&
-                              name.toLowerCase().contains(query)) {
-                            return true;
-                          }
-                          final phone = o.shippingAddress?['phone'] as String?;
-                          if (phone != null && phone.contains(query)) {
-                            return true;
-                          }
-                          return o.items.any(
-                            (item) =>
-                                item.productName.toLowerCase().contains(query),
-                          );
-                        }).toList();
+          Expanded(
+            child: searching
+                ? ref
+                      .watch(adminOrdersProvider)
+                      .when(
+                        data: (orders) {
+                          final filtered = orders.where((o) {
+                            if (o.displayNumber.toLowerCase().contains(query)) {
+                              return true;
+                            }
+                            final name =
+                                o.shippingAddress?['recipient_name'] as String?;
+                            if (name != null &&
+                                name.toLowerCase().contains(query)) {
+                              return true;
+                            }
+                            final phone =
+                                o.shippingAddress?['phone'] as String?;
+                            if (phone != null && phone.contains(query)) {
+                              return true;
+                            }
+                            return o.items.any(
+                              (item) => item.productName.toLowerCase().contains(
+                                query,
+                              ),
+                            );
+                          }).toList();
 
-                        if (filtered.isEmpty) {
-                          return Center(
-                            child: Text(
-                              'No matches.',
-                              style: TextStyle(
-                                color: AppPalette.of(context).textMuted,
-                              ),
-                            ),
-                          );
-                        }
-                        return ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg,
-                            0,
-                            AppSpacing.lg,
-                            AppSpacing.lg,
-                          ),
-                          itemCount: filtered.length,
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: AppSpacing.md),
-                          itemBuilder: (context, i) =>
-                              _AdminOrderCard(order: filtered[i]),
-                        );
-                      },
-                      loading: () => Center(
-                        child: CircularProgressIndicator(
-                          color: AppPalette.of(context).accent,
-                        ),
-                      ),
-                      error: (e, _) => ErrorState(
-                        onRetry: () => ref.invalidate(adminOrdersProvider),
-                      ),
-                    )
-              : ref
-                    .watch(adminOrdersPagedProvider)
-                    .when(
-                      data: (paged) {
-                        if (paged.items.isEmpty) {
-                          return Center(
-                            child: Text(
-                              'No orders.',
-                              style: TextStyle(
-                                color: AppPalette.of(context).textMuted,
-                              ),
-                            ),
-                          );
-                        }
-                        return ListView.separated(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg,
-                            0,
-                            AppSpacing.lg,
-                            AppSpacing.lg,
-                          ),
-                          itemCount:
-                              paged.items.length + (paged.hasMore ? 1 : 0),
-                          separatorBuilder: (_, _) =>
-                              const SizedBox(height: AppSpacing.md),
-                          itemBuilder: (context, i) {
-                            if (i >= paged.items.length) {
-                              return Padding(
-                                padding: EdgeInsets.symmetric(
-                                  vertical: AppSpacing.lg,
-                                ),
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    color: AppPalette.of(context).accent,
-                                    strokeWidth: 2,
+                          if (filtered.isEmpty) {
+                            return ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: [
+                                Center(
+                                  child: Text(
+                                    'No matches.',
+                                    style: TextStyle(
+                                      color: AppPalette.of(context).textMuted,
+                                    ),
                                   ),
                                 ),
-                              );
-                            }
-                            return _AdminOrderCard(order: paged.items[i]);
-                          },
-                        );
-                      },
-                      loading: () => Center(
-                        child: CircularProgressIndicator(
-                          color: AppPalette.of(context).accent,
+                              ],
+                            );
+                          }
+                          return ListView.separated(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.lg,
+                              0,
+                              AppSpacing.lg,
+                              AppSpacing.lg,
+                            ),
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: AppSpacing.md),
+                            itemBuilder: (context, i) =>
+                                _AdminOrderCard(order: filtered[i]),
+                          );
+                        },
+                        loading: () => Center(
+                          child: CircularProgressIndicator(
+                            color: AppPalette.of(context).accent,
+                          ),
+                        ),
+                        error: (e, _) => ErrorState(
+                          onRetry: () => ref.invalidate(adminOrdersProvider),
+                        ),
+                      )
+                : ref
+                      .watch(adminOrdersPagedProvider)
+                      .when(
+                        data: (paged) {
+                          if (paged.items.isEmpty) {
+                            return ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              children: [
+                                Center(
+                                  child: Text(
+                                    'No orders.',
+                                    style: TextStyle(
+                                      color: AppPalette.of(context).textMuted,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+                          return ListView.separated(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            controller: _scrollController,
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.lg,
+                              0,
+                              AppSpacing.lg,
+                              AppSpacing.lg,
+                            ),
+                            itemCount:
+                                paged.items.length + (paged.hasMore ? 1 : 0),
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: AppSpacing.md),
+                            itemBuilder: (context, i) {
+                              if (i >= paged.items.length) {
+                                return Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    vertical: AppSpacing.lg,
+                                  ),
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      color: AppPalette.of(context).accent,
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                );
+                              }
+                              return _AdminOrderCard(order: paged.items[i]);
+                            },
+                          );
+                        },
+                        loading: () => Center(
+                          child: CircularProgressIndicator(
+                            color: AppPalette.of(context).accent,
+                          ),
+                        ),
+                        error: (e, _) => ErrorState(
+                          onRetry: () => ref
+                              .read(adminOrdersPagedProvider.notifier)
+                              .refresh(),
                         ),
                       ),
-                      error: (e, _) => ErrorState(
-                        onRetry: () => ref
-                            .read(adminOrdersPagedProvider.notifier)
-                            .refresh(),
-                      ),
-                    ),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -510,8 +560,10 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                 const SizedBox(height: AppSpacing.md),
                 const Divider(height: 1),
                 const SizedBox(height: AppSpacing.md),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  spacing: AppSpacing.md,
+                  runSpacing: AppSpacing.sm,
                   children: [
                     Text(
                       'Total Purchase',
@@ -533,10 +585,10 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                 const SizedBox(height: AppSpacing.md),
                 _StatusSelector(order: order),
                 const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _PillButton(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final actions = [
+                      _PillButton(
                         icon: Icons.chat_bubble_outline,
                         label: 'Contact Buyer',
                         onTap: hasPhone
@@ -547,18 +599,33 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                               )
                             : null,
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: _PillButton(
+                      _PillButton(
                         icon: Icons.receipt_long_outlined,
                         label: 'Print Invoice',
                         filled: true,
                         loading: _sharing,
                         onTap: _sharing ? null : () => _printInvoice(context),
                       ),
-                    ),
-                  ],
+                    ];
+                    if (constraints.maxWidth < 340 ||
+                        MediaQuery.textScalerOf(context).scale(14) > 18) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          actions.first,
+                          const SizedBox(height: AppSpacing.sm),
+                          actions.last,
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: actions.first),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(child: actions.last),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
@@ -616,8 +683,8 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
         message: s == OrderStatus.refunded
             ? 'This will issue a real Stripe refund for order '
                   '#${widget.order.displayNumber} back to the customer\'s original '
-                  'payment method. This is final — the status can never be changed '
-                  'again after this.'
+                  'payment method. The order will show Refunded only after '
+                  'the payment provider confirms completion.'
             : 'Order #${widget.order.displayNumber} will move to "${orderStatusLabel(s)}". '
                   'This is final — the status can never be changed again after this.',
         confirmLabel: s == OrderStatus.refunded
@@ -660,6 +727,24 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
   @override
   Widget build(BuildContext context) {
     final status = widget.order.status;
+    if (widget.order.hasCancellationHold &&
+        status != OrderStatus.refunded &&
+        status != OrderStatus.cancelled) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            widget.order.fulfillmentStatusLabel,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          TextButton(
+            onPressed: () =>
+                context.push('/orders/${widget.order.id}', extra: widget.order),
+            child: const Text('Review cancellation'),
+          ),
+        ],
+      );
+    }
     final color = _colorFor(status);
     final nextStatuses = validNextStatuses(status);
     // Cancel/refund are final and consequence-heavy (release stock, trigger
@@ -667,10 +752,12 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
     // forward-progress actions so they read as deliberate, not just
     // another button in the same row an admin might tap by reflex.
     final progressStatuses = nextStatuses.where(
-      (s) => s != OrderStatus.cancelled && s != OrderStatus.refunded,
+      (s) => s == OrderStatus.packing,
     );
     final riskyStatuses = nextStatuses.where(
-      (s) => s == OrderStatus.cancelled || s == OrderStatus.refunded,
+      (s) =>
+          s == OrderStatus.cancelled ||
+          (s == OrderStatus.refunded && widget.order.canRequestRefund),
     );
 
     return Column(
@@ -689,7 +776,7 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
                 border: Border.all(color: color.withValues(alpha: 0.25)),
               ),
               child: Text(
-                orderStatusLabel(status),
+                widget.order.fulfillmentStatusLabel,
                 style: TextStyle(
                   color: color,
                   fontWeight: FontWeight.w700,
@@ -707,6 +794,36 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
             ],
           ],
         ),
+        if (widget.order.refundStatusLabel != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text(widget.order.refundStatusLabel!),
+          if (widget.order.refundStatus != 'succeeded')
+            TextButton(
+              onPressed: _updating
+                  ? null
+                  : () async {
+                      setState(() => _updating = true);
+                      try {
+                        await ref
+                            .read(orderRepositoryProvider)
+                            .refundOrder(widget.order.id, refreshOnly: true);
+                        refreshAdminOrders(ref);
+                      } catch (_) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Could not refresh the refund. Try again or check Stripe.',
+                            ),
+                          ),
+                        );
+                      } finally {
+                        if (mounted) setState(() => _updating = false);
+                      }
+                    },
+              child: const Text('Refresh refund status'),
+            ),
+        ],
         if (!_updating && progressStatuses.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.sm),
           Wrap(
@@ -735,6 +852,17 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
             ],
           ),
         ],
+        if (!_updating &&
+            const {
+              OrderStatus.paid,
+              OrderStatus.packing,
+              OrderStatus.shipped,
+            }.contains(status))
+          TextButton.icon(
+            onPressed: () => DefaultTabController.of(context).animateTo(1),
+            icon: const Icon(Icons.local_shipping_outlined),
+            label: const Text('Manage delivery'),
+          ),
         if (!_updating && riskyStatuses.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.xs),
           Wrap(
@@ -804,8 +932,13 @@ class _PillButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.pill),
         onTap: onTap,
         child: Container(
-          height: 38,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          constraints: const BoxConstraints(
+            minHeight: kMinInteractiveDimension,
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: 10,
+          ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadius.pill),
             border: filled
@@ -831,8 +964,7 @@ class _PillButton extends StatelessWidget {
                     Flexible(
                       child: Text(
                         label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,

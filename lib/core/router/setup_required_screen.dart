@@ -18,7 +18,7 @@ class SetupRequiredScreen extends StatelessWidget {
         builder: (context) => Scaffold(
           backgroundColor: AppPalette.of(context).background,
           body: Center(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(32),
               child: Column(
                 mainAxisSize: MainAxisSize.min,

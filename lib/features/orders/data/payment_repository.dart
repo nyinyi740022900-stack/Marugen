@@ -25,6 +25,7 @@ class PaymentRepository {
     Map<String, dynamic>? shippingAddress,
     String currency = 'sgd',
     String? promoCode,
+    String? shippingQuoteId,
     String? idempotencyKey,
     String? customerRemarks,
     int customerRemarksRevision = 0,
@@ -37,6 +38,7 @@ class PaymentRepository {
       'create-payment-intent',
       body: {
         'currency': currency,
+        'shipping_quote_id': ?shippingQuoteId,
         'items': items,
         'shipping_address': ?shippingAddress,
         if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,

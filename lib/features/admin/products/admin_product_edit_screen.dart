@@ -29,6 +29,8 @@ class _AdminProductEditScreenState
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _priceCtrl = TextEditingController();
+  final _shippingWeightCtrl = TextEditingController();
+  final _packedSize = _PackedSizeControllers();
   final _salePriceCtrl = TextEditingController();
   final _videoUrlCtrl = TextEditingController();
   final _stockCtrl = TextEditingController(text: '1');
@@ -43,6 +45,9 @@ class _AdminProductEditScreenState
   final List<String> _existingImageUrls = [];
   bool _loading = false;
   bool _initialLoad = true;
+  bool _productMissing = false;
+  String? _loadError;
+  String? _createdProductId;
 
   // Variants (weight options) — only shown for restockable goods
   // (fish_food/accessories). Existing rows carry their variant id so
@@ -83,17 +88,38 @@ class _AdminProductEditScreenState
   }
 
   Future<void> _loadExisting() async {
-    if (widget.productId == null) {
-      setState(() => _initialLoad = false);
-      return;
+    setState(() {
+      _initialLoad = true;
+      _loadError = null;
+      _productMissing = false;
+    });
+    try {
+      await _fetchExisting();
+    } catch (error) {
+      if (!mounted) return;
+      _loadError = friendlyErrorMessage(
+        error,
+        fallback: 'Could not load this product. Please try again.',
+        context: 'admin.product_edit.load',
+      );
+    } finally {
+      if (mounted) setState(() => _initialLoad = false);
     }
+  }
+
+  Future<void> _fetchExisting() async {
+    if (widget.productId == null) return;
     final product = await ProductRepository().fetchProductById(
       widget.productId!,
     );
+    if (!mounted) return;
+    _productMissing = product == null;
     if (product != null) {
       _nameCtrl.text = product.name;
       _descCtrl.text = product.description ?? '';
       _priceCtrl.text = product.price?.toString() ?? '';
+      _shippingWeightCtrl.text = product.shippingWeightKg?.toString() ?? '';
+      _packedSize.load(product.packedDimensions);
       _salePriceCtrl.text = product.salePrice?.toString() ?? '';
       _videoUrlCtrl.text = product.videoUrl ?? '';
       _stockCtrl.text = '${product.stockQuantity}';
@@ -119,7 +145,6 @@ class _AdminProductEditScreenState
         _sizeOptionCtrls.add(TextEditingController(text: size));
       }
     }
-    if (mounted) setState(() => _initialLoad = false);
   }
 
   void _addVariantRow() {
@@ -202,13 +227,16 @@ class _AdminProductEditScreenState
   }
 
   Future<void> _saveVariants(String productId, ProductRepository repo) async {
-    for (final id in _deletedVariantIds) {
+    for (final id in List<String>.of(_deletedVariantIds)) {
+      if (!mounted) return;
       await repo.deleteVariant(id);
     }
+    if (!mounted) return;
     final sizes = _collectedSizeOptions();
     final useMatrix = sizes.isNotEmpty;
 
     for (var i = 0; i < _variants.length; i++) {
+      if (!mounted) return;
       final row = _variants[i];
       final label = row.labelCtrl.text.trim();
       if (label.isEmpty) continue; // skip incomplete rows silently
@@ -221,6 +249,10 @@ class _AdminProductEditScreenState
             ? 0
             : int.tryParse(row.stockCtrl.text.trim()) ?? 0,
         'sort_order': i,
+        'packed_dimensions': isLiveFish ? null : row.packedSize.value?.toMap(),
+        'shipping_weight_kg': isLiveFish
+            ? null
+            : double.tryParse(row.weightCtrl.text.trim()),
       };
       final String variantId;
       if (row.id == null) {
@@ -229,8 +261,10 @@ class _AdminProductEditScreenState
         await repo.updateVariant(row.id!, payload);
         variantId = row.id!;
       }
+      if (!mounted) return;
       if (useMatrix) {
         for (final size in sizes) {
+          if (!mounted) return;
           final qty = int.tryParse(_sizeStockCtrl(i, size).text.trim()) ?? 0;
           await repo.upsertVariantSizeStock(
             variantId: variantId,
@@ -240,17 +274,23 @@ class _AdminProductEditScreenState
         }
       }
     }
+    if (!mounted) return;
     await repo.deleteOrphanSizeStocks(productId: productId, keepSizes: sizes);
   }
 
   Future<void> _pickImages() async {
+    if (_loading) return;
     final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
-    setState(() => _newImages.addAll(picked));
+    if (mounted && !_loading) setState(() => _newImages.addAll(picked));
   }
 
   Future<void> _save() async {
+    if (_loading) return;
     if (!_formKey.currentState!.validate()) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _loading = true);
+    final newImages = List<XFile>.of(_newImages);
+    final existingUrls = List<String>.of(_existingImageUrls);
     try {
       final repo = ProductRepository();
       final categoryValue = _category == ProductCategory.fishFood
@@ -263,6 +303,10 @@ class _AdminProductEditScreenState
             ? null
             : _descCtrl.text.trim(),
         'category': categoryValue,
+        'packed_dimensions': isLiveFish ? null : _packedSize.value?.toMap(),
+        'shipping_weight_kg': isLiveFish
+            ? null
+            : double.tryParse(_shippingWeightCtrl.text.trim()),
         'price': _priceCtrl.text.trim().isEmpty
             ? null
             : double.tryParse(_priceCtrl.text.trim()),
@@ -294,31 +338,38 @@ class _AdminProductEditScreenState
       };
 
       String productId;
-      if (widget.productId == null) {
+      final creating = widget.productId == null && _createdProductId == null;
+      if (creating) {
         // Insert first (without images) so we get a generated id to
         // namespace uploaded files under.
         payload['image_urls'] = <String>[];
         productId = await repo.createProduct(payload);
+        _createdProductId = productId;
       } else {
-        productId = widget.productId!;
+        productId = widget.productId ?? _createdProductId!;
       }
 
+      if (!mounted) return;
       // Upload any newly picked images, then merge with existing URLs.
-      if (_newImages.isNotEmpty) {
-        final urls = <String>[..._existingImageUrls];
-        for (final img in _newImages) {
+      if (newImages.isNotEmpty) {
+        final urls = <String>[...existingUrls];
+        for (final img in newImages) {
+          if (!mounted) return;
           final bytes = await img.readAsBytes();
+          if (!mounted) return;
           final ext = img.name.split('.').last;
           final url = await repo.uploadProductImage(productId, bytes, ext);
           urls.add(url);
         }
+        if (!mounted) return;
         payload['image_urls'] = urls;
         await repo.updateProduct(productId, payload);
-      } else if (widget.productId != null) {
-        payload['image_urls'] = _existingImageUrls;
+      } else if (!creating) {
+        payload['image_urls'] = existingUrls;
         await repo.updateProduct(productId, payload);
       }
 
+      if (!mounted) return;
       // Variants only ever apply to restockable goods; skip entirely for
       // live fish even if stale rows somehow exist. Failures here (e.g.
       // migration 0008 not applied yet) shouldn't block the product save
@@ -334,6 +385,7 @@ class _AdminProductEditScreenState
         }
       }
 
+      if (!mounted) return;
       refreshAdminProducts(ref);
       if (mounted) {
         if (variantSaveFailed) {
@@ -443,369 +495,432 @@ class _AdminProductEditScreenState
     if (_initialLoad) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.productId == null ? 'New Product' : 'Edit Product'),
-        actions: [
-          if (widget.productId != null)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: _delete,
-            ),
-        ],
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          children: [
-            const _SectionLabel('PHOTOS'),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
+    if (_loadError != null || _productMissing) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Edit Product')),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                for (var i = 0; i < _existingImageUrls.length; i++)
-                  _EditableThumbnail(
-                    onRemove: () => _removeExistingImage(i),
-                    child: Image.network(
-                      _existingImageUrls[i],
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const SizedBox(
+                Text(
+                  _productMissing ? 'Product not found' : _loadError!,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                OutlinedButton(
+                  onPressed: _loadExisting,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return PopScope(
+      canPop: !_loading,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            widget.productId == null ? 'New Product' : 'Edit Product',
+          ),
+          actions: [
+            if (widget.productId != null)
+              IconButton(
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Delete product',
+                onPressed: _loading ? null : _delete,
+              ),
+          ],
+        ),
+        body: AbsorbPointer(
+          absorbing: _loading,
+          child: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              children: [
+                const _SectionLabel('PHOTOS'),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    for (var i = 0; i < _existingImageUrls.length; i++)
+                      _EditableThumbnail(
+                        onRemove: () => _removeExistingImage(i),
+                        child: Image.network(
+                          _existingImageUrls[i],
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const SizedBox(
+                            width: 80,
+                            height: 80,
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                    for (var i = 0; i < _newImages.length; i++)
+                      _EditableThumbnail(
+                        onRemove: () => _removeNewImage(i),
+                        child: Image.file(
+                          File(_newImages[i].path),
+                          width: 80,
+                          height: 80,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    InkWell(
+                      onTap: _pickImages,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      child: Container(
                         width: 80,
                         height: 80,
-                        child: Icon(Icons.broken_image_outlined),
-                      ),
-                    ),
-                  ),
-                for (var i = 0; i < _newImages.length; i++)
-                  _EditableThumbnail(
-                    onRemove: () => _removeNewImage(i),
-                    child: Image.file(
-                      File(_newImages[i].path),
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                InkWell(
-                  onTap: _pickImages,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                  child: Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).surfaceMuted,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      border: Border.all(color: AppPalette.of(context).border),
-                    ),
-                    child: Icon(
-                      Icons.add_a_photo_outlined,
-                      color: AppPalette.of(context).textMuted,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Tap a photo\'s × to remove it. First photo is the cover image.',
-              style: TextStyle(
-                fontSize: 11.5,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('BASIC INFO'),
-            const SizedBox(height: AppSpacing.sm),
-            TextFormField(
-              controller: _nameCtrl,
-              decoration: const InputDecoration(labelText: 'Name'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Required' : null,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            DropdownButtonFormField<ProductCategory>(
-              isExpanded: true,
-              itemHeight: math.max(
-                kMinInteractiveDimension,
-                32 + MediaQuery.textScalerOf(context).scale(16),
-              ),
-              initialValue: _category,
-              decoration: const InputDecoration(labelText: 'Category'),
-              items: [
-                for (final c in ProductCategory.values)
-                  DropdownMenuItem(value: c, child: Text(categoryLabel(c))),
-              ],
-              onChanged: (v) =>
-                  setState(() => _category = v ?? ProductCategory.koi),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextFormField(
-              controller: _descCtrl,
-              decoration: const InputDecoration(labelText: 'Description'),
-              maxLines: 3,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('PRICING & STOCK'),
-            const SizedBox(height: AppSpacing.sm),
-            if (supportsVariants && _variants.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  color: AppPalette.of(context).surfaceMuted,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: Text(
-                  'This product has variants below — their price & stock are used '
-                  'instead of the fields here. The price/stock below are ignored '
-                  'once at least one variant exists.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppPalette.of(context).textMuted,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-            ],
-            Opacity(
-              opacity: supportsVariants && _variants.isNotEmpty ? 0.45 : 1,
-              child: IgnorePointer(
-                ignoring: supportsVariants && _variants.isNotEmpty,
-                child: Column(
-                  children: [
-                    TextFormField(
-                      controller: _priceCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Price (SGD)',
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    TextFormField(
-                      controller: _salePriceCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Sale price (SGD, optional)',
-                        hintText: 'Leave blank for no discount',
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Show price to customers'),
-                      subtitle: const Text('Off = "Contact for price"'),
-                      value: _showPrice,
-                      onChanged: (v) => setState(() => _showPrice = v),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (isLiveFish)
-                      // A live fish is one animal, not a countable
-                      // quantity — a plain 0/1 switch is the one-tap
-                      // action a farm admin needs at a show or after an
-                      // in-person sale, instead of typing a number into a
-                      // generic stock field. Bound to the same
-                      // `stock_quantity` column the checkout/DB triggers
-                      // already read (see 0010_payment_integrity.sql) —
-                      // no schema change needed.
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('Available for sale in app'),
-                        subtitle: Text(
-                          _stockCtrl.text.trim() == '0'
-                              ? 'Off — shows as "Sold" to customers'
-                              : 'On — customers can buy this fish',
+                        decoration: BoxDecoration(
+                          color: AppPalette.of(context).surfaceMuted,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                          border: Border.all(
+                            color: AppPalette.of(context).border,
+                          ),
                         ),
-                        value: _stockCtrl.text.trim() != '0',
-                        onChanged: (v) =>
-                            setState(() => _stockCtrl.text = v ? '1' : '0'),
-                      )
-                    else
-                      TextFormField(
-                        controller: _stockCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Stock quantity',
+                        child: Icon(
+                          Icons.add_a_photo_outlined,
+                          color: AppPalette.of(context).textMuted,
                         ),
-                        keyboardType: TextInputType.number,
                       ),
+                    ),
                   ],
                 ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextFormField(
-              controller: _videoUrlCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Video URL (optional)',
-                hintText: 'YouTube link, or a direct .mp4 URL',
-              ),
-              keyboardType: TextInputType.url,
-            ),
-            if (supportsVariants) ...[
-              const SizedBox(height: AppSpacing.xl),
-              _SectionLabel(isLiveFish ? 'FISH OPTIONS' : 'WEIGHT VARIANTS'),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                isLiveFish
-                    ? 'For a batch photo (e.g. "Japan Imported Koi Selection") — list each '
-                          'fish/variety separately so shoppers can pick which one. Leave empty '
-                          'for a single fish with no picks.'
-                    : (_usesSizeStockMatrix
-                          ? 'Add weight options (e.g. 2kg, 5kg) with price. Stock is set in the size matrix below.'
-                          : 'Add weight options (e.g. 2kg, 5kg) each with their own price & stock.'),
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: AppPalette.of(context).textMuted,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              for (var i = 0; i < _variants.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _VariantEditRow(
-                    row: _variants[i],
-                    hideStock: _usesSizeStockMatrix,
-                    labelHint: isLiveFish ? 'e.g. Kohaku' : 'e.g. 1kg',
-                    onLabelChanged: (_) => setState(() {}),
-                    onRemove: () => _removeVariantRow(i),
-                  ),
-                ),
-              OutlinedButton.icon(
-                onPressed: _addVariantRow,
-                icon: const Icon(Icons.add, size: 18),
-                label: Text(isLiveFish ? 'Add Fish Option' : 'Add Weight'),
-              ),
-            ],
-            if (supportsSizeMatrix) ...[
-              const SizedBox(height: AppSpacing.xl),
-              const _SectionLabel('SIZE OPTIONS'),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Pellet/size labels (e.g. Small, Medium, Large). Price stays on weight; '
-                'each weight×size cell has its own stock.',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: AppPalette.of(context).textMuted,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              for (var i = 0; i < _sizeOptionCtrls.length; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _SizeOptionEditRow(
-                    controller: _sizeOptionCtrls[i],
-                    onRemove: () => _removeSizeOptionRow(i),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-              OutlinedButton.icon(
-                onPressed: _addSizeOptionRow,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add Size'),
-              ),
-              if (_usesSizeStockMatrix &&
-                  _variants.any((v) => v.labelCtrl.text.trim().isNotEmpty)) ...[
-                const SizedBox(height: AppSpacing.xl),
-                const _SectionLabel('STOCK BY WEIGHT × SIZE'),
-                const SizedBox(height: AppSpacing.sm),
+                const SizedBox(height: 4),
                 Text(
-                  'Enter how many bags you have for each combination, or fill all at once.',
+                  'Tap a photo\'s × to remove it. First photo is the cover image.',
                   style: TextStyle(
                     fontSize: 11.5,
                     color: AppPalette.of(context).textMuted,
                   ),
                 ),
+                const SizedBox(height: AppSpacing.xl),
+                const _SectionLabel('BASIC INFO'),
                 const SizedBox(height: AppSpacing.sm),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: _fillAllStockCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Fill all',
-                          hintText: 'e.g. 10',
-                          isDense: true,
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Name'),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                DropdownButtonFormField<ProductCategory>(
+                  isExpanded: true,
+                  itemHeight: math.max(
+                    kMinInteractiveDimension,
+                    32 + MediaQuery.textScalerOf(context).scale(16),
+                  ),
+                  initialValue: _category,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                  items: [
+                    for (final c in ProductCategory.values)
+                      DropdownMenuItem(value: c, child: Text(categoryLabel(c))),
+                  ],
+                  onChanged: (v) =>
+                      setState(() => _category = v ?? ProductCategory.koi),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _descCtrl,
+                  decoration: const InputDecoration(labelText: 'Description'),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: AppSpacing.xl),
+                const _SectionLabel('PRICING & STOCK'),
+                const SizedBox(height: AppSpacing.sm),
+                if (supportsVariants && _variants.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: AppPalette.of(context).surfaceMuted,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Text(
+                      'This product has variants below — their price & stock are used '
+                      'instead of the fields here. The price/stock below are ignored '
+                      'once at least one variant exists.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppPalette.of(context).textMuted,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
+                Opacity(
+                  opacity: supportsVariants && _variants.isNotEmpty ? 0.45 : 1,
+                  child: IgnorePointer(
+                    ignoring: supportsVariants && _variants.isNotEmpty,
+                    child: Column(
+                      children: [
+                        if (!isLiveFish) ...[
+                          TextFormField(
+                            controller: _shippingWeightCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'kg',
+                              helperText:
+                                  'Weight of one item. Example: 500g = 0.5 kg.',
+                              helperMaxLines: 10,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            validator: _validateShippingWeight,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          _PackedSizeFields(
+                            controllers: _packedSize,
+                            enabled: _variants.isEmpty,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                        TextFormField(
+                          controller: _priceCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Price (SGD)',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
                         ),
-                        keyboardType: TextInputType.number,
+                        const SizedBox(height: AppSpacing.sm),
+                        TextFormField(
+                          controller: _salePriceCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Sale price (SGD, optional)',
+                            hintText: 'Leave blank for no discount',
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('Show price to customers'),
+                          subtitle: const Text('Off = "Contact for price"'),
+                          value: _showPrice,
+                          onChanged: (v) => setState(() => _showPrice = v),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        if (isLiveFish)
+                          // A live fish is one animal, not a countable
+                          // quantity — a plain 0/1 switch is the one-tap
+                          // action a farm admin needs at a show or after an
+                          // in-person sale, instead of typing a number into a
+                          // generic stock field. Bound to the same
+                          // `stock_quantity` column the checkout/DB triggers
+                          // already read (see 0010_payment_integrity.sql) —
+                          // no schema change needed.
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('Available for sale in app'),
+                            subtitle: Text(
+                              _stockCtrl.text.trim() == '0'
+                                  ? 'Off — shows as "Sold" to customers'
+                                  : 'On — customers can buy this fish',
+                            ),
+                            value: _stockCtrl.text.trim() != '0',
+                            onChanged: (v) =>
+                                setState(() => _stockCtrl.text = v ? '1' : '0'),
+                          )
+                        else
+                          TextFormField(
+                            controller: _stockCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Stock quantity',
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _videoUrlCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Video URL (optional)',
+                    hintText: 'YouTube link, or a direct .mp4 URL',
+                  ),
+                  keyboardType: TextInputType.url,
+                ),
+                if (supportsVariants) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  _SectionLabel(
+                    isLiveFish ? 'FISH OPTIONS' : 'WEIGHT VARIANTS',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    isLiveFish
+                        ? 'For a batch photo (e.g. "Japan Imported Koi Selection") — list each '
+                              'fish/variety separately so shoppers can pick which one. Leave empty '
+                              'for a single fish with no picks.'
+                        : (_usesSizeStockMatrix
+                              ? 'Add weight options (e.g. 2kg, 5kg) with price. Stock is set in the size matrix below.'
+                              : 'Add weight options (e.g. 2kg, 5kg) each with their own price & stock.'),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppPalette.of(context).textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (var i = 0; i < _variants.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: _VariantEditRow(
+                        showShippingWeight: !isLiveFish,
+                        row: _variants[i],
+                        hideStock: _usesSizeStockMatrix,
+                        labelHint: isLiveFish ? 'e.g. Kohaku' : 'e.g. 1kg',
+                        onLabelChanged: (_) => setState(() {}),
+                        onRemove: () => _removeVariantRow(i),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    ElevatedButton(
-                      onPressed: _fillAllSizeStocks,
-                      child: const Text('Apply'),
+                  OutlinedButton.icon(
+                    onPressed: _addVariantRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: Text(isLiveFish ? 'Add Fish Option' : 'Add Weight'),
+                  ),
+                ],
+                if (supportsSizeMatrix) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  const _SectionLabel('SIZE OPTIONS'),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Pellet/size labels (e.g. Small, Medium, Large). Price stays on weight; '
+                    'each weight×size cell has its own stock.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppPalette.of(context).textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (var i = 0; i < _sizeOptionCtrls.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                      child: _SizeOptionEditRow(
+                        controller: _sizeOptionCtrls[i],
+                        onRemove: () => _removeSizeOptionRow(i),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                  OutlinedButton.icon(
+                    onPressed: _addSizeOptionRow,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add Size'),
+                  ),
+                  if (_usesSizeStockMatrix &&
+                      _variants.any(
+                        (v) => v.labelCtrl.text.trim().isNotEmpty,
+                      )) ...[
+                    const SizedBox(height: AppSpacing.xl),
+                    const _SectionLabel('STOCK BY WEIGHT × SIZE'),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Enter how many bags you have for each combination, or fill all at once.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _fillAllStockCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Fill all',
+                              hintText: 'e.g. 10',
+                              isDense: true,
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        ElevatedButton(
+                          onPressed: _fillAllSizeStocks,
+                          child: const Text('Apply'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _SizeStockMatrix(
+                      variantLabels: [
+                        for (final v in _variants)
+                          if (v.labelCtrl.text.trim().isNotEmpty)
+                            v.labelCtrl.text.trim(),
+                      ],
+                      variantIndexes: [
+                        for (var i = 0; i < _variants.length; i++)
+                          if (_variants[i].labelCtrl.text.trim().isNotEmpty) i,
+                      ],
+                      sizes: _collectedSizeOptions(),
+                      controllerFor: _sizeStockCtrl,
                     ),
                   ],
+                ],
+                if (isLiveFish) ...[
+                  const SizedBox(height: AppSpacing.xl),
+                  const _SectionLabel('FISH DETAILS'),
+                  const SizedBox(height: AppSpacing.sm),
+                  TextFormField(
+                    controller: _varietyCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Variety (e.g. Kohaku)',
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextFormField(
+                    controller: _sizeCtrl,
+                    decoration: const InputDecoration(labelText: 'Size (cm)'),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextFormField(
+                    controller: _breederCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Breeder / Farm',
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Has certificate'),
+                    value: _hasCertificate,
+                    onChanged: (v) => setState(() => _hasCertificate = v),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.xxl),
+                ElevatedButton(
+                  onPressed: _loading ? null : _save,
+                  child: _loading
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.white,
+                          ),
+                        )
+                      : const Text('Save'),
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                _SizeStockMatrix(
-                  variantLabels: [
-                    for (final v in _variants)
-                      if (v.labelCtrl.text.trim().isNotEmpty)
-                        v.labelCtrl.text.trim(),
-                  ],
-                  variantIndexes: [
-                    for (var i = 0; i < _variants.length; i++)
-                      if (_variants[i].labelCtrl.text.trim().isNotEmpty) i,
-                  ],
-                  sizes: _collectedSizeOptions(),
-                  controllerFor: _sizeStockCtrl,
-                ),
+                const SizedBox(height: AppSpacing.md),
               ],
-            ],
-            if (isLiveFish) ...[
-              const SizedBox(height: AppSpacing.xl),
-              const _SectionLabel('FISH DETAILS'),
-              const SizedBox(height: AppSpacing.sm),
-              TextFormField(
-                controller: _varietyCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Variety (e.g. Kohaku)',
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _sizeCtrl,
-                decoration: const InputDecoration(labelText: 'Size (cm)'),
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _breederCtrl,
-                decoration: const InputDecoration(labelText: 'Breeder / Farm'),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Has certificate'),
-                value: _hasCertificate,
-                onChanged: (v) => setState(() => _hasCertificate = v),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.xxl),
-            ElevatedButton(
-              onPressed: _loading ? null : _save,
-              child: _loading
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.white,
-                      ),
-                    )
-                  : const Text('Save'),
             ),
-            const SizedBox(height: AppSpacing.md),
-          ],
+          ),
         ),
       ),
     );
@@ -878,26 +993,43 @@ class _VariantRow {
   final TextEditingController labelCtrl;
   final TextEditingController priceCtrl;
   final TextEditingController stockCtrl;
+  final TextEditingController weightCtrl;
+  final packedSize = _PackedSizeControllers();
+  String? _generatedLabel;
 
   _VariantRow._({
     this.id,
     required this.labelCtrl,
     required this.priceCtrl,
     required this.stockCtrl,
-  });
+    required this.weightCtrl,
+  }) : _generatedLabel = _optionLabelFromKg(weightCtrl.text);
+
+  void updateWeightLabel(String value) {
+    final next = _optionLabelFromKg(value);
+    // Keep a custom name such as 500ml, 2L or Small when weight changes.
+    if (labelCtrl.text.trim().isEmpty || labelCtrl.text == _generatedLabel) {
+      labelCtrl.text = next ?? '';
+    }
+    _generatedLabel = next;
+  }
 
   factory _VariantRow.blank() => _VariantRow._(
     labelCtrl: TextEditingController(),
     priceCtrl: TextEditingController(),
     stockCtrl: TextEditingController(text: '0'),
+    weightCtrl: TextEditingController(),
   );
 
-  factory _VariantRow.existing(ProductVariant v) => _VariantRow._(
+  factory _VariantRow.existing(ProductVariant v) => (_VariantRow._(
     id: v.id,
     labelCtrl: TextEditingController(text: v.label),
     priceCtrl: TextEditingController(text: v.price.toString()),
     stockCtrl: TextEditingController(text: '${v.stockQuantity}'),
-  );
+    weightCtrl: TextEditingController(
+      text: v.shippingWeightKg?.toString() ?? '',
+    ),
+  )..packedSize.load(v.packedDimensions));
 }
 
 /// One row in the VARIANTS section — label / price / stock fields plus a
@@ -907,12 +1039,14 @@ class _VariantEditRow extends StatelessWidget {
   final _VariantRow row;
   final VoidCallback onRemove;
   final bool hideStock;
+  final bool showShippingWeight;
   final String labelHint;
   final ValueChanged<String>? onLabelChanged;
   const _VariantEditRow({
     required this.row,
     required this.onRemove,
     this.hideStock = false,
+    this.showShippingWeight = false,
     this.labelHint = 'e.g. 1kg',
     this.onLabelChanged,
   });
@@ -925,6 +1059,10 @@ class _VariantEditRow extends StatelessWidget {
       decoration: InputDecoration(
         labelText: 'Label',
         hintText: labelHint,
+        helperText: showShippingWeight
+            ? 'Auto from kg; edit only if needed.'
+            : null,
+        helperMaxLines: 5,
         isDense: true,
       ),
     );
@@ -932,6 +1070,16 @@ class _VariantEditRow extends StatelessWidget {
       controller: row.priceCtrl,
       decoration: const InputDecoration(labelText: 'Price', isDense: true),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    );
+    final weight = TextFormField(
+      controller: row.weightCtrl,
+      onChanged: (value) {
+        row.updateWeightLabel(value);
+        onLabelChanged?.call(row.labelCtrl.text);
+      },
+      decoration: const InputDecoration(labelText: 'kg', isDense: true),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      validator: _validateShippingWeight,
     );
     final stock = TextFormField(
       controller: row.stockCtrl,
@@ -954,47 +1102,80 @@ class _VariantEditRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.sm),
         boxShadow: AppShadows.card,
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth < 520 ||
-              MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3) {
-            return Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth < 520 ||
+                  MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3) {
+                return Column(
                   children: [
-                    Expanded(child: label),
-                    remove,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: label),
+                        remove,
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    if (showShippingWeight &&
+                        (constraints.maxWidth < 340 ||
+                            MediaQuery.textScalerOf(context).scale(14) > 18))
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          price,
+                          const SizedBox(height: AppSpacing.sm),
+                          weight,
+                          if (!hideStock) ...[
+                            const SizedBox(height: AppSpacing.sm),
+                            stock,
+                          ],
+                        ],
+                      )
+                    else
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: price),
+                          if (showShippingWeight) ...[
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(child: weight),
+                          ],
+                          if (!hideStock) ...[
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(child: stock),
+                          ],
+                        ],
+                      ),
                   ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: price),
-                    if (!hideStock) ...[
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(child: stock),
-                    ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 3, child: label),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(flex: 2, child: price),
+                  if (showShippingWeight) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(flex: 2, child: weight),
                   ],
-                ),
-              ],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 3, child: label),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(flex: 2, child: price),
-              if (!hideStock) ...[
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(flex: 2, child: stock),
-              ],
-              remove,
-            ],
-          );
-        },
+                  if (!hideStock) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(flex: 2, child: stock),
+                  ],
+                  remove,
+                ],
+              );
+            },
+          ),
+          if (showShippingWeight) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _PackedSizeFields(controllers: row.packedSize),
+          ],
+        ],
       ),
     );
   }
@@ -1149,4 +1330,112 @@ class _SizeStockMatrix extends StatelessWidget {
       ),
     );
   }
+}
+
+String? _validateShippingWeight(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  final weight = double.tryParse(value.trim());
+  return weight == null || !weight.isFinite || weight <= 0
+      ? 'Enter a positive weight in kg.'
+      : null;
+}
+
+String? _optionLabelFromKg(String input) {
+  final kg = double.tryParse(input.trim());
+  if (kg == null || !kg.isFinite || kg <= 0) return null;
+  final value = kg < 1 ? kg * 1000 : kg;
+  final number = value.toStringAsFixed(6).replaceFirst(RegExp(r'\.?0+$'), '');
+  return '$number${kg < 1 ? 'g' : 'kg'}';
+}
+
+/// Packed dimensions of one individually wrapped unit, not the bare product.
+class _PackedSizeControllers {
+  final length = TextEditingController();
+  final width = TextEditingController();
+  final height = TextEditingController();
+  List<TextEditingController> get fields => [length, width, height];
+  void load(PackedDimensions? value) {
+    length.text = value?.lengthCm.toString() ?? '';
+    width.text = value?.widthCm.toString() ?? '';
+    height.text = value?.heightCm.toString() ?? '';
+  }
+
+  PackedDimensions? get value => PackedDimensions.fromMap({
+    'length_cm': double.tryParse(length.text.trim()),
+    'width_cm': double.tryParse(width.text.trim()),
+    'height_cm': double.tryParse(height.text.trim()),
+  });
+  String? validate(String? text) {
+    if (fields.every((field) => field.text.trim().isEmpty)) return null;
+    final number = double.tryParse(text?.trim() ?? '');
+    return number == null || !number.isFinite || number <= 0
+        ? 'Enter a positive size.'
+        : null;
+  }
+}
+
+class _PackedSizeFields extends StatelessWidget {
+  final _PackedSizeControllers controllers;
+  final bool enabled;
+  const _PackedSizeFields({required this.controllers, this.enabled = true});
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Packed size (optional)',
+        style: TextStyle(fontWeight: FontWeight.w600),
+      ),
+      const SizedBox(height: 4),
+      const Text(
+        'One packed unit, including its box. Enter all three sizes or leave blank.',
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      LayoutBuilder(
+        builder: (context, constraints) {
+          final vertical =
+              constraints.maxWidth < 340 ||
+              MediaQuery.textScalerOf(context).scale(14) > 18;
+          final fields = [
+            for (final entry in {
+              'Length (cm)': controllers.length,
+              'Width (cm)': controllers.width,
+              'Height (cm)': controllers.height,
+            }.entries)
+              TextFormField(
+                controller: entry.value,
+                decoration: InputDecoration(
+                  labelText: entry.key,
+                  isDense: true,
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                enabled: enabled,
+                validator: enabled ? controllers.validate : null,
+              ),
+          ];
+          return vertical
+              ? Column(
+                  children: [
+                    for (final field in fields)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: field,
+                      ),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < fields.length; i++) ...[
+                      if (i > 0) const SizedBox(width: AppSpacing.sm),
+                      Expanded(child: fields[i]),
+                    ],
+                  ],
+                );
+        },
+      ),
+    ],
+  );
 }

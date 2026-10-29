@@ -71,11 +71,41 @@ class FishDetails {
 /// When the parent product has [Product.sizeOptions], inventory lives in
 /// [sizeStocks] (one qty per pellet size) and [stockQuantity] is ignored
 /// for availability. Price still comes from this weight row.
+class PackedDimensions {
+  final double lengthCm;
+  final double widthCm;
+  final double heightCm;
+  const PackedDimensions(this.lengthCm, this.widthCm, this.heightCm);
+
+  Map<String, double> toMap() => {
+    'length_cm': lengthCm,
+    'width_cm': widthCm,
+    'height_cm': heightCm,
+  };
+
+  static PackedDimensions? fromMap(dynamic value) {
+    if (value is! Map) return null;
+    final values = [
+      'length_cm',
+      'width_cm',
+      'height_cm',
+    ].map((key) => value[key]).toList();
+    if (values.any((v) => v is! num || !v.isFinite || v <= 0)) return null;
+    return PackedDimensions(
+      (values[0] as num).toDouble(),
+      (values[1] as num).toDouble(),
+      (values[2] as num).toDouble(),
+    );
+  }
+}
+
 class ProductVariant {
   final String id;
   final String productId;
   final String label;
   final double price;
+  final double? shippingWeightKg;
+  final PackedDimensions? packedDimensions;
   final int stockQuantity;
   final String? sku;
   final int sortOrder;
@@ -89,6 +119,8 @@ class ProductVariant {
     required this.productId,
     required this.label,
     required this.price,
+    this.shippingWeightKg,
+    this.packedDimensions,
     this.stockQuantity = 0,
     this.sku,
     this.sortOrder = 0,
@@ -127,6 +159,8 @@ class ProductVariant {
       productId: map['product_id'] as String,
       label: map['label'] as String? ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0,
+      shippingWeightKg: (map['shipping_weight_kg'] as num?)?.toDouble(),
+      packedDimensions: PackedDimensions.fromMap(map['packed_dimensions']),
       stockQuantity: map['stock_quantity'] as int? ?? 0,
       sku: map['sku'] as String?,
       sortOrder: map['sort_order'] as int? ?? 0,
@@ -140,6 +174,8 @@ class Product {
   final String name;
   final String? description;
   final ProductCategory category;
+  final double? shippingWeightKg;
+  final PackedDimensions? packedDimensions;
   final double? price; // null when admin has hidden the price
   final double? salePrice; // set + < price when this item is discounted
   final bool showPrice;
@@ -171,6 +207,8 @@ class Product {
     this.description,
     required this.category,
     this.price,
+    this.shippingWeightKg,
+    this.packedDimensions,
     this.salePrice,
     this.showPrice = true,
     this.stockQuantity = 0,
@@ -280,13 +318,19 @@ class Product {
   /// only meaningful when [hasVariants] is true.
   int get variantCount => variants.length;
 
-  Product withStats({required int soldCount, double? avgRating, required int reviewCount}) {
+  Product withStats({
+    required int soldCount,
+    double? avgRating,
+    required int reviewCount,
+  }) {
     return Product(
       id: id,
       name: name,
       description: description,
       category: category,
       price: price,
+      shippingWeightKg: shippingWeightKg,
+      packedDimensions: packedDimensions,
       salePrice: salePrice,
       showPrice: showPrice,
       stockQuantity: stockQuantity,
@@ -303,7 +347,8 @@ class Product {
   }
 
   factory Product.fromMap(Map<String, dynamic> map) {
-    final variants = (map['variants'] as List?)
+    final variants =
+        (map['variants'] as List?)
             ?.map((e) => ProductVariant.fromMap(e as Map<String, dynamic>))
             .toList() ??
         <ProductVariant>[];
@@ -311,9 +356,9 @@ class Product {
     final rawSizes = map['size_options'];
     final sizeOptions = rawSizes is List
         ? rawSizes
-            .map((e) => e?.toString().trim() ?? '')
-            .where((s) => s.isNotEmpty)
-            .toList()
+              .map((e) => e?.toString().trim() ?? '')
+              .where((s) => s.isNotEmpty)
+              .toList()
         : <String>[];
     return Product(
       id: map['id'] as String,
@@ -321,6 +366,8 @@ class Product {
       description: map['description'] as String?,
       category: categoryFromString(map['category'] as String? ?? 'koi'),
       price: (map['price'] as num?)?.toDouble(),
+      shippingWeightKg: (map['shipping_weight_kg'] as num?)?.toDouble(),
+      packedDimensions: PackedDimensions.fromMap(map['packed_dimensions']),
       salePrice: (map['sale_price'] as num?)?.toDouble(),
       showPrice: map['show_price'] as bool? ?? true,
       stockQuantity: map['stock_quantity'] as int? ?? 0,
@@ -342,6 +389,8 @@ class Product {
       description: description,
       category: category,
       price: price,
+      shippingWeightKg: shippingWeightKg,
+      packedDimensions: packedDimensions,
       salePrice: salePrice,
       showPrice: showPrice,
       stockQuantity: stockQuantity,

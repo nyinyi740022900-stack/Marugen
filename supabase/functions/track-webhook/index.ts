@@ -127,6 +127,7 @@ Deno.serve(async (req) => {
         tracking_updated_at: new Date().toISOString(),
       })
       .eq('qxpress_tracking_no', number)
+      .eq('tracking_provider', 'seventeentrack')
       .select('id, status');
 
     if (error) {

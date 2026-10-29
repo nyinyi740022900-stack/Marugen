@@ -62,6 +62,9 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   XFile? _newCoverImage;
   final List<_StageDraft> _stages = [];
   bool _saving = false;
+  bool _submitted = false;
+  String? _saveError;
+  late String? _savedId = widget.existing?.id;
 
   @override
   void initState() {
@@ -94,7 +97,7 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
       source: ImageSource.gallery,
       imageQuality: 85,
     );
-    if (picked != null) setState(() => _newCoverImage = picked);
+    if (mounted && picked != null) setState(() => _newCoverImage = picked);
   }
 
   Future<void> _pickStageImage(_StageDraft stage) async {
@@ -102,7 +105,7 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
       source: ImageSource.gallery,
       imageQuality: 85,
     );
-    if (picked != null) setState(() => stage.newImage = picked);
+    if (mounted && picked != null) setState(() => stage.newImage = picked);
   }
 
   void _addStage() => setState(() => _stages.add(_StageDraft()));
@@ -110,7 +113,24 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   void _removeStage(int i) => setState(() => _stages.removeAt(i).dispose());
 
   Future<void> _save() async {
-    setState(() => _saving = true);
+    setState(() => _submitted = true);
+    if (_nameCtrl.text.trim().isEmpty) return;
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+    final coverImage = _newCoverImage;
+    final stages = _stages
+        .map(
+          (stage) => (
+            label: stage.labelCtrl.text.trim(),
+            description: stage.descCtrl.text.trim(),
+            imageUrl: stage.existingImageUrl,
+            newImage: stage.newImage,
+          ),
+        )
+        .toList(growable: false);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       final repo = ref.read(knowledgeRepositoryProvider);
       final id = await repo.upsertVariety({
@@ -122,30 +142,29 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
             .map((t) => t.trim())
             .where((t) => t.isNotEmpty)
             .toList(),
-      }, id: widget.existing?.id);
+      }, id: _savedId);
+      _savedId = id;
 
       var coverUrl = _existingCoverUrl;
-      if (_newCoverImage != null) {
-        final bytes = await _newCoverImage!.readAsBytes();
-        final ext = _newCoverImage!.name.split('.').last;
+      if (coverImage != null) {
+        final bytes = await coverImage.readAsBytes();
+        final ext = coverImage.name.split('.').last;
         coverUrl = await repo.uploadVarietyImage(id, bytes, ext);
       }
 
       final stagePayload = <Map<String, dynamic>>[];
-      for (final s in _stages) {
-        if (s.labelCtrl.text.trim().isEmpty) continue;
-        var imageUrl = s.existingImageUrl;
+      for (final s in stages) {
+        if (s.label.isEmpty) continue;
+        var imageUrl = s.imageUrl;
         if (s.newImage != null) {
           final bytes = await s.newImage!.readAsBytes();
           final ext = s.newImage!.name.split('.').last;
           imageUrl = await repo.uploadVarietyImage(id, bytes, ext);
         }
         stagePayload.add({
-          'label': s.labelCtrl.text.trim(),
+          'label': s.label,
           'image_url': imageUrl,
-          'description': s.descCtrl.text.trim().isEmpty
-              ? null
-              : s.descCtrl.text.trim(),
+          'description': s.description.isEmpty ? null : s.description,
         });
       }
 
@@ -154,19 +173,15 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
         'stages': stagePayload,
       }, id: id);
 
-      ref.invalidate(varietiesProvider);
+      container.invalidate(varietiesProvider);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              friendlyErrorMessage(
-                e,
-                fallback: 'Could not save the variety. Please try again.',
-                context: 'admin.variety_form',
-              ),
-            ),
+        setState(
+          () => _saveError = friendlyErrorMessage(
+            e,
+            fallback: 'Could not save the variety. Please try again.',
+            context: 'admin.variety_form',
           ),
         );
       }
@@ -226,10 +241,17 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
             const SizedBox(height: AppSpacing.lg),
             TextField(
               controller: _nameCtrl,
-              decoration: const InputDecoration(labelText: 'Name'),
+              decoration: InputDecoration(
+                labelText: 'Name',
+                errorText: _submitted && _nameCtrl.text.trim().isEmpty
+                    ? 'Enter a name.'
+                    : null,
+                errorMaxLines: 3,
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: _category,
               items: const [
                 DropdownMenuItem(value: 'koi', child: Text('Koi')),
@@ -253,7 +275,10 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            Row(
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
               children: [
                 Text(
                   'GROWTH STAGES',
@@ -264,7 +289,6 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                     color: AppPalette.of(context).textMuted,
                   ),
                 ),
-                const Spacer(),
                 TextButton.icon(
                   onPressed: _addStage,
                   icon: const Icon(Icons.add, size: 18),
@@ -288,10 +312,9 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                   border: Border.all(color: AppPalette.of(context).border),
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    GestureDetector(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final photo = GestureDetector(
                       onTap: () => _pickStageImage(_stages[i]),
                       child: Container(
                         width: 56,
@@ -320,41 +343,66 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                                     )
                                   : null),
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _stages[i].labelCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Stage label',
-                              isDense: true,
-                            ),
+                    );
+                    final fields = Column(
+                      children: [
+                        TextField(
+                          controller: _stages[i].labelCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Stage label',
+                            isDense: true,
                           ),
-                          const SizedBox(height: 6),
-                          TextField(
-                            controller: _stages[i].descCtrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Note (optional)',
-                              isDense: true,
-                            ),
+                        ),
+                        const SizedBox(height: 6),
+                        TextField(
+                          controller: _stages[i].descCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Note (optional)',
+                            isDense: true,
                           ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
+                        ),
+                      ],
+                    );
+                    final remove = IconButton(
+                      tooltip: 'Remove stage',
                       icon: Icon(
                         Icons.close,
                         size: 18,
                         color: AppPalette.of(context).textMuted,
                       ),
                       onPressed: () => _removeStage(i),
-                    ),
-                  ],
+                    );
+                    if (constraints.maxWidth < 360 &&
+                        MediaQuery.textScalerOf(context).scale(14) > 21) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(children: [photo, const Spacer(), remove]),
+                          const SizedBox(height: AppSpacing.sm),
+                          fields,
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        photo,
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(child: fields),
+                        remove,
+                      ],
+                    );
+                  },
                 ),
               ),
             const SizedBox(height: AppSpacing.lg),
+            if (_saveError != null) ...[
+              Text(
+                _saveError!,
+                style: TextStyle(color: AppPalette.of(context).error),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             ElevatedButton(
               onPressed: _saving ? null : _save,
               child: _saving

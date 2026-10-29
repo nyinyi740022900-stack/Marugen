@@ -189,47 +189,36 @@ class ProductCard extends ConsumerWidget {
                     const SizedBox(height: 3),
                     _StatsRow(product: product),
                     const SizedBox(height: 4),
+                    // Price gets the full content width. A touch target must
+                    // never take space away from the amount being purchased.
+                    if (product.hasActiveSale)
+                      Text(
+                        formatPrice(product.price!),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: AppPalette.of(context).textMuted,
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                    Text(
+                      product.hasActiveSale
+                          ? formatPrice(product.salePrice!)
+                          : _priceLabel(product),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: product.isPurchasable
+                            ? AppPalette.of(context).accent
+                            : AppPalette.of(context).textMuted,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
                         Expanded(
-                          child: product.hasActiveSale
-                              ? Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      formatPrice(product.price!),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: AppPalette.of(context).textMuted,
-                                        decoration: TextDecoration.lineThrough,
-                                      ),
-                                    ),
-                                    Text(
-                                      formatPrice(product.salePrice!),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: AppPalette.of(context).accent,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Text(
-                                  _priceLabel(product),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    color: product.isPurchasable
-                                        ? AppPalette.of(context).accent
-                                        : AppPalette.of(context).textMuted,
-                                    fontSize: 14,
-                                  ),
-                                ),
+                          child: product.isPurchasable && !product.isOutOfStock
+                              ? const _DeliveryEstimateLabel()
+                              : const SizedBox.shrink(),
                         ),
                         _CardActionButtons(
                           product: product,
@@ -237,10 +226,6 @@ class ProductCard extends ConsumerWidget {
                         ),
                       ],
                     ),
-                    if (product.isPurchasable && !product.isOutOfStock) ...[
-                      const SizedBox(height: 3),
-                      const _DeliveryEstimateLabel(),
-                    ],
                   ],
                 ),
               ),
@@ -263,7 +248,7 @@ String _priceLabel(Product product) {
   return formatPrice(product.price!);
 }
 
-/// CTA row on the card price line:
+/// CTA in the card footer:
 /// - restockable + priced → quick-add cart (variant products open PDP)
 /// - live fish + priced + in stock → Buy Now (cart + checkout)
 /// - contact-for-price → Chat with shop
@@ -341,15 +326,25 @@ class _RoundIconButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: AppColors.black,
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Icon(icon, size: 20, color: AppColors.white),
+      child: SizedBox.square(
+        dimension: 48,
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Center(
+              child: Ink(
+                width: 32,
+                height: 32,
+                decoration: const BoxDecoration(
+                  color: AppColors.black,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 20, color: AppColors.white),
+              ),
+            ),
           ),
         ),
       ),
@@ -357,7 +352,7 @@ class _RoundIconButton extends StatelessWidget {
   }
 }
 
-/// Compact cart icon in the card's price row. Plain products go straight
+/// Compact cart icon in the card footer. Plain products go straight
 /// into the cart with a snackbar; variant products bounce to the detail
 /// page (via [onOpenDetail]) because a size has to be chosen first.
 class _QuickAddButton extends ConsumerWidget {
@@ -447,18 +442,24 @@ class _FavoriteButton extends ConsumerWidget {
                       }
                     }
                   },
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.black.withValues(alpha: 0.45),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                isFavorited ? Icons.favorite : Icons.favorite_border,
-                size: 16,
-                color: isFavorited
-                    ? AppPalette.of(context).accent
-                    : AppColors.white,
+            child: SizedBox.square(
+              dimension: 48,
+              child: Center(
+                child: Ink(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: AppColors.black.withValues(alpha: 0.45),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isFavorited ? Icons.favorite : Icons.favorite_border,
+                    size: 20,
+                    color: isFavorited
+                        ? AppPalette.of(context).accent
+                        : AppColors.white,
+                  ),
+                ),
               ),
             ),
           ),
@@ -492,7 +493,7 @@ class _StatsRow extends StatelessWidget {
     // Nothing to say — still reserve the line's height so cards without
     // stats don't pull their price/cart row up relative to cards that do.
     if (product.avgRating == null && parts.isEmpty) {
-      return const SizedBox(height: 15);
+      return SizedBox(height: MediaQuery.textScalerOf(context).scale(11) * 1.2);
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -553,9 +554,9 @@ class _DeliveryEstimateLabel extends ConsumerWidget {
         const SizedBox(width: 3),
         Flexible(
           child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            label.replaceFirst('Delivery ', ''),
+            semanticsLabel: label,
+            softWrap: true,
             style: TextStyle(
               fontSize: 10.5,
               color: AppPalette.of(context).textMuted,

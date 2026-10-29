@@ -9,6 +9,8 @@
 
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { syncOrderRefunds } from "../_shared/refund_lifecycle.ts";
+import { createRefundPort } from "../_shared/refund_port.ts";
 import { applyPaymentEvent } from "../_shared/payment_lifecycle.ts";
 import { createPaymentPort } from "../_shared/payment_port.ts";
 
@@ -59,6 +61,21 @@ Deno.serve(async (req) => {
     ) {
       const intent = event.data.object as Stripe.PaymentIntent;
       await applyPaymentEvent(event.type, intent.id, paymentPort);
+    } else if (
+      ["refund.created", "refund.updated", "refund.failed", "charge.refunded"]
+        .includes(event.type)
+    ) {
+      // Fetch current Stripe state instead of trusting delivery order/payload.
+      const object = event.data.object as Stripe.Refund | Stripe.Charge;
+      const intentId = typeof object.payment_intent === "string"
+        ? object.payment_intent
+        : object.payment_intent?.id;
+      if (intentId) {
+        await syncOrderRefunds(
+          intentId,
+          createRefundPort(supabaseAdmin, stripe, supabaseUrl, serviceRoleKey),
+        );
+      }
     }
   } catch (err) {
     console.error("Payment reconciliation failed", event.id, err);

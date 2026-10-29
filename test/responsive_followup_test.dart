@@ -156,7 +156,7 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.scrollUntilVisible(
-            find.text('YOU MAY ALSO LIKE'),
+            find.text('Recommended for you').last,
             300,
             scrollable: find.byType(Scrollable).first,
           );

@@ -19,6 +19,7 @@ class NotificationRepository {
         .from('notifications')
         .select()
         .eq('user_id', user.id)
+        .isFilter('dismissed_at', null)
         .order('created_at', ascending: false)
         .limit(100);
     return (data as List)
@@ -33,7 +34,8 @@ class NotificationRepository {
         .from('notifications')
         .count()
         .eq('user_id', user.id)
-        .eq('read', false);
+        .eq('read', false)
+        .isFilter('dismissed_at', null);
     return count;
   }
 
@@ -54,6 +56,41 @@ class NotificationRepository {
         .from('notifications')
         .update({'read': true})
         .eq('user_id', user.id)
-        .eq('read', false);
+        .eq('read', false)
+        .isFilter('dismissed_at', null);
+  }
+
+  /// Acknowledged IDs let callers keep any unmodified rows selected for retry.
+  Future<Set<String>> dismiss(
+    Set<String> ids, {
+    required String owner,
+    required String dismissedAt,
+  }) async {
+    if (ids.isEmpty || SupabaseService.currentUser?.id != owner) return {};
+    final rows = await _client
+        .from('notifications')
+        .update({'dismissed_at': dismissedAt})
+        .eq('user_id', owner)
+        .inFilter('id', ids.toList())
+        .isFilter('dismissed_at', null)
+        .select('id');
+    return rows.map((row) => row['id'] as String).toSet();
+  }
+
+  /// Match this exact batch, so an old Undo cannot undo a newer dismissal.
+  Future<Set<String>> restore(
+    Set<String> ids, {
+    required String owner,
+    required String dismissedAt,
+  }) async {
+    if (ids.isEmpty || SupabaseService.currentUser?.id != owner) return {};
+    final rows = await _client
+        .from('notifications')
+        .update({'dismissed_at': null})
+        .eq('user_id', owner)
+        .inFilter('id', ids.toList())
+        .eq('dismissed_at', dismissedAt)
+        .select('id');
+    return rows.map((row) => row['id'] as String).toSet();
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:marugen_app/shared/widgets/keyboard_dismiss_region.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
@@ -32,7 +33,7 @@ Widget host(
           textScaler: TextScaler.linear(textScale),
           viewInsets: EdgeInsets.only(bottom: keyboard),
         ),
-        child: child!,
+        child: KeyboardDismissRegion(child: child!),
       ),
       home: screen,
     ),

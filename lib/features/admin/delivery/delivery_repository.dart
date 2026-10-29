@@ -28,6 +28,7 @@ class DeliveryRepository {
       body: {
         'order_id': orderId,
         'tracking_number': trackingNumber,
+        'confirmed_handover': true,
         'carrier_code': ?carrierCode,
       },
     );

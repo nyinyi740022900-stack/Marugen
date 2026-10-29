@@ -38,6 +38,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   }
 
   Future<void> _submit() async {
+    if (_loading || _oauthLoading) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
@@ -52,15 +53,18 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
             _passwordCtrl.text,
             fullName: _nameCtrl.text.trim(),
           );
-      setState(() => _info = 'Check your email to confirm your account.');
+      if (mounted) {
+        setState(() => _info = 'Check your email to confirm your account.');
+      }
     } catch (e) {
-      setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _oauthSignIn(Future<void> Function() signIn) async {
+    if (_loading || _oauthLoading) return;
     setState(() {
       _oauthLoading = true;
       _error = null;
@@ -70,7 +74,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -116,6 +120,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     controller: _nameCtrl,
                     textInputAction: TextInputAction.next,
                     decoration: const InputDecoration(
+                      errorMaxLines: 4,
                       labelText: 'Full name',
                       prefixIcon: Icon(Icons.person_outline, size: 20),
                     ),
@@ -128,6 +133,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     keyboardType: TextInputType.emailAddress,
                     textInputAction: TextInputAction.next,
                     decoration: const InputDecoration(
+                      errorMaxLines: 4,
                       labelText: 'Email',
                       prefixIcon: Icon(Icons.mail_outline, size: 20),
                     ),
@@ -142,6 +148,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     textInputAction: TextInputAction.done,
                     onFieldSubmitted: (_) => _submit(),
                     decoration: InputDecoration(
+                      errorMaxLines: 4,
                       labelText: 'Password',
                       prefixIcon: const Icon(Icons.lock_outline, size: 20),
                       suffixIcon: IconButton(
@@ -195,9 +202,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   ],
                   const SizedBox(height: AppSpacing.lg),
                   RichText(
+                    textScaler: MediaQuery.textScalerOf(context),
                     textAlign: TextAlign.center,
                     text: TextSpan(
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.bodySmall!.copyWith(
                         fontSize: 12,
                         color: AppPalette.of(context).textMuted,
                         height: 1.4,
@@ -274,18 +282,20 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     icon: const Icon(Icons.g_mobiledata, size: 24),
                     label: const Text('Continue with Google'),
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  OutlinedButton.icon(
-                    onPressed: _oauthLoading
-                        ? null
-                        : () => _oauthSignIn(
-                            () => ref
-                                .read(authRepositoryProvider)
-                                .signInWithApple(),
-                          ),
-                    icon: const Icon(Icons.apple, size: 20),
-                    label: const Text('Continue with Apple'),
-                  ),
+                  if (Theme.of(context).platform != TargetPlatform.android) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    OutlinedButton.icon(
+                      onPressed: _oauthLoading
+                          ? null
+                          : () => _oauthSignIn(
+                              () => ref
+                                  .read(authRepositoryProvider)
+                                  .signInWithApple(),
+                            ),
+                      icon: const Icon(Icons.apple, size: 20),
+                      label: const Text('Continue with Apple'),
+                    ),
+                  ],
                 ],
               ),
             ),

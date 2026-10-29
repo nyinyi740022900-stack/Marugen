@@ -44,7 +44,7 @@
 //   google-services.json.) — optional; the in-app inbox works without it.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { GoogleAuth } from 'https://esm.sh/google-auth-library@9?target=deno';
+import { pushToRecipients } from '../_shared/push.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -107,56 +107,6 @@ const ADMIN_NEW_ORDER_COPY = {
   body: (id: string) => `New order #${id} just came in — payment received.`,
 };
 
-/// Gets an OAuth access token for the FCM HTTP v1 API from a Firebase
-/// service account, then sends one notification to one device token.
-/// Returns the FCM response status so callers can log/aggregate failures
-/// without this function ever throwing over a delivery problem.
-async function sendPush(
-  serviceAccount: { project_id: string },
-  accessToken: string,
-  token: string,
-  title: string,
-  body: string,
-  data: Record<string, string>,
-  badge: number,
-): Promise<{ ok: boolean; error?: string; unregistered?: boolean }> {
-  const fcmRes = await fetch(
-    `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message: {
-          token,
-          notification: { title, body },
-          data,
-          // Android ignores `apns`; harmless to always include. Sets the
-          // home screen app icon badge count to the recipient's current
-          // unread total (not just +1) so it's correct even if a push
-          // arrives out of order or a previous one was missed — mirrors
-          // AppIconBadge on the client, which does the same from the
-          // in-app inbox whenever the app is foregrounded.
-          apns: { payload: { aps: { badge } } },
-        },
-      }),
-    },
-  );
-  if (!fcmRes.ok) {
-    const text = await fcmRes.text();
-    console.error('[send-order-notification] FCM send failed', fcmRes.status, text);
-    // FCM's HTTP v1 API reports a dead token as UNREGISTERED (uninstalled/
-    // token rotated) — without checking this, a dead token stays in
-    // profiles.fcm_token forever and every future notification keeps
-    // retrying delivery to it for no reason.
-    const isUnregistered = text.includes('UNREGISTERED') || text.includes('NOT_FOUND');
-    return { ok: false, error: text, unregistered: isUnregistered };
-  }
-  return { ok: true };
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -217,13 +167,13 @@ Deno.serve(async (req) => {
 
     const { data: order } = await admin
       .from('orders')
-      .select('id, user_id')
+      .select('id, user_id, order_number')
       .eq('id', order_id)
       .maybeSingle();
     if (!order) {
       return jsonResponse({ skipped: true, reason: 'Order not found' });
     }
-    const orderShort = (order.id as string).slice(0, 8);
+    const orderShort = order.order_number || (order.id as string).slice(0, 8);
 
     // Resolve the audience "targets" for this request — each with its own
     // recipient ids, title and body, and its own inbox `type`. Independent
@@ -325,115 +275,17 @@ Deno.serve(async (req) => {
       return jsonResponse({ inboxWritten: false, pushSkipped: true, reason: 'Already notified (duplicate)' });
     }
 
-    // Push delivery is optional on top of the inbox write above.
-    const serviceAccountJson = Deno.env.get('FCM_SERVICE_ACCOUNT_JSON');
-    if (!serviceAccountJson) {
-      // Not configured yet — expected until a real Firebase project
-      // exists. Not an error: the in-app inbox row above already landed.
-      return jsonResponse({ inboxWritten: !insertError, pushSkipped: true, reason: 'FCM not configured' });
-    }
-
-    const { data: recipients } = await admin
-      .from('profiles')
-      .select('id, fcm_token')
-      .in('id', [...newlyNotifiedIds])
-      .not('fcm_token', 'is', null)
-      .eq('notifications_enabled', true);
-    // Map each newly-notified recipient back to the title/body of the
-    // target that included them, so admins get "New order" and the
-    // customer gets "Order confirmed" even within the same request.
-    const copyByUserId = new Map<string, { title: string; body: string }>();
-    for (const t of nonEmptyTargets) {
-      for (const userId of t.recipientIds) {
-        if (!copyByUserId.has(userId)) copyByUserId.set(userId, { title: t.title, body: t.body });
-      }
-    }
-    const tokenOwners = (recipients ?? [])
-      .filter((p) => p.fcm_token)
-      .map((p) => ({
-        userId: p.id as string,
-        token: p.fcm_token as string,
-        copy: copyByUserId.get(p.id as string)!,
-      }));
-    const tokens = tokenOwners.map((t) => t.token);
-
-    if (tokens.length === 0) {
-      return jsonResponse({
-        inboxWritten: !insertError,
-        pushSkipped: true,
-        reason: 'No device token(s) for this audience',
-      });
-    }
-
-    const serviceAccount = JSON.parse(serviceAccountJson);
-    const auth = new GoogleAuth({
-      credentials: serviceAccount,
-      scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
-    });
-    const client = await auth.getClient();
-    const accessToken = await client.getAccessToken();
-    if (!accessToken.token) {
-      return jsonResponse({
-        inboxWritten: !insertError,
-        pushSent: false,
-        error: 'Could not obtain FCM access token',
-      });
-    }
-
+    // Push only to recipients with a genuinely new inbox row above.
+    const pushRecipients = nonEmptyTargets.flatMap((t) =>
+      t.recipientIds
+        .filter((userId) => newlyNotifiedIds.has(userId))
+        .map((userId) => ({ userId, title: t.title, body: t.body })),
+    );
     const data = { order_id: order.id, ...(status ? { status } : {}), ...(event ? { event } : {}) };
-    // Each recipient's own current unread total, not just "+1" — so the
-    // badge is right even if this recipient had unread notifications
-    // from before, or if two pushes land close together.
-    const unreadCounts = await Promise.all(
-      tokenOwners.map((t) =>
-        admin
-          .from('notifications')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', t.userId)
-          .eq('read', false)
-          .then(({ count }) => ({ userId: t.userId, count: count ?? 0 })),
-      ),
-    );
-    const badgeByUserId = new Map(unreadCounts.map((u) => [u.userId, u.count]));
-    const results = await Promise.all(
-      tokenOwners.map((t) =>
-        sendPush(
-          serviceAccount,
-          accessToken.token!,
-          t.token,
-          t.copy.title,
-          t.copy.body,
-          data,
-          badgeByUserId.get(t.userId) ?? 1,
-        ).then((r) => ({ ...r, userId: t.userId })),
-      ),
-    );
-    const sentCount = results.filter((r) => r.ok).length;
-
-    // Clear any token FCM reported as dead — otherwise it stays in
-    // profiles.fcm_token forever and every future notification keeps
-    // retrying delivery to it for nothing.
-    const deadOwnerIds = results.filter((r) => r.unregistered).map((r) => r.userId);
-    if (deadOwnerIds.length > 0) {
-      const { error: clearError } = await admin
-        .from('profiles')
-        .update({ fcm_token: null })
-        .in('id', deadOwnerIds);
-      if (clearError) {
-        console.error('[send-order-notification] failed to clear dead tokens', clearError);
-      }
-    }
-
-    // Don't fail the caller's request over a push-delivery problem (e.g. a
-    // stale/unregistered token) — the order state change itself already
-    // succeeded, and the inbox row above already landed regardless.
-    return jsonResponse({
-      inboxWritten: !insertError,
-      pushSent: sentCount > 0,
-      sentCount,
-      total: tokens.length,
-      clearedDeadTokens: deadOwnerIds.length,
-    });
+    // Never fail the caller over push delivery: the order change and the
+    // inbox row already succeeded.
+    const push = await pushToRecipients(admin, pushRecipients, data);
+    return jsonResponse({ inboxWritten: !insertError, ...push });
   } catch (err) {
     console.error('[send-order-notification] error', err);
     // Same reasoning as above: never let a notification failure look like

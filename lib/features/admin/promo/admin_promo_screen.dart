@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/promo_code.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
@@ -119,6 +120,10 @@ class AdminPromoScreen extends ConsumerWidget {
     DiscountType type = existing?.discountType ?? DiscountType.percent;
     bool active = existing?.active ?? true;
     DateTime? expiresAt = existing?.expiresAt;
+    final container = ProviderScope.containerOf(context, listen: false);
+    final repository = ref.read(promoRepositoryProvider);
+    bool saving = false;
+    String? saveError;
 
     // Created outside the sheet's own widget tree (this is a plain method,
     // not a State), so nothing disposes them automatically — do it
@@ -158,6 +163,9 @@ class AdminPromoScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: AppSpacing.md),
                 DropdownButtonFormField<DiscountType>(
+                  isExpanded: true,
+                  isDense: false,
+                  itemHeight: 48 * MediaQuery.textScalerOf(ctx).scale(14) / 14,
                   initialValue: type,
                   items: const [
                     DropdownMenuItem(
@@ -166,7 +174,7 @@ class AdminPromoScreen extends ConsumerWidget {
                     ),
                     DropdownMenuItem(
                       value: DiscountType.fixed,
-                      child: Text('Fixed amount off'),
+                      child: Text('Fixed amount off', maxLines: 2),
                     ),
                   ],
                   onChanged: (v) =>
@@ -226,11 +234,13 @@ class AdminPromoScreen extends ConsumerWidget {
                     children: [
                       if (expiresAt != null)
                         IconButton(
+                          tooltip: 'Clear expiry date',
                           icon: const Icon(Icons.clear, size: 18),
                           onPressed: () =>
                               setSheetState(() => expiresAt = null),
                         ),
                       IconButton(
+                        tooltip: 'Choose expiry date',
                         icon: const Icon(
                           Icons.calendar_today_outlined,
                           size: 18,
@@ -239,14 +249,30 @@ class AdminPromoScreen extends ConsumerWidget {
                           final picked = await showDatePicker(
                             context: ctx,
                             initialDate: expiresAt ?? DateTime.now(),
-                            firstDate: DateTime.now().subtract(
-                              const Duration(days: 365),
-                            ),
-                            lastDate: DateTime.now().add(
-                              const Duration(days: 365 * 3),
-                            ),
+                            firstDate:
+                                expiresAt != null &&
+                                    expiresAt!.isBefore(
+                                      DateTime.now().subtract(
+                                        const Duration(days: 365),
+                                      ),
+                                    )
+                                ? expiresAt!
+                                : DateTime.now().subtract(
+                                    const Duration(days: 365),
+                                  ),
+                            lastDate:
+                                expiresAt != null &&
+                                    expiresAt!.isAfter(
+                                      DateTime.now().add(
+                                        const Duration(days: 365 * 3),
+                                      ),
+                                    )
+                                ? expiresAt!
+                                : DateTime.now().add(
+                                    const Duration(days: 365 * 3),
+                                  ),
                           );
-                          if (picked != null) {
+                          if (ctx.mounted && picked != null) {
                             setSheetState(() => expiresAt = picked);
                           }
                         },
@@ -261,49 +287,81 @@ class AdminPromoScreen extends ConsumerWidget {
                   onChanged: (v) => setSheetState(() => active = v),
                 ),
                 const SizedBox(height: AppSpacing.lg),
+                if (saveError != null) ...[
+                  Text(
+                    saveError!,
+                    style: TextStyle(color: AppPalette.of(ctx).error),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
                 ElevatedButton(
-                  onPressed: () async {
-                    final code = codeCtrl.text.trim().toUpperCase();
-                    final value = double.tryParse(valueCtrl.text.trim()) ?? 0;
-                    if (code.isEmpty || value <= 0) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Enter a code and a discount value greater than 0.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-                    // Not exploitable (the checkout total is already
-                    // clamped to the subtotal both client- and
-                    // server-side), but a percent code saved above 100
-                    // reads as an admin data-entry mistake — catch it here.
-                    if (type == DiscountType.percent && value > 100) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Percent discount can\'t be more than 100%.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-                    final maxRedemptionsText = maxRedemptionsCtrl.text.trim();
-                    await ref.read(promoRepositoryProvider).upsert({
-                      'code': code,
-                      'discount_type': type.name,
-                      'discount_value': value,
-                      'active': active,
-                      'expires_at': expiresAt?.toIso8601String(),
-                      'max_redemptions': maxRedemptionsText.isEmpty
-                          ? null
-                          : int.tryParse(maxRedemptionsText),
-                    }, id: existing?.id);
-                    ref.invalidate(adminPromoCodesProvider);
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  },
-                  child: const Text('Save'),
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          final code = codeCtrl.text.trim().toUpperCase();
+                          final value =
+                              double.tryParse(valueCtrl.text.trim()) ?? 0;
+                          if (code.isEmpty || !value.isFinite || value <= 0) {
+                            setSheetState(
+                              () => saveError = 'Enter a code and a discount value greater than 0.',
+                            );
+                            return;
+                          }
+                          // Not exploitable (the checkout total is already
+                          // clamped to the subtotal both client- and
+                          // server-side), but a percent code saved above 100
+                          // reads as an admin data-entry mistake — catch it here.
+                          if (type == DiscountType.percent && value > 100) {
+                            setSheetState(
+                              () => saveError =
+                                  "Percent discount can't be more than 100%.",
+                            );
+                            return;
+                          }
+                          final maxRedemptionsText = maxRedemptionsCtrl.text
+                              .trim();
+                          final limit = int.tryParse(maxRedemptionsText);
+                          if (maxRedemptionsText.isNotEmpty &&
+                              (limit == null || limit <= 0)) {
+                            setSheetState(
+                              () => saveError = 'Enter a whole-number usage limit greater than 0, or leave it blank.',
+                            );
+                            return;
+                          }
+                          setSheetState(() {
+                            saving = true;
+                            saveError = null;
+                          });
+                          try {
+                            await repository.upsert({
+                              'code': code,
+                              'discount_type': type.name,
+                              'discount_value': value,
+                              'active': active,
+                              'expires_at': expiresAt?.toIso8601String(),
+                              'max_redemptions': maxRedemptionsText.isEmpty
+                                  ? null
+                                  : int.tryParse(maxRedemptionsText),
+                            }, id: existing?.id);
+                            container.invalidate(adminPromoCodesProvider);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          } catch (error) {
+                            if (ctx.mounted) {
+                              setSheetState(
+                                () => saveError = friendlyErrorMessage(
+                                  error,
+                                  fallback: 'Could not save the promo code. Please try again.',
+                                  context: 'admin.promo_form',
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (ctx.mounted) {
+                              setSheetState(() => saving = false);
+                            }
+                          }
+                        },
+                  child: Text(saving ? 'Saving…' : 'Save'),
                 ),
               ],
             ),

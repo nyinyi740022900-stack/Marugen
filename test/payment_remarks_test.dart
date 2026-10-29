@@ -33,6 +33,7 @@ void main() {
         ],
         shippingAddress: {'line1': '1 Street'},
         idempotencyKey: 'retry-key',
+        shippingQuoteId: 'server-quote-id',
         customerRemarks: note,
         customerRemarksRevision: 7,
       );
@@ -44,6 +45,9 @@ void main() {
         {'product_id': 'food', 'quantity': 2},
       ]);
       expect(sent!['idempotency_key'], 'retry-key');
+      expect(sent!['shipping_quote_id'], 'server-quote-id');
+      expect(sent!.containsKey('shipping_amount'), isFalse);
+      expect(sent!.containsKey('amount'), isFalse);
       expect(sent!['customer_remarks_revision'], 7);
     });
   }

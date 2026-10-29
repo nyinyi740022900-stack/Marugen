@@ -1,92 +1,98 @@
 import 'package:flutter/material.dart';
-
-import '../../../shared/widgets/content_width.dart';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
-
-import '../../orders/utils/packing_slip_pdf.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/providers/settings_providers.dart';
+import '../../../shared/utils/error_message.dart';
+import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../shared/widgets/content_width.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/shipping_cost_summary.dart';
 import '../../orders/presentation/orders_providers.dart';
+import '../../orders/presentation/order_pull_to_refresh.dart';
+import '../../orders/utils/print_document.dart';
+import '../../orders/utils/packing_slip_pdf.dart';
 import 'delivery_repository.dart';
 import 'easyparcel_providers.dart';
 import 'easyparcel_repository.dart';
-import '../../../shared/utils/error_message.dart';
+import 'pickup_diagnostics_panel.dart';
+import 'parcel_fulfillment_panel.dart';
 
-/// 17TRACK carrier codes for couriers this shop actually uses — passed as
-/// `carrier_code` so 17TRACK doesn't have to guess from the tracking
-/// number's format (which fails for newer/less common numbering schemes,
-/// e.g. TracX Logis's). See https://www.17track.net/en/carriers for the
-/// full list if another courier is needed.
-const _carrierOptions = <int?, String>{
-  null: 'Auto-detect',
-  100190: 'TracX Logis (Qxpress)',
-  100124: 'Ninja Van',
-  100229: 'J&T Express',
-  101004: 'SingPost / Speedpost',
-  100001: 'DHL Express',
-};
-
-/// Delivery pane embedded in the Orders hub (no Scaffold). Every order is
-/// delivered — there is no self-collection/pickup option. Courier tracking
-/// (17TRACK) is optional: live fish and any other order the shop
-/// hand-delivers itself can be marked delivered without a courier or
-/// tracking number.
+/// Every outstanding shipment remains here until delivered, regardless of the
+/// All-tab filter or courier provider.
 class AdminDeliveryPane extends ConsumerWidget {
   const AdminDeliveryPane({super.key});
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ordersAsync = ref.watch(adminOrdersProvider);
-    // Defaults to false (manual-entry-only) while unknown/loading/errored —
-    // EasyParcel is meant to be a convenience on top of the always-working
-    // manual path, never a blocker if the status check itself fails.
-    final easyParcelConnected =
+    final ordersAsync = ref.watch(fulfillmentOrdersProvider);
+    final connected =
         ref.watch(easyParcelConnectedProvider).valueOrNull ?? false;
-
     return ContentWidth(
       maxWidth: 800,
       child: ordersAsync.when(
         data: (orders) {
-          final readyToShip = orders
+          final outstanding = orders
               .where(
-                (o) =>
-                    o.status == OrderStatus.paid ||
-                    o.status == OrderStatus.packing ||
-                    (o.status == OrderStatus.shipped &&
-                        o.trackingProvider == 'easyparcel'),
+                (o) => const {
+                  OrderStatus.paid,
+                  OrderStatus.packing,
+                  OrderStatus.shipped,
+                }.contains(o.status),
               )
               .toList();
-          if (readyToShip.isEmpty) {
-            return const EmptyState(
-              icon: Icons.local_shipping_outlined,
-              title: 'Nothing to fulfil',
-              subtitle: 'No orders are ready for delivery right now.',
-            );
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            itemCount: readyToShip.length,
-            separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-            itemBuilder: (context, i) => _FulfillmentCard(
-              order: readyToShip[i],
-              easyParcelConnected: easyParcelConnected,
-            ),
+          outstanding.sort((a, b) {
+            final attention =
+                (b.needsBookingAttention || b.needsDeliveryReview ? 1 : 0)
+                    .compareTo(
+                      a.needsBookingAttention || a.needsDeliveryReview ? 1 : 0,
+                    );
+            return attention != 0
+                ? attention
+                : a.createdAt.compareTo(b.createdAt);
+          });
+          return OrderPullToRefresh(
+            onRefresh: () async {
+              final container = ProviderScope.containerOf(
+                context,
+                listen: false,
+              );
+              container.invalidate(easyParcelConnectedProvider);
+              await refreshAdminOrdersFromCarrier(container);
+            },
+            child: outstanding.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: const [
+                      SizedBox(height: 80),
+                      EmptyState(
+                        icon: Icons.local_shipping_outlined,
+                        title: 'Nothing to fulfil',
+                        subtitle: 'No outstanding deliveries right now.',
+                      ),
+                    ],
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    itemCount: outstanding.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: AppSpacing.md),
+                    itemBuilder: (_, i) => _FulfillmentCard(
+                      key: ValueKey(outstanding[i].id),
+                      order: outstanding[i],
+                      easyParcelConnected: connected,
+                    ),
+                  ),
           );
         },
-        loading: () => Center(
-          child: CircularProgressIndicator(
-            color: AppPalette.of(context).accent,
-          ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (_, _) => ErrorState(
+          onRetry: () => ref.invalidate(fulfillmentOrdersProvider),
         ),
-        error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
       ),
     );
   }
@@ -96,457 +102,444 @@ class _FulfillmentCard extends ConsumerStatefulWidget {
   final Order order;
   final bool easyParcelConnected;
   const _FulfillmentCard({
+    super.key,
     required this.order,
     required this.easyParcelConnected,
   });
-
   @override
   ConsumerState<_FulfillmentCard> createState() => _FulfillmentCardState();
 }
 
 class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
-  bool _markingDelivered = false;
-
-  // Guards against a double-tap/second call while a booking is in flight —
-  // without it, the button stayed enabled for the whole await below, and a
-  // second tap before the order's qxpressTrackingNo/refreshAdminOrders
-  // updated the UI could fire a second, real (billed) EasyParcel booking
-  // for the same order. The Edge Function itself also now refuses a
-  // second booking (see easyparcel-book-shipment's tracking_registered
-  // claim) — this is the fast, same-request defense in front of that.
-  bool _bookingShipment = false;
-
-  /// Bottom sheet: fetch live rates, let the admin pick a courier, then
-  /// book — mirrors _enterTracking's dialog-then-register shape, but as a
-  /// sheet since the rate list is a longer, scrollable choice.
-  Future<void> _shipWithEasyParcel() async {
-    final selected = await showModalBottomSheet<EasyParcelRate>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheetContext) => _EasyParcelRateSheet(orderId: widget.order.id),
-    );
-    if (selected == null || !mounted) return;
-
-    setState(() => _bookingShipment = true);
+  bool _working = false;
+  bool _sheetOpen = false;
+  bool get _busy => _working || _sheetOpen;
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _working = true);
     try {
-      await EasyParcelRepository().bookShipment(
-        orderId: widget.order.id,
-        serviceId: selected.serviceId,
-        courierId: selected.courierId,
-      );
-      refreshAdminOrders(ref);
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                'Booked with ${selected.courierName} — tracking is automatic',
-              ),
-            ),
-          );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                friendlyErrorMessage(
-                  e,
-                  fallback: 'EasyParcel request failed. Please try again.',
-                  context: 'admin.delivery',
-                ),
-              ),
-            ),
-          );
-      }
-    } finally {
-      if (mounted) setState(() => _bookingShipment = false);
-    }
-  }
-
-  Future<void> _markDeliveredByShop() async {
-    final order = widget.order;
-    // Every major platform (Shopify's "Fulfill order", Amazon Seller
-    // Central's "Confirm shipment", Shopee/Lazada) confirms before a
-    // shipment/delivery action — it immediately notifies the customer and
-    // (0030_order_status_forward_only.sql) can never be reverted to
-    // shipped/packing afterwards, so a stray tap has real consequences.
-    final confirmed = await confirmAction(
-      context,
-      title: 'Mark as delivered?',
-      message:
-          'Order #${order.displayNumber} will be marked "Delivered" and the customer notified. '
-          'Use this only once it has actually been handed to them — this cannot be undone.',
-      confirmLabel: 'Mark Delivered',
-    );
-    if (!confirmed) return;
-
-    setState(() => _markingDelivered = true);
-    try {
-      await ref
-          .read(orderRepositoryProvider)
-          .updateOrderStatus(order.id, OrderStatus.delivered);
-      refreshAdminOrders(ref);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            friendlyErrorMessage(
-              e,
-              fallback: 'Could not update the delivery status.',
-              context: 'admin.delivery',
-            ),
-          ),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _markingDelivered = false);
-    }
-  }
-
-  Future<void> _registerTracking(
-    String trackingNumber,
-    int? carrierCode,
-  ) async {
-    try {
-      await DeliveryRepository().registerTracking(
-        orderId: widget.order.id,
-        trackingNumber: trackingNumber,
-        carrierCode: carrierCode,
-      );
-      refreshAdminOrders(ref);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Registered with 17TRACK — tracking is now automatic',
-            ),
-          ),
-        );
-      }
-    } catch (e) {
+      await action();
+    } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               friendlyErrorMessage(
-                e,
-                fallback: 'Tracking request failed. Please try again.',
+                error,
+                fallback: 'Could not complete this action. Refresh the order and try again.',
                 context: 'admin.delivery',
               ),
             ),
           ),
         );
       }
+    } finally {
+      // Failed requests can still have booked a real shipment. Always fetch truth
+      // again rather than leaving a stale, enabled booking button on screen.
+      if (mounted) {
+        ref.invalidate(fulfillmentOrdersProvider);
+        ref.invalidate(adminOrdersProvider);
+        ref.invalidate(adminOrdersPagedProvider);
+        ref.invalidate(orderByIdProvider(widget.order.id));
+        ref.invalidate(myOrdersProvider);
+        setState(() => _working = false);
+      }
     }
   }
 
-  /// Tracking number + courier picker. Passing the courier explicitly
-  /// avoids 17TRACK's "carrier cannot be detected" failure for numbering
-  /// schemes it doesn't recognise yet (seen with TracX Logis/Qxpress).
-  Future<void> _enterTracking({String? initialNumber}) async {
-    final controller = TextEditingController(text: initialNumber);
-    int? carrierCode;
-    final result = await showDialog<(String, int?)>(
+  Future<void> _shipWithEasyParcel() async {
+    if (_busy) return;
+    // Lock before opening the sheet so other fulfillment actions cannot race it.
+    setState(() => _sheetOpen = true);
+    final selection = await showModalBottomSheet<_ShipmentSelection>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _EasyParcelRateSheet(
+        orderId: widget.order.id,
+        acceptedParcel: widget.order.shippingParcel,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _sheetOpen = false);
+    if (selection == null) return;
+    await _run(
+      () => ref
+          .read(easyParcelRepositoryProvider)
+          .bookShipment(
+            orderId: widget.order.id,
+            serviceId: selection.rate.serviceId,
+            courierId: selection.rate.courierId,
+            parcel: selection.parcel,
+          ),
+    );
+  }
+
+  Future<void> _moveTo(OrderStatus status) async {
+    if (_busy) return;
+    if (status == OrderStatus.delivered) {
+      final confirmed = await confirmAction(
+        context,
+        title: 'Mark as delivered?',
+        message:
+            'Confirm that order #${widget.order.displayNumber} has actually been handed to the recipient. '
+            'The customer will be notified. This cannot be undone.',
+        confirmLabel: 'Mark Delivered',
+      );
+      if (!confirmed || !mounted) return;
+    } else if (status == OrderStatus.shipped) {
+      final confirmed = await confirmAction(
+        context,
+        title: 'Start shop delivery?',
+        message:
+            'Confirm order #${widget.order.displayNumber} has left the shop for delivery. '
+            'The customer will be notified.',
+        confirmLabel: 'Start delivery',
+      );
+      if (!confirmed || !mounted) return;
+    }
+    await _run(
+      () => ref
+          .read(orderRepositoryProvider)
+          .updateOrderStatus(widget.order.id, status),
+    );
+  }
+
+  Future<void> _enterTracking({bool recovery = false}) async {
+    if (_busy) return;
+    final controller = TextEditingController();
+    const int? carrier = null;
+    bool confirmed = false;
+    final form = GlobalKey<FormState>();
+    final tracking = await showDialog<String>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: const Text('Enter tracking number'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<int?>(
-                initialValue: carrierCode,
-                decoration: const InputDecoration(labelText: 'Courier'),
-                items: [
-                  for (final entry in _carrierOptions.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(entry.value),
-                    ),
-                ],
-                onChanged: (v) => setState(() => carrierCode = v),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'e.g. SG1234567890',
+        builder: (ctx, update) => AlertDialog(
+          scrollable: true,
+          title: Text(
+            recovery ? 'Recover existing shipment' : 'Add tracking number',
+          ),
+          content: Form(
+            key: form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  recovery
+                      ? 'Find this order’s existing booking in EasyParcel and copy its tracking number. Do not create another booking.'
+                      : 'Only save tracking after the parcel has been handed to the courier. This marks the order as shipped.',
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                if (!recovery)
+                  const Text('Carrier detected from the tracking number.'),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: controller,
+                  maxLength: 100,
+                  decoration: const InputDecoration(
+                    labelText: 'Tracking number',
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Enter the tracking number.'
+                      : null,
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: confirmed,
+                  title: Text(
+                    recovery
+                        ? 'I checked this is the existing booking for this order.'
+                        : 'The parcel has been handed to the courier.',
+                  ),
+                  onChanged: (value) =>
+                      update(() => confirmed = value ?? false),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(ctx, (controller.text.trim(), carrierCode)),
-              child: const Text('Save'),
+            FilledButton(
+              onPressed: !confirmed
+                  ? null
+                  : () {
+                      if (form.currentState!.validate()) {
+                        Navigator.pop(ctx, controller.text.trim());
+                      }
+                    },
+              child: Text(recovery ? 'Recover shipment' : 'Confirm handover'),
             ),
           ],
         ),
       ),
     );
     controller.dispose();
-    if (result == null || result.$1.isEmpty) return;
-    if (!mounted) return;
-    await _registerTracking(result.$1, result.$2);
-  }
-
-  Future<void> _openLabel() async {
-    final uri = Uri.tryParse(widget.order.easyparcelAwbUrl ?? '');
-    try {
-      if (uri == null ||
-          !['http', 'https'].contains(uri.scheme) ||
-          uri.host.isEmpty ||
-          !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-        throw Exception('Could not open shipping label');
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Could not open shipping label. Please try EasyParcel dashboard.',
+    if (tracking == null || !mounted) return;
+    await _run(
+      () => recovery
+          ? ref
+                .read(easyParcelRepositoryProvider)
+                .reconcileShipment(widget.order.id, tracking)
+          : DeliveryRepository().registerTracking(
+              orderId: widget.order.id,
+              trackingNumber: tracking,
+              carrierCode: carrier,
             ),
-          ),
-        );
-      }
-    }
+    );
   }
 
-  Future<void> _printPackingSlip() async {
-    try {
-      final settings = await ref.read(shopSettingsProvider.future);
-      if (!mounted) return;
-      await printPackingSlip(
-        widget.order,
-        context: context,
-        settings: settings,
-      );
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not print packing slip. Please try again.'),
-          ),
-        );
-      }
-    }
-  }
+  Future<void> _openLabel() => _run(
+    () => previewShippingLabel(
+      context,
+      url: widget.order.easyparcelAwbUrl ?? '',
+      orderNumber: widget.order.displayNumber,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
+    final palette = AppPalette.of(context);
+    final address = order.shippingAddress ?? {};
+    final lines = [
+      address['line1'],
+      address['line2'],
+      address['city'],
+      address['postal_code'],
+    ].whereType<String>().where((s) => s.trim().isNotEmpty).join(', ');
+    final hasTracking = order.qxpressTrackingNo?.isNotEmpty == true;
+    final hasBooking =
+        order.hasParcelPlan ||
+        order.trackingRegistered ||
+        hasTracking ||
+        order.trackingProvider == 'easyparcel';
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppPalette.of(context).surface,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
             'Order #${order.displayNumber}',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
-            DateFormat.yMMMd().format(order.createdAt),
-            style: TextStyle(
-              color: AppPalette.of(context).textMuted,
-              fontSize: 12,
-            ),
+            '${DateFormat.yMMMd().format(order.createdAt)} · ${order.fulfillmentStatusLabel}',
+            style: TextStyle(color: palette.textMuted),
           ),
-          const SizedBox(height: AppSpacing.md),
-          TextButton.icon(
-            onPressed: _printPackingSlip,
+          const SizedBox(height: 12),
+          Text(
+            order.deliveryMethodLabel,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          ShippingCostSummary(order: order, showAllocation: true),
+          if (order.needsDeliveryReview)
+            const Text(
+              'Check the original items and confirm shop delivery. Courier booking is blocked.',
+            ),
+          const SizedBox(height: 8),
+          Text(
+            [
+              address['recipient_name'],
+              address['phone'],
+            ].whereType<String>().where((s) => s.isNotEmpty).join(' · '),
+          ),
+          if (lines.isNotEmpty) Text(lines),
+          if (lines.isEmpty)
+            const Text(
+              'Delivery address missing — open the order before dispatch.',
+            ),
+          const SizedBox(height: 12),
+          for (final item in order.items)
+            Text(
+              '${item.quantity} × ${item.productName}${item.optionLabel == null ? '' : ' · ${item.optionLabel}'}',
+            ),
+          if (order.customerRemarks?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'Delivery requests',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            Text(order.customerRemarks!),
+          ],
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => context.push('/orders/${order.id}', extra: order),
+            icon: const Icon(Icons.open_in_new, size: 18),
+            label: const Text('Open order'),
+          ),
+          if (!order.hasCancellationHold &&
+              (order.hasParcelPlan || order.canSplitIntoParcels))
+            ParcelFulfillmentPanel(
+              order: order,
+              disabled: _busy,
+              onChanged: () {
+                ref.invalidate(fulfillmentOrdersProvider);
+                ref.invalidate(orderByIdProvider(order.id));
+                ref.invalidate(adminOrdersProvider);
+                ref.invalidate(myOrdersProvider);
+              },
+            ),
+          if (!order.hasParcelPlan && order.trackingProvider == 'easyparcel')
+            PickupDiagnosticsPanel(
+              key: ValueKey(
+                '${order.id}-${order.qxpressTrackingNo}-${order.trackingUpdatedAt}',
+              ),
+              order: order,
+              disabled: _busy,
+            ),
+          if (!order.hasParcelPlan &&
+              hasTracking &&
+              order.trackingProvider != 'easyparcel') ...[
+            const Divider(),
+            SelectableText(
+              'Tracking: ${order.qxpressTrackingNo}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            if (order.trackingStatus != null) Text(order.trackingStatus!),
+            if (order.trackingProvider == 'seventeentrack' &&
+                order.trackingStatus == 'Registration pending')
+              OutlinedButton(
+                onPressed: _busy
+                    ? null
+                    : () => _run(
+                        () => DeliveryRepository().registerTracking(
+                          orderId: order.id,
+                          trackingNumber: order.qxpressTrackingNo!,
+                        ),
+                      ),
+                child: const Text('Retry tracking registration'),
+              ),
+            if (order.trackingStatusDetail?.isNotEmpty == true &&
+                !order.trackingStatusDetail!.startsWith('booking_issue:'))
+              Text(order.trackingStatusDetail!),
+            if (order.trackingUpdatedAt != null)
+              Text(
+                'Updated ${DateFormat.yMMMd().add_jm().format(order.trackingUpdatedAt!.toLocal())}',
+                style: TextStyle(color: palette.textMuted),
+              ),
+          ],
+          const SizedBox(height: 12),
+          if (!order.hasParcelPlan &&
+              !order.hasSampleTracking &&
+              order.easyparcelAwbUrl?.isNotEmpty == true) ...[
+            OutlinedButton.icon(
+              onPressed: _busy ? null : _openLabel,
+              icon: const Icon(Icons.description_outlined, size: 18),
+              label: const Text('Print shipping label'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => _run(() async {
+                    final settings = await ref.read(
+                      shopSettingsProvider.future,
+                    );
+                    if (context.mounted) {
+                      await printPackingSlip(
+                        order,
+                        context: context,
+                        settings: settings,
+                      );
+                    }
+                  }),
             icon: const Icon(Icons.print_outlined, size: 18),
             label: const Text('Print Packing Slip'),
-            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
           ),
-          const SizedBox(height: AppSpacing.sm),
-          if (order.trackingProvider == 'easyparcel') ...[
-            Wrap(
-              spacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: order.easyparcelAwbUrl?.isNotEmpty == true
-                      ? _openLabel
-                      : null,
-                  icon: const Icon(Icons.description_outlined),
-                  label: const Text('Open Shipping Label'),
-                ),
-              ],
+          const SizedBox(height: 12),
+          if (order.hasCancellationHold)
+            const Text(
+              'Delivery paused for cancellation. Open the order to review the request and refund status.',
+            )
+          else if (order.needsDeliveryReview && !hasBooking) ...[
+            OutlinedButton(
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      final confirmed = await confirmAction(
+                        context,
+                        title: 'Use shop delivery?',
+                        message:
+                            'The original product category is unavailable. Confirm the shop will hand-deliver '
+                            'this entire order. This does not book a courier.',
+                        confirmLabel: 'Use shop delivery',
+                      );
+                      if (confirmed && mounted) {
+                        await _run(
+                          () => ref
+                              .read(orderRepositoryProvider)
+                              .confirmShopDelivery(order.id),
+                        );
+                      }
+                    },
+              child: const Text('Use shop delivery'),
             ),
-            Text(
-              order.easyparcelAwbUrl?.isNotEmpty == true
-                  ? 'Print the courier label and attach it before pickup.'
-                  : 'Shipping label is not available yet. Check EasyParcel dashboard.',
-              style: const TextStyle(fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-          ],
-          if (order.qxpressTrackingNo != null) ...[
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppPalette.of(context).success.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(AppRadius.sm),
+          ] else if (order.needsBookingAttention &&
+              !order.hasSampleTracking) ...[
+            if (!order.hasSampleTracking)
+              OutlinedButton(
+                onPressed: _busy ? null : () => _enterTracking(recovery: true),
+                child: const Text('Recover existing shipment'),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.local_shipping_outlined,
-                        size: 15,
-                        color: AppPalette.of(context).success,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          'Tracking: ${order.qxpressTrackingNo}',
-                          style: TextStyle(
-                            color: AppPalette.of(context).success,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      if (order.trackingProvider == 'easyparcel')
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppPalette.of(context).success
-                                .withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(AppRadius.pill),
-                          ),
-                          child: Text(
-                            'via EasyParcel',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppPalette.of(context).success,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  if (order.trackingStatus != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      order.trackingStatusDetail ?? order.trackingStatus!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: AppPalette.of(context).textMuted,
-                      ),
-                    ),
-                  ] else if (order.trackingRegistered) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      'Waiting for first carrier update…',
-                      style: TextStyle(
-                        fontSize: 12,
-                        // Was greySoft (#9A9490, ~2.7:1 on white — fails
-                        // WCAG AA) — this is a status an admin needs to
-                        // actually read, not decorative fine print.
-                        color: AppPalette.of(context).textMuted,
-                      ),
-                    ),
-                  ] else if (order.trackingProvider != 'easyparcel') ...[
-                    // Manual/17TRACK path only — an EasyParcel-booked
-                    // shipment with no status yet just hasn't had its
-                    // first webhook update land; there's no "retry" action
-                    // for it (re-typing a tracking number would overwrite
-                    // a real EasyParcel booking with a manual one).
-                    const SizedBox(height: AppSpacing.sm),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _enterTracking(
-                          initialNumber: order.qxpressTrackingNo!,
-                        ),
-                        icon: const Icon(Icons.track_changes, size: 16),
-                        label: const Text('Retry / pick a courier'),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ] else
-            // Stacked full-width, not side-by-side: buttons wrap to 2
-            // lines at this card's width while a Row split them into
-            // visibly mismatched heights. Stacking also reads as intended:
-            // when EasyParcel is connected it's the primary/default path
-            // (ElevatedButton, themed red — the app's actual
-            // primary-button style), manual entry demotes to secondary
-            // (OutlinedButton, matching everything below it), and
-            // hand-delivery stays the last/fallback path underneath.
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (widget.easyParcelConnected) ...[
-                  ElevatedButton.icon(
-                    onPressed: _bookingShipment ? null : _shipWithEasyParcel,
-                    icon: _bookingShipment
-                        ? const SizedBox(
-                            height: 16,
-                            width: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.white,
-                            ),
-                          )
-                        : const Icon(Icons.local_shipping_outlined, size: 17),
-                    label: Text(
-                      _bookingShipment ? 'Booking…' : 'Ship with EasyParcel',
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  TextButton.icon(
-                    onPressed: () => _enterTracking(),
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Add tracking number'),
-                  ),
-                ] else
-                  ElevatedButton.icon(
-                    onPressed: () => _enterTracking(),
-                    icon: const Icon(Icons.local_shipping_outlined, size: 17),
-                    label: const Text('Add tracking number'),
-                  ),
-                const SizedBox(height: AppSpacing.sm),
-                // For orders the shop hand-delivers itself — live fish
-                // especially, which never go through a courier/tracking
-                // API — this closes the order out as delivered directly,
-                // with no tracking number.
-                OutlinedButton(
-                  onPressed: _markingDelivered ? null : _markDeliveredByShop,
-                  child: _markingDelivered
-                      ? const SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Mark as delivered'),
+          ] else if (order.status == OrderStatus.paid && !hasBooking)
+            ElevatedButton(
+              onPressed: _busy ? null : () => _moveTo(OrderStatus.packing),
+              child: const Text('Start packing'),
+            )
+          else if (order.status == OrderStatus.packing && !hasBooking) ...[
+            if (order.canUseCourier) ...[
+              if (widget.easyParcelConnected)
+                ElevatedButton.icon(
+                  onPressed: _busy || lines.isEmpty
+                      ? null
+                      : _shipWithEasyParcel,
+                  icon: const Icon(Icons.local_shipping_outlined),
+                  label: const Text('Ship with EasyParcel'),
                 ),
-              ],
+              OutlinedButton(
+                onPressed: _busy || lines.isEmpty
+                    ? null
+                    : () => _enterTracking(),
+                child: const Text('Add tracking number'),
+              ),
+            ] else
+              ElevatedButton(
+                onPressed: _busy || lines.isEmpty
+                    ? null
+                    : () => _moveTo(OrderStatus.shipped),
+                child: const Text('Start delivery'),
+              ),
+          ] else if (order.status == OrderStatus.shipped &&
+              order.isShopDelivery)
+            ElevatedButton(
+              onPressed: _busy ? null : () => _moveTo(OrderStatus.delivered),
+              child: const Text('Mark as delivered'),
+            )
+          else if (order.status == OrderStatus.shipped &&
+              order.trackingProvider != 'easyparcel' &&
+              !hasTracking)
+            OutlinedButton(
+              onPressed: _busy || !order.canUseCourier
+                  ? null
+                  : () => _enterTracking(),
+              child: const Text('Add tracking number'),
+            ),
+          if (_working)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: LinearProgressIndicator(),
             ),
         ],
       ),
@@ -554,178 +547,251 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
   }
 }
 
-/// Bottom sheet content for _shipWithEasyParcel — fetches rates on open,
-/// lets the admin pick one (price shown so it's an informed choice, not a
-/// black box), and pops the selection back for the caller to book.
-class _EasyParcelRateSheet extends StatefulWidget {
-  final String orderId;
-  const _EasyParcelRateSheet({required this.orderId});
-
-  @override
-  State<_EasyParcelRateSheet> createState() => _EasyParcelRateSheetState();
+class _ShipmentSelection {
+  final EasyParcelRate rate;
+  final ParcelDetails parcel;
+  const _ShipmentSelection(this.rate, this.parcel);
 }
 
-class _EasyParcelRateSheetState extends State<_EasyParcelRateSheet> {
-  late Future<List<EasyParcelRate>> _ratesFuture = _fetchRates();
+class _EasyParcelRateSheet extends ConsumerStatefulWidget {
+  final String orderId;
+  final Map<String, dynamic>? acceptedParcel;
+  const _EasyParcelRateSheet({required this.orderId, this.acceptedParcel});
+  @override
+  ConsumerState<_EasyParcelRateSheet> createState() =>
+      _EasyParcelRateSheetState();
+}
+
+class _EasyParcelRateSheetState extends ConsumerState<_EasyParcelRateSheet> {
+  final _form = GlobalKey<FormState>();
+  final _weight = TextEditingController();
+  final _length = TextEditingController();
+  final _width = TextEditingController();
+  final _height = TextEditingController();
+  DateTime? _date;
+  ParcelDetails? _quotedParcel;
+  Future<List<EasyParcelRate>>? _rates;
   EasyParcelRate? _selected;
 
-  Future<List<EasyParcelRate>> _fetchRates() {
-    // Cheapest first (EasyParcel's own docs recommend this default sort) —
-    // lets the admin book the cheapest option with one tap most of the time.
-    return EasyParcelRepository()
-        .getRates(widget.orderId)
-        .then((rates) => rates..sort((a, b) => a.price.compareTo(b.price)));
+  @override
+  void initState() {
+    super.initState();
+    final parcel = widget.acceptedParcel;
+    if (parcel != null) {
+      _weight.text = parcel['weight_kg']?.toString() ?? '';
+      _length.text = parcel['length_cm']?.toString() ?? '';
+      _width.text = parcel['width_cm']?.toString() ?? '';
+      _height.text = parcel['height_cm']?.toString() ?? '';
+      final date = DateTime.tryParse(
+        parcel['collection_date']?.toString() ?? '',
+      );
+      final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+      if (date != null &&
+          date.isAfter(DateTime(now.year, now.month, now.day))) {
+        _date = date;
+      }
+    }
   }
 
-  void _retry() => setState(() {
+  @override
+  void dispose() {
+    for (final c in [_weight, _length, _width, _height]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _changed() => setState(() {
+    _rates = null;
     _selected = null;
-    _ratesFuture = _fetchRates();
+    _quotedParcel = null;
   });
+  Future<void> _chooseDate() async {
+    final sgNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+    final tomorrow = DateTime(sgNow.year, sgNow.month, sgNow.day + 1);
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _date ?? tomorrow,
+      firstDate: tomorrow,
+      lastDate: tomorrow.add(const Duration(days: 30)),
+    );
+    if (date != null && mounted) {
+      _changed();
+      setState(() => _date = date);
+    }
+  }
+
+  void _getRates() {
+    if (!_form.currentState!.validate() || _date == null) return;
+    final parcel = ParcelDetails(
+      weightKg: double.parse(_weight.text.trim()),
+      lengthCm: double.parse(_length.text.trim()),
+      widthCm: double.parse(_width.text.trim()),
+      heightCm: double.parse(_height.text.trim()),
+      collectionDate: DateFormat('yyyy-MM-dd').format(_date!),
+    );
+    setState(() {
+      _selected = null;
+      _quotedParcel = parcel;
+      _rates = ref
+          .read(easyParcelRepositoryProvider)
+          .getRates(widget.orderId, parcel: parcel)
+          .then((rates) => rates..sort((a, b) => a.price.compareTo(b.price)));
+    });
+  }
+
+  Widget _measurement(TextEditingController controller, String label) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: TextFormField(
+          controller: controller,
+          readOnly:
+              widget.acceptedParcel?[identical(controller, _weight)
+                  ? 'weight_kg'
+                  : identical(controller, _length)
+                  ? 'length_cm'
+                  : identical(controller, _width)
+                  ? 'width_cm'
+                  : 'height_cm'] !=
+              null,
+          decoration: InputDecoration(labelText: label),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          onChanged: (_) => _changed(),
+          validator: (value) {
+            final n = double.tryParse(value?.trim() ?? '');
+            return n == null || !n.isFinite || n <= 0
+                ? 'Enter a number greater than zero.'
+                : null;
+          },
+        ),
+      );
 
   @override
-  Widget build(BuildContext context) {
-    // A long courier list (10+ options is common) must not just overflow
-    // silently past the screen — cap the sheet's height and let only the
-    // list scroll, so the title stays put on top and Book/Cancel stay
-    // reachable at the bottom instead of being pushed off-screen.
-    final maxHeight = MediaQuery.of(context).size.height * 0.85;
-    return SafeArea(
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: maxHeight),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.sm,
-            AppSpacing.lg,
-            AppSpacing.lg,
-          ),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Choose a courier',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                'Parcel and courier',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
               ),
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: 12),
               Flexible(
                 child: SingleChildScrollView(
-                  child: FutureBuilder<List<EasyParcelRate>>(
-                    future: _ratesFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState != ConnectionState.done) {
-                        return Padding(
-                          padding: EdgeInsets.symmetric(
-                            vertical: AppSpacing.xl,
-                          ),
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              color: AppPalette.of(context).accent,
-                            ),
-                          ),
-                        );
-                      }
-                      if (snapshot.hasError) {
-                        return _RateSheetMessage(
-                          icon: Icons.error_outline,
-                          message: 'Could not fetch rates: ${snapshot.error}',
-                          color: AppPalette.of(context).error,
-                          onRetry: _retry,
-                        );
-                      }
-                      final rates = snapshot.data ?? [];
-                      if (rates.isEmpty) {
-                        return _RateSheetMessage(
-                          icon: Icons.local_shipping_outlined,
-                          message:
-                              'No courier rates available for this address.',
-                          color: AppPalette.of(context).textMuted,
-                          onRetry: _retry,
-                        );
-                      }
-                      return RadioGroup<EasyParcelRate>(
-                        groupValue: _selected,
-                        onChanged: (value) => setState(() => _selected = value),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (final rate in rates)
-                              RadioListTile<EasyParcelRate>(
-                                contentPadding: EdgeInsets.zero,
-                                value: rate,
-                                title: Text(rate.courierName),
-                                secondary: Text(
-                                  '${rate.currency ?? 'S\$'} ${rate.price.toStringAsFixed(2)}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                          ],
+                  child: Form(
+                    key: _form,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Item weight comes from checkout. Enter any missing packed dimensions and choose a future pickup date. The service and price must still match the accepted quote.',
                         ),
-                      );
-                    },
+                        const SizedBox(height: 12),
+                        _measurement(_weight, 'Weight (kg)'),
+                        _measurement(_length, 'Length (cm)'),
+                        _measurement(_width, 'Width (cm)'),
+                        _measurement(_height, 'Height (cm)'),
+                        OutlinedButton.icon(
+                          onPressed: _chooseDate,
+                          icon: const Icon(Icons.calendar_today_outlined),
+                          label: Text(
+                            _date == null
+                                ? 'Choose pickup date'
+                                : 'Pickup: ${DateFormat.yMMMd().format(_date!)}',
+                          ),
+                        ),
+                        const Text(
+                          'Pickup date uses Singapore time. Courier availability will be checked when booking.',
+                        ),
+                        OutlinedButton(
+                          onPressed: _getRates,
+                          child: const Text('Get courier rates'),
+                        ),
+                        if (_rates != null)
+                          FutureBuilder<List<EasyParcelRate>>(
+                            future: _rates,
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState !=
+                                  ConnectionState.done) {
+                                return const Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              }
+                              if (snapshot.hasError) {
+                                return Column(
+                                  children: [
+                                    const Text(
+                                      'Could not load courier rates. Check the parcel and address, then retry.',
+                                    ),
+                                    TextButton(
+                                      onPressed: _getRates,
+                                      child: const Text('Retry'),
+                                    ),
+                                  ],
+                                );
+                              }
+                              final rates = snapshot.data ?? [];
+                              if (rates.isEmpty) {
+                                return const Text(
+                                  'No courier is available for this parcel and address.',
+                                );
+                              }
+                              return RadioGroup<EasyParcelRate>(
+                                groupValue: _selected,
+                                onChanged: (rate) =>
+                                    setState(() => _selected = rate),
+                                child: Column(
+                                  children: [
+                                    for (final rate in rates)
+                                      RadioListTile<EasyParcelRate>(
+                                        contentPadding: EdgeInsets.zero,
+                                        value: rate,
+                                        enabled: rate.bookingAvailable,
+                                        title: Text(rate.courierName),
+                                        subtitle: Text(
+                                          '${formatPrice(rate.price)} total delivery${rate.bookingAvailable ? '' : '\n${rate.bookingMessage ?? 'For reference only'}'}',
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: AppSpacing.md),
-              ElevatedButton(
-                onPressed: _selected == null
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _selected == null || _quotedParcel == null
                     ? null
-                    : () => Navigator.of(context).pop(_selected),
+                    : () => Navigator.pop(
+                        context,
+                        _ShipmentSelection(_selected!, _quotedParcel!),
+                      ),
                 child: const Text('Book Shipment'),
               ),
-              const SizedBox(height: AppSpacing.xs),
               TextButton(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () => Navigator.pop(context),
                 child: const Text('Cancel'),
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Shared empty/error state for the rate sheet — always offers a Retry so a
-/// transient failure (or fixing Settings in another tab) doesn't force the
-/// admin to close and reopen the whole sheet.
-class _RateSheetMessage extends StatelessWidget {
-  final IconData icon;
-  final String message;
-  final Color color;
-  final VoidCallback onRetry;
-
-  const _RateSheetMessage({
-    required this.icon,
-    required this.message,
-    required this.color,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: color, fontSize: 13),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('Retry'),
-          ),
-        ],
-      ),
-    );
-  }
+    ),
+  );
 }

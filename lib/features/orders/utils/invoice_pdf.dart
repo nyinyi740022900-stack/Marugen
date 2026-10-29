@@ -5,7 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+
+import 'print_document.dart';
 
 import '../../../shared/models/order.dart';
 import '../../../shared/providers/settings_providers.dart';
@@ -27,17 +28,16 @@ Future<Uint8List> buildInvoicePdf({
   final shopPhone = settings['shop_phone'] as String?;
   final shopAddress = settings['shop_address'] as String?;
   final gstPercent = (settings['gst_percent'] as num?)?.toDouble() ?? 0;
-  final gstIncluded = settings['gst_included_in_price'] as bool? ?? true;
 
   final discount = order.discountAmount ?? 0;
-  final netTotal = order.total;
-  final subtotalBeforeGst = gstIncluded
-      ? netTotal / (1 + gstPercent / 100)
-      : netTotal;
-  final gstAmount = gstIncluded
-      ? netTotal - subtotalBeforeGst
-      : netTotal * gstPercent / 100;
-  final grandTotal = gstIncluded ? netTotal : netTotal + gstAmount;
+  // orders.total is the amount charged by the server, including merchandise
+  // tax and only the buyer's shipping share. Never tax shipping a second time.
+  final buyerShipping = (order.buyerShippingCents ?? 0) / 100;
+  final merchandiseTotal = order.total - buyerShipping;
+  final gstAmount = gstPercent > 0
+      ? merchandiseTotal - merchandiseTotal / (1 + gstPercent / 100)
+      : 0.0;
+  final grandTotal = order.total;
 
   final shipping = order.shippingAddress;
   final dateFmt = DateFormat.yMMMd().add_jm();
@@ -128,7 +128,7 @@ Future<Uint8List> buildInvoicePdf({
                       style: const pw.TextStyle(fontSize: 9.5),
                     ),
                     pw.Text(
-                      'Status: ${orderStatusLabel(order.status).toUpperCase()}',
+                      'Status: ${(order.refundStatusLabel ?? orderStatusLabel(order.status)).toUpperCase()}',
                       style: const pw.TextStyle(fontSize: 9.5),
                     ),
                   ],
@@ -291,21 +291,34 @@ Future<Uint8List> buildInvoicePdf({
                     crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                     children: [
                       _totalRow(
-                        'Subtotal (excl. GST)',
-                        _money(subtotalBeforeGst),
+                        'Items after discount (incl. GST)',
+                        _money(merchandiseTotal),
                       ),
                       if (discount > 0)
                         _totalRow(
                           order.promoCode != null
-                              ? 'Promo discount (${order.promoCode})'
-                              : 'Promo discount',
+                              ? 'Discount included (${order.promoCode})'
+                              : 'Discount included above',
                           '-${_money(discount)}',
                           color: _brandRed,
                         ),
                       _totalRow(
-                        'GST (${gstPercent.toStringAsFixed(0)}%)',
+                        'GST included in items (${gstPercent.toStringAsFixed(0)}%)',
                         _money(gstAmount),
                       ),
+                      if (order.shippingQuoteId != null)
+                        _totalRow(
+                          order.shippingCostPolicy == 'seller_100'
+                              ? 'Delivery (shop covers in full)'
+                              : 'Delivery - buyer share',
+                          _money(buyerShipping),
+                        ),
+                      if (order.shippingCostPolicy == 'shared_50_50' &&
+                          order.sellerShippingCents != null)
+                        _totalRow(
+                          'Delivery covered by shop',
+                          _money(order.sellerShippingCents! / 100),
+                        ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.symmetric(vertical: 6),
                         child: pw.Divider(color: _lightGrey, thickness: 1),
@@ -414,14 +427,16 @@ pw.Widget _totalRow(
   );
 }
 
-/// Opens the native print/share preview (AirPrint on iOS) for [order]'s
-/// invoice — this is what both the admin "Print Invoice" button and the
-/// customer's receipt-share icon call.
+/// Opens the A4 invoice preview with print and share/save actions for both
+/// admin and customer receipt entry points.
 Future<void> shareReceipt(WidgetRef ref, Order order) async {
   final settings = await ref.read(shopSettingsProvider.future);
   final bytes = await buildInvoicePdf(order: order, settings: settings);
-  await Printing.layoutPdf(
-    onLayout: (_) async => bytes,
-    name: 'Invoice-${order.displayNumber}.pdf',
+  if (!ref.context.mounted) return;
+  await previewPdfDocument(
+    ref.context,
+    bytes: bytes,
+    title: 'Invoice preview',
+    filename: 'Invoice-${order.displayNumber}.pdf',
   );
 }

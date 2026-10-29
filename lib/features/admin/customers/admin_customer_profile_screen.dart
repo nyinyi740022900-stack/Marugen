@@ -226,14 +226,16 @@ class _AddressCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
                       address.label,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     if (address.isDefault) ...[
-                      const SizedBox(width: 6),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 6,
@@ -291,30 +293,42 @@ class _OrderHistorySection extends ConsumerWidget {
             borderRadius: BorderRadius.circular(AppRadius.md),
             boxShadow: AppShadows.card,
           ),
-          child: Column(
-            children: [
-              for (var i = 0; i < orders.length; i++) ...[
-                if (i != 0)
-                  const Divider(
-                    height: 1,
-                    indent: AppSpacing.lg,
-                    endIndent: AppSpacing.lg,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (var i = 0; i < orders.length; i++) ...[
+                  if (i != 0)
+                    const Divider(
+                      height: 1,
+                      indent: AppSpacing.lg,
+                      endIndent: AppSpacing.lg,
+                    ),
+                  ListTile(
+                    title: Text('Order #${orders[i].displayNumber}'),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${orderStatusLabel(orders[i].status)} · '
+                          '${DateFormat.yMMMd().format(orders[i].createdAt)}',
+                        ),
+                        Text(
+                          formatPrice(orders[i].total),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                    onTap: () => context.push(
+                      '/orders/${orders[i].id}',
+                      extra: orders[i],
+                    ),
                   ),
-                ListTile(
-                  title: Text('Order #${orders[i].displayNumber}'),
-                  subtitle: Text(
-                    '${orderStatusLabel(orders[i].status)} · '
-                    '${DateFormat.yMMMd().format(orders[i].createdAt)}',
-                  ),
-                  trailing: Text(
-                    formatPrice(orders[i].total),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  onTap: () =>
-                      context.push('/orders/${orders[i].id}', extra: orders[i]),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         );
       },

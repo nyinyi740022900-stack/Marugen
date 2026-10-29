@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 
-/// Static Terms of Service. Placeholder legal text — reasonable generic
-/// boilerplate for a Singapore koi/arowana e-commerce shop, but the shop
-/// owner should have an actual lawyer review it before relying on it.
+/// Customer-facing terms for use of the shop and product orders.
 class TermsScreen extends StatelessWidget {
   const TermsScreen({super.key});
 
@@ -16,14 +14,11 @@ class TermsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: const [
-          _DisclaimerBanner(),
-          SizedBox(height: AppSpacing.lg),
           _Section(
             title: '1. Introduction',
             body:
                 'These Terms of Service ("Terms") govern your use of the Marugen Fish Farm '
-                'app and your purchase of products through it, including live koi and '
-                'arowana, fish food, and aquarium accessories. By creating an account or '
+                'app and your purchase of products through it. By creating an account or '
                 'placing an order, you agree to these Terms.',
           ),
           _Section(
@@ -33,16 +28,15 @@ class TermsScreen extends StatelessWidget {
                 'include Goods and Services Tax (GST). Some products may be marked '
                 '"Contact us for price" and require you to reach out to the shop directly. '
                 'We reserve the right to correct pricing errors and to cancel or refuse an '
-                'order at our discretion, e.g. if a live fish has already been sold.',
+                'order at our discretion, for example when a product is no longer available.',
           ),
           _Section(
-            title: '3. Live Fish Guarantee',
+            title: '3. Product Information & Support',
             body:
-                'Every koi and arowana listed is a unique, single-stock animal. We take '
-                'care to ship healthy fish and package them appropriately for transit. '
-                'Please refer to our FAQ for guidance on our live-arrival guarantee and how '
-                'to report an issue — claims must generally be reported with photo/video '
-                'evidence within a short window of delivery.',
+                'Please check the product description, selected option and quantity before '
+                'ordering. If an item is missing, damaged or different from your order, '
+                'contact the shop with your order number and relevant photos so we can '
+                'review the issue and explain the available next steps.',
           ),
           _Section(
             title: '4. Payment',
@@ -54,9 +48,9 @@ class TermsScreen extends StatelessWidget {
           _Section(
             title: '5. Shipping & Delivery',
             body:
-                'Deliveries within Singapore are arranged via our courier partner. '
-                'Delivery timelines are estimates and may vary due to weather, fish health '
-                'and quarantine considerations, or courier delays.',
+                'Deliveries within Singapore are arranged by the shop or a delivery partner. '
+                'Any delivery fee is shown at checkout before payment. Delivery dates are '
+                'estimates and may vary due to order preparation, weather or courier delays.',
           ),
           _Section(
             title: '6. Cancellations & Refunds',
@@ -92,30 +86,6 @@ class TermsScreen extends StatelessWidget {
                 'option in the app.',
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DisclaimerBanner extends StatelessWidget {
-  const _DisclaimerBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppPalette.of(context).accentSoft,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-      ),
-      child: Text(
-        'This is placeholder legal text for demonstration purposes. Please have a '
-        'qualified lawyer review and finalize these Terms before relying on them.',
-        style: TextStyle(
-          fontSize: 12.5,
-          color: AppPalette.of(context).accent,
-          height: 1.4,
-        ),
       ),
     );
   }

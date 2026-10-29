@@ -246,14 +246,15 @@ void main() {
     final order = Order(
       id: 'order-12345',
       userId: 'customer',
-      status: OrderStatus.paid,
+      status: OrderStatus.packing,
+      fulfillmentMethod: 'courier',
       total: 20,
       createdAt: DateTime(2026, 10, 10),
     );
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          adminOrdersProvider.overrideWith((ref) async => [order]),
+          fulfillmentOrdersProvider.overrideWith((ref) async => [order]),
           easyParcelConnectedProvider.overrideWith((ref) async => true),
         ],
         child: MaterialApp(
@@ -268,7 +269,7 @@ void main() {
       lessThan(tester.getTopLeft(find.text('Print Packing Slip')).dy),
     );
     expect(find.text('Add tracking number'), findsOneWidget);
-    expect(find.text('Mark as delivered'), findsOneWidget);
+    expect(find.text('Mark as delivered'), findsNothing);
     expect(tester.takeException(), isNull);
   });
   testWidgets('tablet empty-state actions remain bounded', (tester) async {

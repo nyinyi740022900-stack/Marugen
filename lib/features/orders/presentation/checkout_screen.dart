@@ -1,5 +1,8 @@
 import 'dart:developer' as developer;
+import 'dart:convert';
 import 'dart:math';
+
+import '../utils/delivery_estimate.dart';
 
 import 'package:flutter/material.dart';
 
@@ -26,8 +29,12 @@ import '../../promo/presentation/promo_providers.dart';
 import '../data/order_repository.dart';
 import '../data/payment_repository.dart';
 import '../utils/payment_confirmation.dart';
+import '../utils/checkout_totals.dart';
 import 'orders_providers.dart';
 import 'purchase_intent.dart';
+import 'shipping_quote_providers.dart';
+import '../domain/shipping_quote.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// A random per-attempt key for `create-payment-intent` — see
 /// CheckoutScreen's `_idempotencyKey` doc. Just needs to be unique per
@@ -260,6 +267,23 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     return true;
   }
 
+  String _shippingKey(List<CartItem> items, Address address) => jsonEncode({
+    'user_id': _checkoutOwner,
+    'items': [
+      for (final item in items)
+        {
+          'product_id': item.product.id,
+          'quantity': item.quantity,
+          if (item.selectedVariant != null)
+            'variant_id': item.selectedVariant!.id,
+          if (item.selectedSize != null) 'size_label': item.selectedSize,
+        },
+    ],
+    'shipping_address': address.toShippingJson(),
+    'all_couriers': true,
+    if (_appliedPromo != null) 'promo_code': _appliedPromo!.code,
+  });
+
   Future<void> _pay({Address? shippingAddress}) async {
     // The Pay button's disabled-while-processing state only takes effect
     // on the next rebuild frame, so a very fast double-tap could otherwise
@@ -282,6 +306,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     }
     final items = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
     if (items.isEmpty) return;
+    final shippingKey = _shippingKey(items, shippingAddress);
+    final quoteAsync = ref.read(checkoutShippingQuoteProvider(shippingKey));
+    final quote = quoteAsync.valueOrNull;
+    if (quote == null ||
+        quoteAsync.isLoading ||
+        quoteAsync.hasError ||
+        quote.isExpired) {
+      setState(
+        () => _error = 'Wait for a current delivery quote before paying.',
+      );
+      return;
+    }
     final remarksError = orderRemarksValidationError(_remarksCtrl.text);
     if (remarksError != null) {
       setState(() => _remarksError = remarksError);
@@ -311,9 +347,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (!_ownsCheckout) return;
       final freshItems = _isBuyNow ? _buyNowItems! : ref.read(cartProvider);
       if (freshItems.isEmpty) return;
+      if (_shippingKey(freshItems, shippingAddress) != shippingKey) {
+        setState(
+          () => _error =
+              'Cart changed. Review shipping and totals before paying.',
+        );
+        return;
+      }
 
       final intent = await PaymentRepository().createPaymentIntent(
         currency: 'sgd',
+        shippingQuoteId: quote.quoteId,
         shippingAddress: shippingAddress.toShippingJson(),
         promoCode: _appliedPromo?.code,
         idempotencyKey: _idempotencyKey,
@@ -334,6 +378,26 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (!mounted || !_ownsCheckout) return;
 
       if (pendingOrderId == null) throw StateError('Payment order missing');
+      final settings = ref.read(shopSettingsProvider).requireValue;
+      final subtotal = freshItems.fold<double>(
+        0,
+        (sum, item) => sum + item.subtotal,
+      );
+      final totals = checkoutTotals(
+        subtotal: subtotal,
+        discount: _appliedPromo?.discountFor(subtotal) ?? 0,
+        gstPercent: (settings['gst_percent'] as num?)?.toDouble() ?? 0,
+        gstIncluded: settings['gst_included_in_price'] as bool? ?? true,
+      );
+      final expectedCents = totals.payableCents(quote.buyerShippingCents);
+      if (intent['paymentStatus'] == null &&
+          (intent['amountCents'] != expectedCents ||
+              intent['currency']?.toString().toLowerCase() != 'sgd')) {
+        throw StateError(
+          'Checkout total changed. Review your order before paying.',
+        );
+      }
+
       await presentPendingPayment(
         intent: intent,
         ownsCheckout: () => _ownsCheckout,
@@ -425,6 +489,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           );
         }
       }
+      if (_ownsCheckout && e.error.code == FailureCode.Canceled) {
+        ref.invalidate(checkoutShippingQuoteProvider(shippingKey));
+      }
       if (mounted) {
         setState(
           () => _error = e.error.code == FailureCode.Canceled
@@ -433,10 +500,19 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         );
       }
     } catch (e) {
+      if (_ownsCheckout) {
+        ref.invalidate(checkoutShippingQuoteProvider(shippingKey));
+      }
       developer.log('Checkout failed', name: 'CheckoutScreen', error: e);
       if (mounted) {
         setState(
-          () => _error = 'We couldn’t complete checkout. Check your connection and try again. If payment was taken, check My Orders before retrying.',
+          () => _error = e is StateError
+              ? e.message.toString()
+              : friendlyErrorMessage(
+                  e,
+                  fallback: 'We couldn’t complete checkout. Check your connection and try again. If payment was taken, check My Orders before retrying.',
+                  context: 'checkout.payment',
+                ),
         );
       }
     } finally {
@@ -524,6 +600,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   @override
   Widget build(BuildContext context) {
     final ownerValid = ref.watch(currentUserIdProvider) == _checkoutOwner;
+    final compactSummary =
+        MediaQuery.sizeOf(context).width < 500 &&
+        MediaQuery.textScalerOf(context).scale(14) > 20;
     final items = !ownerValid
         ? <CartItem>[]
         : _isBuyNow
@@ -532,18 +611,48 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final subtotal = items.fold<double>(0, (sum, i) => sum + i.subtotal);
     final addressesAsync = ref.watch(myAddressesProvider);
     final settingsAsync = ref.watch(shopSettingsProvider);
-    final totalsReady =
+    final settingsReady =
         settingsAsync.hasValue &&
         !settingsAsync.isLoading &&
         !settingsAsync.hasError;
-    final settings = totalsReady ? settingsAsync.requireValue : null;
-    final net = subtotal - (_appliedPromo?.discountFor(subtotal) ?? 0);
-    final payable = settings == null
+    final settings = settingsReady ? settingsAsync.requireValue : null;
+    final addresses = addressesAsync.valueOrNull ?? <Address>[];
+    final selectedId = _resolveSelectedId(addresses);
+    final selected = addresses.where(
+      (address) => address.id == selectedId && address.userId == _checkoutOwner,
+    );
+    final quoteKey =
+        ownerValid &&
+            settingsReady &&
+            items.isNotEmpty &&
+            selected.isNotEmpty &&
+            !addressesAsync.isLoading &&
+            !addressesAsync.hasError
+        ? _shippingKey(items, selected.first)
+        : null;
+    final shippingAsync = quoteKey == null
         ? null
-        : (settings['gst_included_in_price'] as bool? ?? true)
-        ? net
-        : net *
-              (1 + ((settings['gst_percent'] as num?)?.toDouble() ?? 0) / 100);
+        : ref.watch(checkoutShippingQuoteProvider(quoteKey));
+    final quote = shippingAsync?.valueOrNull;
+    final shippingReady =
+        quote != null &&
+        shippingAsync!.hasValue &&
+        !shippingAsync.isLoading &&
+        !shippingAsync.hasError &&
+        !quote.isExpired;
+    final shippingFailed = shippingAsync?.hasError ?? false;
+    final totalsReady = settingsReady && shippingReady;
+    final totals = settings == null
+        ? null
+        : checkoutTotals(
+            subtotal: subtotal,
+            discount: _appliedPromo?.discountFor(subtotal) ?? 0,
+            gstPercent: (settings['gst_percent'] as num?)?.toDouble() ?? 0,
+            gstIncluded: settings['gst_included_in_price'] as bool? ?? true,
+          );
+    final payable = totalsReady
+        ? totals!.payableCents(quote.buyerShippingCents) / 100
+        : null;
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
@@ -671,6 +780,27 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.lg),
+                      _DeliveryPromise(
+                        shopDelivery: items.any(
+                          (item) => item.product.isLiveFish,
+                        ),
+                        settings: settings,
+                        shippingReady: shippingReady,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      if (quoteKey != null && shippingAsync != null)
+                        shippingAsync.when(
+                          data: (_) => const SizedBox.shrink(),
+                          loading: () =>
+                              const Text('Calculating SGD delivery cost…'),
+                          error: (error, _) => _InlineRetryError(
+                            message: 'We couldn’t get a delivery price. Retry or contact the shop.',
+                            onRetry: () => ref.invalidate(
+                              checkoutShippingQuoteProvider(quoteKey),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: AppSpacing.lg),
                       Text(
                         'ORDER SUMMARY',
                         style: TextStyle(
@@ -694,35 +824,49 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                               ListTile(
                                 title: Text(
                                   item.product.name,
-                                  maxLines: 1,
+                                  maxLines: compactSummary ? 3 : 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                     fontSize: 14,
                                   ),
                                 ),
-                                subtitle: Text(
-                                  item.optionLabel != null
-                                      ? '${item.optionLabel} · Qty ${item.quantity}'
-                                      : 'Qty ${item.quantity}',
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    color: AppPalette.of(context).textMuted,
-                                  ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.optionLabel != null
+                                          ? '${item.optionLabel} · Qty ${item.quantity}'
+                                          : 'Qty ${item.quantity}',
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: AppPalette.of(context).textMuted,
+                                      ),
+                                    ),
+                                    if (compactSummary)
+                                      Text(
+                                        formatPrice(item.subtotal),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      formatPrice(item.subtotal),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14,
+                                    if (!compactSummary)
+                                      Text(
+                                        formatPrice(item.subtotal),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 14,
+                                        ),
                                       ),
-                                    ),
                                     IconButton(
                                       tooltip: 'Remove',
-                                      visualDensity: VisualDensity.compact,
+                                      visualDensity: VisualDensity.standard,
                                       icon: Icon(
                                         Icons.close,
                                         size: 18,
@@ -860,8 +1004,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                     ),
                                   ),
                                   const SizedBox(width: AppSpacing.sm),
-                                  SizedBox(
-                                    height: 52,
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      minHeight: 52,
+                                    ),
                                     child: OutlinedButton(
                                       onPressed: _promoLoading || _processing
                                           ? null
@@ -889,27 +1035,26 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           final gstIncluded =
                               settings['gst_included_in_price'] as bool? ??
                               true;
-                          final discountAmount =
-                              _appliedPromo?.discountFor(subtotal) ?? 0;
-                          final netSubtotal = subtotal - discountAmount;
-                          final double gstAmount;
-                          final double payableTotal;
-                          if (gstIncluded) {
-                            gstAmount =
-                                netSubtotal -
-                                (netSubtotal / (1 + gstPercent / 100));
-                            payableTotal = netSubtotal;
-                          } else {
-                            gstAmount = netSubtotal * gstPercent / 100;
-                            payableTotal = netSubtotal + gstAmount;
-                          }
+                          final amount = checkoutTotals(
+                            subtotal: subtotal,
+                            discount: _appliedPromo?.discountFor(subtotal) ?? 0,
+                            gstPercent: gstPercent,
+                            gstIncluded: gstIncluded,
+                          );
                           return _TotalsCard(
                             subtotal: subtotal,
-                            discountAmount: discountAmount,
+                            discountAmount: amount.discountCents / 100,
                             gstPercent: gstPercent,
-                            gstAmount: gstAmount,
+                            gstAmount: amount.gstCents / 100,
                             gstIncluded: gstIncluded,
-                            payableTotal: payableTotal,
+                            payableTotal: shippingReady
+                                ? amount.payableCents(
+                                        quote.buyerShippingCents,
+                                      ) /
+                                      100
+                                : null,
+                            shippingQuote: shippingReady ? quote : null,
+                            shippingFailed: shippingFailed,
                           );
                         },
                         loading: () => const Padding(
@@ -944,6 +1089,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 const SizedBox(height: AppSpacing.lg),
                 _PayButton(
                   processing: _processing,
+                  shippingFailed: shippingFailed,
+                  onRetryShipping: quoteKey == null
+                      ? null
+                      : () => ref.invalidate(
+                          checkoutShippingQuoteProvider(quoteKey),
+                        ),
                   totalsReady: totalsReady,
                   promoLoading: _promoLoading,
                   payable: payable,
@@ -1000,6 +1151,8 @@ class _InlineRetryError extends StatelessWidget {
 }
 
 class _PayButton extends StatelessWidget {
+  final bool shippingFailed;
+  final VoidCallback? onRetryShipping;
   final bool remarksValid;
   final bool processing;
   final bool hasItems;
@@ -1011,6 +1164,8 @@ class _PayButton extends StatelessWidget {
   final void Function(Address) onPayDelivery;
 
   const _PayButton({
+    required this.shippingFailed,
+    this.onRetryShipping,
     required this.processing,
     required this.hasItems,
     required this.remarksValid,
@@ -1039,7 +1194,15 @@ class _PayButton extends StatelessWidget {
               processing: processing,
             );
         return ElevatedButton(
-          onPressed: canPay ? () => onPayDelivery(selectedAddress!) : null,
+          onPressed:
+              shippingFailed &&
+                  !processing &&
+                  hasItems &&
+                  selectedAddress != null
+              ? onRetryShipping
+              : canPay
+              ? () => onPayDelivery(selectedAddress!)
+              : null,
           child: processing
               ? const SizedBox(
                   height: 18,
@@ -1054,6 +1217,8 @@ class _PayButton extends StatelessWidget {
                       ? 'No items to check out'
                       : !remarksValid
                       ? 'Review your order requests'
+                      : shippingFailed
+                      ? 'Retry delivery'
                       : !totalsReady
                       ? 'Waiting for totals'
                       : promoLoading
@@ -1078,7 +1243,9 @@ class _TotalsCard extends StatelessWidget {
   final double gstPercent;
   final double gstAmount;
   final bool gstIncluded;
-  final double payableTotal;
+  final double? payableTotal;
+  final ShippingQuote? shippingQuote;
+  final bool shippingFailed;
 
   const _TotalsCard({
     required this.subtotal,
@@ -1087,6 +1254,8 @@ class _TotalsCard extends StatelessWidget {
     required this.gstAmount,
     required this.gstIncluded,
     required this.payableTotal,
+    this.shippingQuote,
+    this.shippingFailed = false,
   });
 
   @override
@@ -1101,6 +1270,17 @@ class _TotalsCard extends StatelessWidget {
       child: Column(
         children: [
           _SummaryLine(label: 'Subtotal', amount: formatPrice(subtotal)),
+          const SizedBox(height: 6),
+          _SummaryLine(
+            label: 'Delivery',
+            amount: shippingFailed
+                ? 'Unavailable'
+                : shippingQuote == null
+                ? 'Calculating…'
+                : shippingQuote!.isShopDelivery
+                ? 'Free'
+                : formatPrice(shippingQuote!.buyerShippingCents / 100),
+          ),
           if (discountAmount > 0) ...[
             const SizedBox(height: 6),
             _SummaryLine(
@@ -1117,7 +1297,11 @@ class _TotalsCard extends StatelessWidget {
           const Divider(height: AppSpacing.lg),
           _SummaryLine(
             label: gstIncluded ? 'Total (incl. GST)' : 'Total',
-            amount: formatPrice(payableTotal),
+            amount: shippingFailed
+                ? 'Delivery unavailable'
+                : payableTotal == null
+                ? 'Waiting for shipping'
+                : formatPrice(payableTotal!),
             isTotal: true,
           ),
         ],
@@ -1175,6 +1359,57 @@ class _SummaryLine extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// The customer sees timing and the payable fee; allocation stays server-side.
+class _DeliveryPromise extends StatelessWidget {
+  final bool shopDelivery;
+  final bool shippingReady;
+  final Map<String, dynamic>? settings;
+  const _DeliveryPromise({
+    required this.shopDelivery,
+    required this.settings,
+    required this.shippingReady,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final min = (settings?['delivery_lead_days_min'] as num?)?.toInt() ?? 2;
+    final max = (settings?['delivery_lead_days_max'] as num?)?.toInt() ?? 5;
+    final range = settings == null
+        ? null
+        : deliveryArrivalRange(DateTime.now(), min, max);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'DELIVERY',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 12,
+            letterSpacing: 0.8,
+            color: AppPalette.of(context).textMuted,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (shopDelivery) ...[
+          const Text(
+            'Shop delivery',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const Text(
+            'Free delivery. We’ll contact you to arrange the delivery time.',
+          ),
+          const Text(
+            'Live fish and other items in this order arrive together.',
+          ),
+        ] else if (shippingReady && range != null)
+          Text(
+            'Estimated arrival: $range',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+      ],
     );
   }
 }

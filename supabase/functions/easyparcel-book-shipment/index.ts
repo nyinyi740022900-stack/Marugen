@@ -1,324 +1,171 @@
-// Supabase Edge Function: easyparcel-book-shipment
-//
-// Admin-only. Given an order_id and the service_id/courier_id the admin
-// picked from easyparcel-get-rates, books the shipment with EasyParcel,
-// then writes the returned tracking number/AWB onto the order — mirroring
-// exactly what track-register does for the manual/17TRACK path, so the
-// existing tracking UI (admin_delivery_screen.dart, order_detail_screen.dart)
-// needs no changes: tracking_provider is the only new signal.
-//
-// Field names below follow https://easyparcel.github.io/OpenAPI/
-// ("Submit Orders") as fetched during planning — re-verify against a real
-// sandbox response if EasyParcel returns a 4xx here.
-//
-// Deploy:  supabase functions deploy easyparcel-book-shipment
-// Secrets: EASYPARCEL_CLIENT_ID / EASYPARCEL_CLIENT_SECRET (already set)
-
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { getEasyParcelAccessToken, EasyParcelNotConnectedError } from '../_shared/easyparcel_token.ts';
-
-const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-const anonKey = Deno.env.get('SB_ANON_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-const serviceRoleKey =
-  Deno.env.get('SB_SERVICE_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-function jsonError(message: string, status: number) {
-  return new Response(JSON.stringify({ error: message }), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
-// Best-effort push, same pattern as track-register's callers — this
-// function itself doesn't notify (track-register doesn't either; the
-// customer sees the status via the order timeline). Kept for parity if a
-// future "shipment booked" notification is wanted.
-async function notifyOrder(orderId: string, payload: { status?: string; event?: string }) {
-  try {
-    await fetch(`${supabaseUrl}/functions/v1/send-order-notification`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${serviceRoleKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ order_id: orderId, ...payload }),
-    });
-  } catch (err) {
-    console.error('[easyparcel-book-shipment] notifyOrder failed', err);
-  }
-}
-
+import {
+  bookingFailureCode,
+  BookingRejectedError,
+} from "../_shared/pickup_diagnostics.ts";
+// Booking reserves a label. Only verified carrier collection advances shipped.
+import {
+  bookingParcel,
+  bookingQuoteError,
+} from "../_shared/shipping_finance.ts";
+import { fetchRates, paidFx } from "../_shared/shipping_api.ts";
+import {
+  courierEligibilityError,
+  runBooking,
+  validateParcel,
+  validateSingaporeAddress,
+} from "../_shared/delivery.ts";
+import {
+  authenticated,
+  claimShipment,
+  corsHeaders,
+  DeliveryError,
+  failure,
+  json,
+  loadOrder,
+  loadSender,
+  saveBooking,
+} from "../_shared/delivery_api.ts";
+import {
+  EasyParcelNotConnectedError,
+  getEasyParcelAccessToken,
+} from "../_shared/easyparcel_token.ts";
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
   try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader) return jsonError('Missing Authorization header', 401);
-
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const {
-      data: { user },
-      error: userError,
-    } = await userClient.auth.getUser();
-    if (userError || !user) return jsonError('Unauthorized', 401);
-
-    const admin = createClient(supabaseUrl, serviceRoleKey);
-    const { data: profile } = await admin
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (!profile || (profile.role !== 'staff' && profile.role !== 'owner')) {
-      return jsonError('Admin access required', 403);
+    const { admin } = await authenticated(req);
+    const { order_id, service_id, parcel: input } = await req.json();
+    if (!service_id || !["string", "number"].includes(typeof service_id)) {
+      throw new DeliveryError("service_id is required");
     }
-
-    const { order_id, service_id, courier_id } = await req.json();
-    if (!order_id || !service_id) {
-      return jsonError('order_id and service_id are required', 400);
-    }
-
-    const { data: order } = await admin
-      .from('orders')
-      .select('id, status, total, items:order_items(*), shipping_address, tracking_registered, tracking_provider, qxpress_tracking_no')
-      .eq('id', order_id)
-      .maybeSingle();
-    if (!order) return jsonError('Order not found', 404);
-    if (order.tracking_registered) {
-      // Guards a double-tap/retry from booking (and paying for) a second
-      // real shipment — without this, two calls for the same order_id both
-      // pass every check below independently and both hit EasyParcel's
-      // real, billed booking API.
-      return jsonError(
-        order.tracking_provider === 'easyparcel'
-          ? `This order already has an EasyParcel shipment booked (tracking: ${order.qxpress_tracking_no}).`
-          : 'This order already has a tracking number registered.',
+    const requestedParcel = input ? validateParcel(input) : null;
+    const order = await loadOrder(admin, order_id);
+    const eligibility = courierEligibilityError(order);
+    if (eligibility) throw new DeliveryError(eligibility, 409);
+    if (!order.shipping_parcel) {
+      throw new DeliveryError(
+        "Legacy order has no paid quote. Arrange seller-paid delivery outside this booking flow",
         409,
       );
     }
-    const shipping = order.shipping_address as Record<string, unknown> | null;
-    if (!shipping) return jsonError('Order has no shipping address', 400);
-
-    const { data: settings } = await admin
-      .from('settings')
-      .select(
-        'shop_name, shop_phone, shop_address, shop_postcode, shop_city, shop_state, shop_country, default_parcel_weight_kg',
-      )
-      .eq('id', 1)
-      .maybeSingle();
-    if (!settings?.shop_postcode) {
-      return jsonError('Sender postcode is not set — fill it in under Settings first', 400);
-    }
-
-    let accessToken: string;
-    try {
-      accessToken = await getEasyParcelAccessToken(admin);
-    } catch (err) {
-      if (err instanceof EasyParcelNotConnectedError) return jsonError(err.message, 409);
-      throw err;
-    }
-
-    // Per the live docs (https://easyparcel.github.io/OpenAPI/ — "Submit
-    // Orders"), the endpoint is shipment/submit_orders (not
-    // shipment/submit), and each shipment item needs collection_date,
-    // weight/height/length/width, a non-empty item[] array, and full
-    // sender/receiver objects (name/phone_number_country_code/phone_number/
-    // address_1/postcode/city/subdivision_code/country_code) — a much
-    // richer shape than the flat {sender,receiver,parcel} this used to
-    // send, which is why booking would have failed the same way the
-    // quotation call did before that was fixed.
-    const collectionDate = new Date(Date.now() + 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
-    const weight = settings.default_parcel_weight_kg ?? 1;
-
-    // Atomically claim the order right before the real (billed) booking
-    // call — the `tracking_registered` check above is only a first-pass
-    // guard (two near-simultaneous requests could both pass it before
-    // either writes); this conditional update is what actually closes that
-    // window, since only one concurrent request can match
-    // `tracking_registered = false` and flip it. If the booking call below
-    // fails, the claim is released in the catch block so the admin can
-    // retry.
-    const { data: claimed } = await admin
-      .from('orders')
-      .update({ tracking_registered: true, tracking_provider: 'easyparcel' })
-      .eq('id', order_id)
-      .eq('tracking_registered', false)
-      .select('id')
-      .maybeSingle();
-    if (!claimed) {
-      return jsonError('This order is already being booked — please refresh.', 409);
-    }
-
-    const submitRes = await fetch(
-      'https://api.easyparcel.com/open_api/2026-06/shipment/submit_orders',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          shipment: [
-            {
-              reference: order_id,
-              service_id,
-              collection_date: collectionDate,
-              weight,
-              height: 5,
-              length: 5,
-              width: 5,
-              item: [
-                {
-                  content: (order.items ?? []).map((item: { product_name: string; quantity: number; variant_label?: string; size_label?: string }) =>
-                    `${[item.product_name, item.variant_label, item.size_label].filter(Boolean).join(' / ')} x${item.quantity}`
-                  ).join('; ') || `Order ${order_id}`,
-                  weight,
-                  height: 5,
-                  length: 5,
-                  width: 5,
-                  currency_code: 'SGD',
-                  value: order.total ?? 0,
-                  quantity: 1,
-                },
-              ],
-              sender: {
-                name: settings.shop_name,
-                phone_number_country_code: 'SG',
-                phone_number: settings.shop_phone ?? '',
-                address_1: settings.shop_address ?? '',
-                postcode: settings.shop_postcode,
-                city: settings.shop_city ?? '',
-                subdivision_code: settings.shop_state ?? '',
-                country_code: settings.shop_country ?? 'SG',
-              },
-              receiver: {
-                name: shipping.recipient_name,
-                phone_number_country_code: 'SG',
-                phone_number: shipping.phone,
-                address_1: shipping.line1,
-                address_2: shipping.line2 ?? '',
-                postcode: shipping.postal_code,
-                city: shipping.city ?? '',
-                subdivision_code: '',
-                country_code: 'SG',
-              },
+    const parcel = bookingParcel(order.shipping_parcel, requestedParcel);
+    const rates = await fetchRates(
+      admin,
+      order.shipping_address,
+      parcel,
+      paidFx(order),
+      true,
+    );
+    const rate = rates.find((r) => r.service_id === String(service_id));
+    const quoteError = bookingQuoteError(
+      order,
+      service_id,
+      requestedParcel ?? parcel,
+      rate,
+    );
+    if (quoteError) throw new DeliveryError(quoteError, 409);
+    const shipping = validateSingaporeAddress(order.shipping_address);
+    const sender = await loadSender(admin);
+    const token = await getEasyParcelAccessToken(admin);
+    const result = await runBooking({
+      claim: () => claimShipment(admin, order.id, "easyparcel"),
+      submit: async () => {
+        const dimensions = {
+          weight: parcel.weight_kg,
+          length: parcel.length_cm,
+          width: parcel.width_cm,
+          height: parcel.height_cm,
+        };
+        const response = await fetch(
+          "https://api.easyparcel.com/open_api/2026-06/shipment/submit_orders",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
             },
-          ],
-        }),
+            body: JSON.stringify({
+              shipment: [{
+                reference: order.id,
+                auto_apply_coupon: false,
+                service_id,
+                collection_date: parcel.collection_date,
+                ...dimensions,
+                item: [{
+                  content: (order.items ?? []).map((
+                    i: Record<string, unknown>,
+                  ) =>
+                    `${
+                      [i.product_name, i.variant_label, i.size_label].filter(
+                        Boolean,
+                      ).join(" / ")
+                    } x${i.quantity}`
+                  ).join("; "),
+                  ...dimensions,
+                  currency_code: "SGD",
+                  value: order.total,
+                  quantity: 1,
+                }],
+                sender,
+                receiver: {
+                  name: shipping.recipient_name,
+                  phone_number_country_code: "SG",
+                  phone_number: shipping.phone,
+                  address_1: shipping.line1,
+                  address_2: shipping.line2,
+                  postcode: shipping.postal_code,
+                  city: shipping.city,
+                  subdivision_code: "",
+                  country_code: "SG",
+                },
+              }],
+            }),
+          },
+        );
+        const body = await response.json();
+        const shipment = body?.data?.[0]?.shipments?.[0];
+        if (
+          !response.ok || (body.status_code && body.status_code !== 200) ||
+          shipment?.status !== "success"
+        ) {
+          throw new BookingRejectedError(bookingFailureCode(body));
+        }
+        // A shipment number is not an AWB: never substitute it for tracking.
+        return {
+          trackingNumber: shipment.awb_number || null,
+          shipmentId: shipment.shipment_number || null,
+          awbUrl: shipment.awb_url || null,
+        };
       },
-    );
-    // Releases the claim taken above so a failed booking attempt doesn't
-    // permanently lock the order out of being retried (manually or via
-    // EasyParcel again) even though no real shipment was ever created.
-    const releaseClaim = () =>
-      admin
-        .from('orders')
-        .update({ tracking_registered: false, tracking_provider: null })
-        .eq('id', order_id);
-
-    const submitData = await submitRes.json();
-    // EasyParcel encodes success/failure in the body's own status_code
-    // (HTTP status alone can be 200 with an error message inside) — see
-    // easyparcel-get-rates for the same gotcha found while testing.
-    if (!submitRes.ok || (submitData?.status_code && submitData.status_code !== 200)) {
-      console.error('[easyparcel-book-shipment] submit failed', submitRes.status, JSON.stringify(submitData));
-      await releaseClaim();
-      return jsonError(
-        submitData?.message
-            ? `EasyParcel: ${submitData.message}`
-            : `Could not book EasyParcel shipment (${submitRes.status})`,
-        502,
-      );
+      persist: (shipment) => saveBooking(admin, order.id, shipment),
+      attention: (shipment, issue) =>
+        saveBooking(
+          admin,
+          order.id,
+          shipment ?? { trackingNumber: null, shipmentId: null, awbUrl: null },
+          true,
+          issue,
+        ),
+    });
+    if (!result.ok) {
+      return json({
+        error: result.needsAttention
+          ? "Booking needs attention. Check EasyParcel and reconcile this existing shipment; do not book another shipment."
+          : "Order is no longer eligible or already has a booking claim.",
+        needs_attention: result.needsAttention ?? false,
+        shipment_id: result.shipment?.shipmentId ?? null,
+      }, result.needsAttention ? 502 : 409);
     }
-    const orderResult = submitData?.data?.[0];
-    const shipmentResult = orderResult?.shipments?.[0];
-    if (!shipmentResult || shipmentResult.status !== 'success') {
-      console.error('[easyparcel-book-shipment] shipment not successful', JSON.stringify(submitData));
-      // shipmentResult.errors is an array of arrays of {message, code, data}
-      // — e.g. [[{"message":"Insufficient Credit Balance", ...}]] — not a
-      // flat remark/reason field.
-      const errorMessage = shipmentResult?.errors
-        ?.flat()
-        ?.map((e: { message?: string }) => e?.message)
-        .filter(Boolean)
-        .join('; ');
-      await releaseClaim();
-      return jsonError(
-        `EasyParcel: ${errorMessage || 'shipment could not be booked'}`,
-        502,
-      );
+    return json({
+      ok: true,
+      tracking_number: result.shipment?.trackingNumber,
+      awb_url: result.shipment?.awbUrl ?? null,
+    });
+  } catch (error) {
+    if (error instanceof EasyParcelNotConnectedError) {
+      return json({ error: error.message }, 409);
     }
-    const trackingNumber: string | undefined =
-      shipmentResult?.awb_number ?? shipmentResult?.shipment_number;
-    const shipmentId: string | undefined =
-      shipmentResult?.shipment_number ?? orderResult?.order_details?.order_number;
-    const awbUrl: string | undefined = shipmentResult?.awb_url;
-
-    if (!trackingNumber) {
-      console.error('[easyparcel-book-shipment] no tracking number in response', submitData);
-      // Deliberately NOT released — EasyParcel did create a real shipment
-      // (shipmentResult.status was "success") even though it withheld a
-      // tracking number, so retrying would book a second, duplicate one.
-      // shipmentId/awbUrl are saved below so the booking isn't lost.
-      await admin
-        .from('orders')
-        .update({ easyparcel_shipment_id: shipmentId ?? null, easyparcel_awb_url: awbUrl ?? null })
-        .eq('id', order_id);
-      return jsonError(
-        'EasyParcel booked the shipment but did not return a tracking number yet — check back shortly or contact EasyParcel support.',
-        502,
-      );
-    }
-
-    // Mirrors track-register: a shipment being booked means the parcel is
-    // (about to be) handed to the courier — advance paid/packing → shipped.
-    const statusUpdate =
-      order.status === 'paid' || order.status === 'packing' ? { status: 'shipped' } : {};
-
-    await admin
-      .from('orders')
-      .update({
-        qxpress_tracking_no: trackingNumber,
-        tracking_provider: 'easyparcel',
-        tracking_registered: true,
-        tracking_status: 'Booked',
-        // 7 = "Schedule In Arrangement" per EasyParcel's Shipment Status
-        // Codes — booked but not yet collected by the courier. Lets the
-        // customer-facing tracking card show a "waiting for pickup" icon
-        // instead of implying the parcel is already moving.
-        tracking_status_code: 7,
-        tracking_updated_at: new Date().toISOString(),
-        easyparcel_shipment_id: shipmentId ?? null,
-        easyparcel_awb_url: awbUrl ?? null,
-        ...statusUpdate,
-      })
-      .eq('id', order_id);
-
-    if (statusUpdate.status) {
-      await notifyOrder(order_id, { status: 'shipped' });
-    }
-
-    return new Response(
-      JSON.stringify({ ok: true, tracking_number: trackingNumber, awb_url: awbUrl ?? null }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-    );
-  } catch (err) {
-    // Deliberately does NOT release the tracking_registered claim here —
-    // an unexpected error (e.g. the submit_orders fetch itself throwing,
-    // network timeout) leaves it genuinely unknown whether EasyParcel
-    // actually created the shipment before this failed. Auto-releasing
-    // would let a retry double-book if it did; leaving it claimed forces a
-    // manual check (EasyParcel dashboard, or the admin's Settings →
-    // EasyParcel connection) before booking again.
-    console.error('[easyparcel-book-shipment] unexpected error', err);
-    return jsonError(`${err}`, 500);
+    return failure(error);
   }
 });

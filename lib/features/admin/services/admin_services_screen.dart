@@ -72,6 +72,10 @@ class AdminServicesTab extends ConsumerWidget {
                           color: AppPalette.of(context).error,
                         ),
                         onPressed: () async {
+                          final container = ProviderScope.containerOf(
+                            context,
+                            listen: false,
+                          );
                           final confirmed = await confirmDestructiveAction(
                             context,
                             title: 'Delete service?',
@@ -82,7 +86,7 @@ class AdminServicesTab extends ConsumerWidget {
                           await ref
                               .read(serviceRepositoryProvider)
                               .deleteService(s.id);
-                          ref.invalidate(servicesProvider);
+                          container.invalidate(servicesProvider);
                         },
                       ),
                       onTap: () => _showServiceForm(context, ref, existing: s),
@@ -140,6 +144,9 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
   final List<String> _existingImageUrls = [];
   final List<XFile> _newImages = [];
   bool _saving = false;
+  bool _submitted = false;
+  String? _saveError;
+  late String? _savedId = widget.existing?.id;
 
   @override
   void initState() {
@@ -158,11 +165,25 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
 
   Future<void> _pickImages() async {
     final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
-    setState(() => _newImages.addAll(picked));
+    if (mounted) setState(() => _newImages.addAll(picked));
   }
 
   Future<void> _save() async {
-    setState(() => _saving = true);
+    setState(() => _submitted = true);
+    if (_nameCtrl.text.trim().isEmpty ||
+        (_priceCtrl.text.trim().isNotEmpty &&
+            (double.tryParse(_priceCtrl.text.trim()) == null ||
+                !double.parse(_priceCtrl.text.trim()).isFinite ||
+                double.parse(_priceCtrl.text.trim()) < 0))) {
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+    final images = List<XFile>.of(_newImages, growable: false);
+    final existingImageUrls = List<String>.of(_existingImageUrls);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       final repo = ref.read(serviceRepositoryProvider);
       final payload = <String, dynamic>{
@@ -180,41 +201,39 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
         'active': _active,
       };
 
+      final creating = _savedId == null;
       String id;
-      if (widget.existing == null) {
+      if (creating) {
         payload['image_urls'] = <String>[];
         id = await repo.upsertService(payload);
+        _savedId = id;
       } else {
-        id = widget.existing!.id;
+        id = _savedId!;
       }
 
-      if (_newImages.isNotEmpty) {
-        final urls = <String>[..._existingImageUrls];
-        for (final img in _newImages) {
+      if (images.isNotEmpty) {
+        final urls = <String>[...existingImageUrls];
+        for (final img in images) {
           final bytes = await img.readAsBytes();
           final ext = img.name.split('.').last;
           urls.add(await repo.uploadServiceImage(id, bytes, ext));
         }
         payload['image_urls'] = urls;
         await repo.upsertService(payload, id: id);
-      } else if (widget.existing != null) {
-        payload['image_urls'] = _existingImageUrls;
+      } else if (!creating) {
+        payload['image_urls'] = existingImageUrls;
         await repo.upsertService(payload, id: id);
       }
 
-      ref.invalidate(servicesProvider);
+      container.invalidate(servicesProvider);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              friendlyErrorMessage(
-                e,
-                fallback: 'Could not save the service. Please try again.',
-                context: 'admin.service_edit',
-              ),
-            ),
+        setState(
+          () => _saveError = friendlyErrorMessage(
+            e,
+            fallback: 'Could not save the service. Please try again.',
+            context: 'admin.service_edit',
           ),
         );
       }
@@ -244,7 +263,11 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
             const SizedBox(height: AppSpacing.lg),
             TextField(
               controller: _nameCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
+                errorText: _submitted && _nameCtrl.text.trim().isEmpty
+                    ? 'Enter a service name.'
+                    : null,
+                errorMaxLines: 3,
                 labelText: 'Service name',
                 hintText: 'e.g. Fish Recovery & Quarantine',
               ),
@@ -266,7 +289,16 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _priceCtrl,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
+                errorText:
+                    _submitted &&
+                        _priceCtrl.text.trim().isNotEmpty &&
+                        (double.tryParse(_priceCtrl.text.trim()) == null ||
+                            !double.parse(_priceCtrl.text.trim()).isFinite ||
+                            double.parse(_priceCtrl.text.trim()) < 0)
+                    ? 'Enter a valid price of 0 or more.'
+                    : null,
+                errorMaxLines: 3,
                 labelText: 'Price (SGD, optional)',
               ),
               keyboardType: const TextInputType.numberWithOptions(
@@ -362,6 +394,13 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
+            if (_saveError != null) ...[
+              Text(
+                _saveError!,
+                style: TextStyle(color: AppPalette.of(context).error),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             ElevatedButton(
               onPressed: _saving ? null : _save,
               child: _saving

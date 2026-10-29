@@ -40,24 +40,27 @@ class AdminLowStockScreen extends ConsumerWidget {
                   boxShadow: AppShadows.card,
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: ListTile(
-                  onTap: () => context.push('/admin/products/${product.id}'),
-                  leading: Icon(
-                    Icons.warning_amber_rounded,
-                    color: AppPalette.of(context).warning,
-                  ),
-                  title: Text(
-                    product.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  trailing: Text(
-                    '${product.availableStock} left',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: AppPalette.of(context).error,
-                      fontWeight: FontWeight.w700,
+                child: Material(
+                  color: Colors.transparent,
+                  child: ListTile(
+                    onTap: () => context.push('/admin/products/${product.id}'),
+                    leading: Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppPalette.of(context).warning,
+                    ),
+                    title: Text(
+                      product.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    trailing: Text(
+                      '${product.availableStock} left',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppPalette.of(context).error,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ),

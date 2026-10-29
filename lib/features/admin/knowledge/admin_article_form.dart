@@ -38,6 +38,9 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
   String? _existingCoverUrl;
   XFile? _newCoverImage;
   bool _saving = false;
+  bool _submitted = false;
+  String? _saveError;
+  late String? _savedId = widget.existing?.id;
 
   @override
   void initState() {
@@ -57,11 +60,18 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
       source: ImageSource.gallery,
       imageQuality: 85,
     );
-    if (picked != null) setState(() => _newCoverImage = picked);
+    if (mounted && picked != null) setState(() => _newCoverImage = picked);
   }
 
   Future<void> _save() async {
-    setState(() => _saving = true);
+    setState(() => _submitted = true);
+    if (_titleCtrl.text.trim().isEmpty || _bodyCtrl.text.trim().isEmpty) return;
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+    final coverImage = _newCoverImage;
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       final repo = ref.read(knowledgeRepositoryProvider);
       final payload = <String, dynamic>{
@@ -70,31 +80,28 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
       };
       // Only stamp published_at on first publish — editing shouldn't bump
       // it back to the top of the "newest first" guide list.
-      if (widget.existing == null) {
+      if (_savedId == null) {
         payload['published_at'] = DateTime.now().toIso8601String();
       }
-      final id = await repo.upsertArticle(payload, id: widget.existing?.id);
+      final id = await repo.upsertArticle(payload, id: _savedId);
+      _savedId = id;
 
-      if (_newCoverImage != null) {
-        final bytes = await _newCoverImage!.readAsBytes();
-        final ext = _newCoverImage!.name.split('.').last;
+      if (coverImage != null) {
+        final bytes = await coverImage.readAsBytes();
+        final ext = coverImage.name.split('.').last;
         final url = await repo.uploadArticleImage(id, bytes, ext);
         await repo.upsertArticle({'cover_image_url': url}, id: id);
       }
 
-      ref.invalidate(articlesProvider);
+      container.invalidate(articlesProvider);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              friendlyErrorMessage(
-                e,
-                fallback: 'Could not save the article. Please try again.',
-                context: 'admin.article_form',
-              ),
-            ),
+        setState(
+          () => _saveError = friendlyErrorMessage(
+            e,
+            fallback: 'Could not save the article. Please try again.',
+            context: 'admin.article_form',
           ),
         );
       }
@@ -151,15 +158,34 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
             const SizedBox(height: AppSpacing.lg),
             TextField(
               controller: _titleCtrl,
-              decoration: const InputDecoration(labelText: 'Title'),
+              decoration: InputDecoration(
+                labelText: 'Title',
+                errorText: _submitted && _titleCtrl.text.trim().isEmpty
+                    ? 'Enter a title.'
+                    : null,
+                errorMaxLines: 3,
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _bodyCtrl,
-              decoration: const InputDecoration(labelText: 'Content'),
+              decoration: InputDecoration(
+                labelText: 'Content',
+                errorText: _submitted && _bodyCtrl.text.trim().isEmpty
+                    ? 'Enter guide content.'
+                    : null,
+                errorMaxLines: 3,
+              ),
               maxLines: 8,
             ),
             const SizedBox(height: AppSpacing.lg),
+            if (_saveError != null) ...[
+              Text(
+                _saveError!,
+                style: TextStyle(color: AppPalette.of(context).error),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             ElevatedButton(
               onPressed: _saving ? null : _save,
               child: _saving

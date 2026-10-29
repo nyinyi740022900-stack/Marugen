@@ -21,6 +21,7 @@ import '../../orders/presentation/purchase_intent.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/reviews_section.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import 'product_share.dart';
 import 'shop_providers.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
@@ -39,6 +40,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   String? _selectedVariantForProductId;
   int _quantity = 1;
   int _imagePage = 0;
+  bool _isSharing = false;
+  final _shareButtonKey = GlobalKey();
 
   // Lazada/Shopee-style PDP tabs: one continuous scroll with an anchor per
   // section (not 4 separate TabBarViews — switching those would reset
@@ -49,7 +52,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   // listener that highlights whichever section's top has just passed
   // under the pinned tab bar, and a tap handler that scrolls to a
   // section's position computed the same way.
-  static const _tabBarHeight = 46.0;
+  static const _tabBarHeight = 48.0;
   late final TabController _tabController;
   final _scrollController = ScrollController();
   final _overviewKey = GlobalKey();
@@ -176,6 +179,67 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
     }
   }
 
+  Future<void> _shareProduct(ProductShareDetails details) async {
+    if (_isSharing ||
+        !mounted ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        _selectedVariantForProductId != details.productId) {
+      return;
+    }
+    final box =
+        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final origin =
+        box != null && box.attached && box.hasSize && !box.size.isEmpty
+        ? box.localToGlobal(Offset.zero) & box.size
+        : Rect.fromLTWH(0, MediaQuery.paddingOf(context).top, 1, 1);
+    final service = ref.read(productShareServiceProvider);
+    setState(() => _isSharing = true);
+    try {
+      String? phone;
+      try {
+        final settings = await ref
+            .read(shopSettingsProvider.future)
+            .timeout(const Duration(seconds: 3));
+        final value = settings['shop_phone'];
+        if (value is String) phone = value;
+      } catch (_) {
+        // Contact settings are optional: the Android shop link still works.
+      }
+      if (!mounted ||
+          ModalRoute.of(context)?.isCurrent != true ||
+          _selectedVariantForProductId != details.productId) {
+        return;
+      }
+      await service.share(
+        details,
+        origin: origin,
+        shopPhone: phone,
+        isActive: () =>
+            mounted &&
+            ModalRoute.of(context)?.isCurrent == true &&
+            _selectedVariantForProductId == details.productId,
+      );
+    } catch (_) {
+      if (mounted &&
+          ModalRoute.of(context)?.isCurrent == true &&
+          _selectedVariantForProductId == details.productId) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Could not share this product. Please try again.',
+            ),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => _shareProduct(details),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
   /// Shared by Add to Cart and Buy Now so both respect the selected
   /// variant, the quantity stepper and the stock cap.
   CartAddResult _addToCart(Product product) {
@@ -259,9 +323,46 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                 pinned: true,
                 backgroundColor: AppColors.black,
                 foregroundColor: AppColors.white,
-                // Chat lives in the bottom action bar (one clear place to
-                // contact the shop), so the app bar only keeps the heart.
-                actions: [_FavoriteAppBarButton(productId: product.id)],
+                actions: [
+                  SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: IconButton(
+                      key: _shareButtonKey,
+                      tooltip: 'Share product',
+                      constraints: const BoxConstraints(
+                        minWidth: 48,
+                        minHeight: 48,
+                      ),
+                      onPressed: _isSharing
+                          ? null
+                          : () => _shareProduct(
+                              ProductShareDetails.fromProduct(
+                                product,
+                                variant: _selectedVariant,
+                                size: _selectedSize,
+                                imageIndex: _imagePage,
+                              ),
+                            ),
+                      icon: _isSharing
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.white,
+                                semanticsLabel: 'Preparing product share',
+                              ),
+                            )
+                          : const Icon(
+                              Icons.ios_share_outlined,
+                              size: 22,
+                              color: AppColors.white,
+                            ),
+                    ),
+                  ),
+                  _FavoriteAppBarButton(productId: product.id),
+                ],
                 flexibleSpace: FlexibleSpaceBar(
                   background: hasImages
                       ? Stack(
@@ -307,7 +408,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                   ),
                               ],
                             ),
-                            // Scrim so the back/heart/chat icons stay legible
+                            // Scrim so the back/share/heart icons stay legible
                             // over bright photos, matching the solid app bar
                             // treatment used everywhere else in the app.
                             IgnorePointer(
@@ -343,15 +444,17 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                   height: _tabBarHeight,
                   child: TabBar(
                     isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    labelPadding: const EdgeInsets.symmetric(horizontal: 16),
                     controller: _tabController,
                     onTap: _onTabTap,
                     // The app's shared TabBarThemeData styles white labels
                     // for tabs that sit on the black AppBar (Knowledge
                     // screen) — invisible on this tab bar's white
                     // background, so this one overrides colors explicitly.
-                    // Labels are also kept short (not "Product Details" /
-                    // "Recommendations") so all 4 fit without truncation
-                    // on a standard phone width.
+                    // Equal insets keep every label aligned; long labels
+                    // stay complete in the horizontally scrollable bar.
                     labelColor: AppPalette.of(context).text,
                     unselectedLabelColor: AppPalette.of(context).textMuted,
                     indicatorColor: AppPalette.of(context).accent,
@@ -368,7 +471,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       Tab(text: 'Overview'),
                       Tab(text: 'Details'),
                       Tab(text: 'Reviews'),
-                      Tab(text: 'Related'),
+                      Tab(text: 'Recommended for you'),
                     ],
                   ),
                 ),
@@ -778,79 +881,97 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
-                  Row(
-                    children: [
-                      // 1. Chat — the single place to reach the shop.
-                      _ChatButton(onPressed: () => _contactShop(product)),
-                      const SizedBox(width: AppSpacing.md),
-                      if (contactForPrice && !soldOut)
-                        // No price → no Add/Buy; the bar collapses to
-                        // [Chat] [Contact Us for Price].
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () => _contactShop(product),
-                            icon: const Icon(
-                              Icons.chat_bubble_outline,
-                              size: 18,
-                            ),
-                            label: const Text('Contact Us for Price'),
-                          ),
-                        )
-                      else if (soldOut)
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: null,
-                            child: Text(product.unavailableLabel),
-                          ),
-                        )
-                      else ...[
-                        // 2. Add to Cart (outlined) — stays on the page.
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: canBuy
-                                ? () => _showCartMessage(_addToCart(product))
-                                : needsOptionSelection
-                                ? _selectOptions
-                                : null,
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 14,
-                                horizontal: 8,
-                              ),
-                            ),
-                            child: Text(
-                              needsOptionSelection
-                                  ? (needsVariantSelection && needsSizeSelection
-                                        ? 'Select Options'
-                                        : needsSizeSelection
-                                        ? 'Select a Size'
-                                        : 'Select an Option')
-                                  : 'Add to Cart',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cartButton = OutlinedButton(
+                        onPressed: canBuy
+                            ? () => _showCartMessage(_addToCart(product))
+                            : needsOptionSelection
+                            ? _selectOptions
+                            : null,
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 8,
                           ),
                         ),
-                        const SizedBox(width: AppSpacing.sm),
-                        // 3. Buy Now (filled red) — straight to checkout.
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: canBuy ? () => _buyNow(product) : null,
-                            style: ElevatedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 14,
-                                horizontal: 8,
-                              ),
-                            ),
-                            child: const Text(
-                              'Buy Now',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                        child: Text(
+                          needsOptionSelection
+                              ? (needsVariantSelection && needsSizeSelection
+                                    ? 'Select Options'
+                                    : needsSizeSelection
+                                    ? 'Select a Size'
+                                    : 'Select an Option')
+                              : 'Add to Cart',
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                      final buyButton = ElevatedButton(
+                        onPressed: canBuy ? () => _buyNow(product) : null,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 8,
                           ),
                         ),
-                      ],
-                    ],
+                        child: const Text(
+                          'Buy Now',
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                      final chatButton = _ChatButton(
+                        onPressed: () => _contactShop(product),
+                      );
+                      final stackActions =
+                          constraints.maxWidth < 500 &&
+                          MediaQuery.textScalerOf(context).scale(14) > 20;
+                      if (stackActions && !contactForPrice && !soldOut) {
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                chatButton,
+                                const SizedBox(width: AppSpacing.md),
+                                Expanded(child: cartButton),
+                              ],
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            buyButton,
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          chatButton,
+                          const SizedBox(width: AppSpacing.md),
+                          if (contactForPrice && !soldOut)
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _contactShop(product),
+                                icon: const Icon(
+                                  Icons.chat_bubble_outline,
+                                  size: 18,
+                                ),
+                                label: const Text('Contact Us for Price'),
+                              ),
+                            )
+                          else if (soldOut)
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: null,
+                                child: Text(product.unavailableLabel),
+                              ),
+                            )
+                          else ...[
+                            Expanded(child: cartButton),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(child: buyButton),
+                          ],
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),
@@ -1230,28 +1351,31 @@ class _RelatedProductsRow extends ConsumerWidget {
     return relatedAsync.maybeWhen(
       data: (related) {
         if (related.isEmpty) return const SizedBox.shrink();
+        final availableWidth = MediaQuery.sizeOf(context).width - 32;
+        final cardWidth = MediaQuery.textScalerOf(context).scale(14) > 18
+            ? availableWidth.clamp(220.0, 328.0).toDouble()
+            : 220.0;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'YOU MAY ALSO LIKE',
+              'Recommended for you',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
+                fontSize: 16,
                 color: AppPalette.of(context).textMuted,
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
             SizedBox(
-              height: productCardExtent(context, 220),
+              height: productCardExtent(context, cardWidth),
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: related.length,
                 separatorBuilder: (_, _) =>
                     const SizedBox(width: AppSpacing.md),
                 itemBuilder: (context, i) => SizedBox(
-                  width: 220,
+                  width: cardWidth,
                   child: ProductCard(
                     product: related[i],
                     onTap: () => context.push('/product/${related[i].id}'),

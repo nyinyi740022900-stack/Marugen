@@ -39,4 +39,7 @@ psql "${psql_args[@]}" -f "$suite_dir/checkout_idempotency.sql"
 psql "${psql_args[@]}" -f "$suite_dir/../migrations/0055_server_owned_order_financials.sql"
 psql "${psql_args[@]}" -f "$suite_dir/server_owned_financials.sql"
 
+psql "${psql_args[@]}" -f "$suite_dir/../migrations/0059_verified_async_refunds.sql"
+psql "${psql_args[@]}" -f "$suite_dir/refund_lifecycle.sql"
+
 python3 "$suite_dir/reservation_cancel_race.py" "$test_root"

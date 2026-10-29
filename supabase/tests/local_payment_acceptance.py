@@ -188,10 +188,11 @@ record('paid cancellation rejected without releasing stock')
 api('POST', '/functions/v1/stripe-refund', {'order_id': order_id}, token=owner_token, expect=403)
 refund = api('POST', '/functions/v1/stripe-refund', {'order_id': order_id}, token=staff_token)
 require(order(order_id)['status'] == 'refunded' and stock() == 4, 'Refund state mismatch')
-api('POST', '/functions/v1/stripe-refund', {'order_id': order_id}, token=staff_token, expect=409)
+retry_refund = api('POST', '/functions/v1/stripe-refund', {'order_id': order_id}, token=staff_token)
+require(retry_refund['refundId'] == refund['refundId'] and retry_refund['refundStatus'] == 'succeeded', 'Refund retry did not reconcile original result')
 require(len(stripe('get', '/v1/refunds', ['payment_intent=' + intent_id])['data']) == 1,
         'Duplicate refund was created')
-record('staff-only refund recorded; duplicate refund denied')
+record('staff-only refund recorded; duplicate request reconciles original refund')
 fish = api('POST', '/rest/v1/products', {
     'name': 'Local single-stock fish ' + run, 'category': 'koi',
     'price': 1, 'stock_quantity': 1, 'show_price': True}, expect=201)[0]

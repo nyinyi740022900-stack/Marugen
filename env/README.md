@@ -36,3 +36,16 @@ You'll need a genuinely separate Firebase project (for a separate
 `google-services.json` / `GoogleService-Info.plist`) if you want dev push
 notifications/Crashlytics to stay fully isolated from prod too — that part
 isn't handled by this file and needs its own Firebase project setup.
+
+## Closed beta production configuration
+
+The Alpha track is a distribution channel, not a separate backend. If it uses the existing production Supabase project, build it with the same reviewed production client configuration:
+
+```sh
+flutter test --dart-define-from-file=env/prod.json
+flutter build appbundle --release --dart-define-from-file=env/prod.json --build-name=1.0.8 --build-number=13
+```
+
+Run Flutter tests and the Android release build sequentially: test tooling can regenerate the Android plugin registrant. An unqualified release build defaults APP_ENV to dev and uses the bundled .env values, which currently contain a Stripe test publishable key. Do not hide the release warning independently or set only APP_ENV=prod: verify the backend and the Stripe publishable-key mode together. Keep private keys server-side.
+
+A production-configured closed beta uses real Stripe payments. Automated tests do not establish successful physical-device payment acceptance.

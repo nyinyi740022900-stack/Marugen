@@ -14,6 +14,7 @@ import 'core/router/setup_required_screen.dart';
 import 'core/supabase/supabase_client.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_preference.dart';
+import 'shared/widgets/keyboard_dismiss_region.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -109,7 +110,30 @@ class MarugenApp extends ConsumerWidget {
       themeMode: ref.watch(themeModeProvider),
       routerConfig: router,
       scaffoldMessengerKey: PushNotificationService.messengerKey,
-      builder: (context, child) => _NonProdReleaseBanner(child: child),
+      builder: (context, child) => ListenableBuilder(
+        listenable: router.routeInformationProvider,
+        builder: (context, _) {
+          final path = router.routeInformationProvider.value.uri.path;
+          final authentication = {
+            '/login',
+            '/signup',
+            '/forgot-password',
+            '/reset-password',
+          }.contains(path);
+          return Theme(
+            data: AppTheme.forViewport(
+              Theme.of(context),
+              width: MediaQuery.sizeOf(context).width,
+              authentication: authentication,
+            ),
+            child: _NonProdReleaseBanner(
+              child: KeyboardDismissRegion(
+                child: child ?? const SizedBox.shrink(),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

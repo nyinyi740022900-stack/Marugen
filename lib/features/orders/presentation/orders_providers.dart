@@ -5,10 +5,85 @@ import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/order_repository.dart';
+import '../../admin/delivery/delivery_repository.dart';
+import '../../admin/delivery/easyparcel_providers.dart';
 
 final orderRepositoryProvider = Provider<OrderRepository>(
   (ref) => OrderRepository(),
 );
+
+/// A read-through carrier refresh, injectable so gestures never depend on a
+/// concrete network client in tests. Booking/payment APIs are not used here.
+final orderTrackingRefreshProvider = Provider<Future<void> Function(Order)>((
+  ref,
+) {
+  final easyParcel = ref.watch(easyParcelRepositoryProvider);
+  return (order) async {
+    if (order.hasSampleTracking ||
+        const {
+          OrderStatus.cancelled,
+          OrderStatus.refunded,
+          OrderStatus.delivered,
+        }.contains(order.status)) {
+      return;
+    }
+    if (order.hasParcelPlan || order.qxpressTrackingNo?.isNotEmpty == true) {
+      if (order.trackingProvider == 'easyparcel' || order.hasParcelPlan) {
+        await easyParcel.refreshStatus(order.id);
+      } else if (order.trackingProvider == 'seventeentrack') {
+        await DeliveryRepository().refreshTrackingStatus(order.id);
+      }
+    }
+  };
+});
+
+Future<void> refreshCarrierOrders(
+  ProviderContainer container,
+  List<Order> orders,
+) async {
+  final refresh = container.read(orderTrackingRefreshProvider);
+  Object? failure;
+  // Bound simultaneous provider calls; attempt every order even if one fails.
+  for (var offset = 0; offset < orders.length; offset += 4) {
+    await Future.wait(
+      orders.skip(offset).take(4).map((order) async {
+        try {
+          await refresh(order).timeout(const Duration(seconds: 30));
+        } catch (error) {
+          failure ??= error;
+        }
+      }),
+    );
+  }
+  if (failure != null) throw failure!;
+}
+
+Future<void> refreshAdminOrdersFromCarrier(ProviderContainer container) async {
+  try {
+    final orders = await container
+        .read(orderRepositoryProvider)
+        .fetchFulfillmentOrders();
+    await refreshCarrierOrders(container, orders);
+  } finally {
+    container.invalidate(adminOrdersProvider);
+    container.invalidate(fulfillmentOrdersProvider);
+    await container.read(adminOrdersPagedProvider.notifier).refresh();
+  }
+}
+
+Future<void> refreshCustomerOrdersFromCarrier(
+  ProviderContainer container,
+) async {
+  try {
+    final orders = await container
+        .read(orderRepositoryProvider)
+        .fetchMyOrders();
+    await refreshCarrierOrders(container, orders);
+  } finally {
+    container.invalidate(myOrdersProvider);
+    await container.read(myOrdersProvider.future);
+  }
+}
 
 /// Watches [authStateProvider] (same pattern as [currentAppUserProvider]) so
 /// this re-fetches once sign-in/session-restore actually completes. Without
@@ -35,7 +110,7 @@ final visibleMyOrdersProvider = Provider<AsyncValue<List<Order>>>((ref) {
     if (query.isEmpty) return orders;
     return orders.where((o) {
       if (o.displayNumber.toLowerCase().contains(query)) return true;
-      if (orderStatusLabel(o.status).toLowerCase().contains(query)) return true;
+      if (o.fulfillmentStatusLabel.toLowerCase().contains(query)) return true;
       return o.items.any(
         (item) => item.productName.toLowerCase().contains(query),
       );
@@ -50,6 +125,11 @@ final adminOrderStatusFilterProvider = StateProvider<OrderStatus?>(
 final adminOrdersProvider = FutureProvider<List<Order>>((ref) {
   final status = ref.watch(adminOrderStatusFilterProvider);
   return ref.watch(orderRepositoryProvider).fetchAllOrders(status: status);
+});
+
+/// Never inherits the All-tab status filter: all outstanding deliveries stay visible.
+final fulfillmentOrdersProvider = FutureProvider<List<Order>>((ref) {
+  return ref.watch(orderRepositoryProvider).fetchFulfillmentOrders();
 });
 
 /// Paged (infinite-scroll) admin order list — the default no-search view.
@@ -81,6 +161,7 @@ final adminOrdersPagedProvider =
 /// change/delete, instead of only one of them going stale.
 void refreshAdminOrders(WidgetRef ref) {
   ref.invalidate(adminOrdersProvider);
+  ref.invalidate(fulfillmentOrdersProvider);
   ref.read(adminOrdersPagedProvider.notifier).refresh();
 }
 

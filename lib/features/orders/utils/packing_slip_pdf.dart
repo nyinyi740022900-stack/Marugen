@@ -5,7 +5,8 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+
+import 'print_document.dart';
 
 import '../../../shared/models/order.dart';
 
@@ -185,20 +186,11 @@ Future<void> printPackingSlip(
 }) async {
   final bytes = await buildPackingSlipPdf(order, settings: settings);
   if (!context.mounted) return;
-  await Navigator.of(context).push<void>(
-    MaterialPageRoute(
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: const Text('Packing Label')),
-        body: PdfPreview(
-          build: (_) async => bytes,
-          initialPageFormat: PdfPageFormat.a6,
-          canChangePageFormat: false,
-          canChangeOrientation: false,
-          canDebug: false,
-          pdfFileName: 'Packing-Label-${order.displayNumber}.pdf',
-          maxPageWidth: 440,
-        ),
-      ),
-    ),
+  await previewPdfDocument(
+    context,
+    bytes: bytes,
+    title: 'Packing label',
+    filename: 'Packing-Label-${order.displayNumber}.pdf',
+    labelDocument: true,
   );
 }

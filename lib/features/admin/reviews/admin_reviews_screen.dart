@@ -260,8 +260,10 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 4,
+                runSpacing: 4,
                 children: [
                   TextButton(
                     onPressed: _saving
@@ -290,8 +292,10 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
               ),
             ],
             const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 4,
+              runSpacing: 4,
               children: [
                 if (!_replying)
                   TextButton(

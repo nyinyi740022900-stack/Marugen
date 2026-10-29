@@ -13,6 +13,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'orders_providers.dart';
+import 'order_pull_to_refresh.dart';
 import '../../../shared/widgets/guest_account_state.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 
@@ -73,9 +74,12 @@ class OrdersScreen extends ConsumerWidget {
                   // order list (Amazon/Shopee/Lazada) so a customer can
                   // manually confirm a just-placed order landed, rather than
                   // only ever seeing whatever was cached on first load.
-                  return RefreshIndicator(
-                    onRefresh: () async => ref.invalidate(myOrdersProvider),
+                  return OrderPullToRefresh(
+                    onRefresh: () => refreshCustomerOrdersFromCarrier(
+                      ProviderScope.containerOf(context, listen: false),
+                    ),
                     child: ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.all(16),
                       itemCount: orders.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
@@ -103,7 +107,10 @@ class OrdersScreen extends ConsumerWidget {
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
-                                      _StatusBadge(status: order.status),
+                                      _StatusBadge(
+                                        status: order.status,
+                                        label: order.fulfillmentStatusLabel,
+                                      ),
                                     ],
                                   ),
                                   const SizedBox(height: 6),
@@ -235,7 +242,8 @@ class _LoggedOutOrders extends StatelessWidget {
 
 class _StatusBadge extends StatelessWidget {
   final OrderStatus status;
-  const _StatusBadge({required this.status});
+  final String label;
+  const _StatusBadge({required this.status, required this.label});
 
   Color _color(BuildContext context) {
     switch (status) {
@@ -260,7 +268,7 @@ class _StatusBadge extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        orderStatusLabel(status),
+        label,
         style: TextStyle(
           color: _color(context),
           fontSize: 11,

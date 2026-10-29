@@ -36,6 +36,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   }
 
   Future<void> _submit() async {
+    if (_loading) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
@@ -88,6 +89,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             obscureText: _obscure,
             textInputAction: TextInputAction.next,
             decoration: InputDecoration(
+              errorMaxLines: 4,
               labelText: 'New password',
               prefixIcon: const Icon(Icons.lock_outline, size: 20),
               suffixIcon: IconButton(
@@ -111,6 +113,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             textInputAction: TextInputAction.done,
             onFieldSubmitted: (_) => _submit(),
             decoration: const InputDecoration(
+              errorMaxLines: 4,
               labelText: 'Confirm password',
               prefixIcon: Icon(Icons.lock_outline, size: 20),
             ),

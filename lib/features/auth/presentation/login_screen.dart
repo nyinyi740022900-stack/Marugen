@@ -35,6 +35,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _submit() async {
+    if (_loading || _oauthLoading) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
@@ -46,13 +47,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .signInWithEmail(_emailCtrl.text.trim(), _passwordCtrl.text);
       // Router redirect handles navigation once auth state updates.
     } catch (e) {
-      setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _oauthSignIn(Future<void> Function() signIn) async {
+    if (_loading || _oauthLoading) return;
     setState(() {
       _oauthLoading = true;
       _error = null;
@@ -62,7 +64,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -70,6 +72,40 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    // A tall, wide iPhone can afford the full form. Height alone classified
+    // even the Pro Max as compact once its safe areas were subtracted.
+    final roomyPhone =
+        Theme.of(context).platform == TargetPlatform.iOS &&
+        media.size.width >= 400 &&
+        media.size.height - media.viewPadding.vertical >= 800;
+    final compact =
+        !roomyPhone && media.size.height - media.viewPadding.vertical < 900;
+    final sectionGap = roomyPhone
+        ? AppSpacing.lg
+        : compact
+        ? AppSpacing.md
+        : AppSpacing.xl;
+    final groupGap = roomyPhone
+        ? AppSpacing.sm
+        : compact
+        ? AppSpacing.sm
+        : AppSpacing.lg;
+    final buttonStyle = roomyPhone
+        ? const ButtonStyle(
+            minimumSize: WidgetStatePropertyAll(Size(0, 56)),
+            textStyle: WidgetStatePropertyAll(
+              TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+          )
+        : compact
+        ? const ButtonStyle(
+            minimumSize: WidgetStatePropertyAll(Size(0, 48)),
+            padding: WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+          )
+        : null;
     // Login is a light page with no AppBar when it is the root route, so
     // set the status bar explicitly; otherwise iOS keeps the previous
     // screen's light icons and the clock disappears.
@@ -97,287 +133,344 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             : null,
         body: ContentWidth(
           maxWidth: 560,
-          child: SafeArea(
-            child: CustomScrollView(
-              slivers: [
-                // The hero and form scroll together, including above the keyboard.
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      AppSpacing.xl,
-                      MediaQuery.of(context).size.height < 700
-                          ? AppSpacing.md
-                          : AppSpacing.xl,
-                      AppSpacing.xl,
-                      AppSpacing.md,
-                    ),
-                    child: Column(
-                      children: [
-                        BrandLogo(
-                          size: MediaQuery.of(context).size.height < 700
-                              ? 64
-                              : 88,
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          'MARUGEN FISH FARM',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppPalette.of(context).text,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 3,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Premium Koi & Arowana — Singapore',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
+          child: Theme(
+            data: roomyPhone
+                ? Theme.of(context).copyWith(
+                    inputDecorationTheme: Theme.of(context).inputDecorationTheme
+                        .copyWith(
+                          labelStyle: TextStyle(
+                            fontSize: 16,
                             color: AppPalette.of(context).textMuted,
-                            fontSize: 12.5,
-                            letterSpacing: 0.4,
                           ),
                         ),
-                      ],
+                    textTheme: Theme.of(context).textTheme.copyWith(
+                      bodyLarge: Theme.of(context).textTheme.bodyLarge
+                          ?.copyWith(fontSize: 16),
                     ),
-                  ),
-                ),
-                // Form sheet
-                SliverFillRemaining(
-                  hasScrollBody: false,
-                  child: Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).background,
-                      borderRadius: BorderRadius.vertical(
-                        top: Radius.circular(AppRadius.lg),
-                      ),
-                    ),
+                  )
+                : Theme.of(context),
+            child: SafeArea(
+              child: CustomScrollView(
+                slivers: [
+                  // The hero and form scroll together, including above the keyboard.
+                  SliverToBoxAdapter(
                     child: Padding(
                       padding: EdgeInsets.fromLTRB(
                         AppSpacing.xl,
-                        MediaQuery.of(context).size.height < 700
+                        roomyPhone
                             ? AppSpacing.lg
-                            : AppSpacing.xxl,
+                            : compact
+                            ? AppSpacing.sm
+                            : AppSpacing.xl,
                         AppSpacing.xl,
-                        MediaQuery.of(context).padding.bottom + AppSpacing.xl,
+                        roomyPhone
+                            ? AppSpacing.sm
+                            : compact
+                            ? AppSpacing.sm
+                            : AppSpacing.md,
                       ),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text(
-                              'Welcome back',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                              ),
+                      child: Column(
+                        children: [
+                          BrandLogo(size: compact ? 56 : 88),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            'MARUGEN FISH FARM',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppPalette.of(context).text,
+                              fontSize: compact ? 16 : 18,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: compact ? 1.5 : 3,
                             ),
+                          ),
+                          if (!compact) ...[
                             const SizedBox(height: 4),
                             Text(
-                              'Log in to continue shopping',
+                              'Premium Koi & Arowana — Singapore',
+                              textAlign: TextAlign.center,
                               style: TextStyle(
-                                fontSize: 13.5,
                                 color: AppPalette.of(context).textMuted,
+                                fontSize: 12.5,
+                                letterSpacing: 0.4,
                               ),
-                            ),
-                            const SizedBox(height: AppSpacing.xl),
-                            TextFormField(
-                              controller: _emailCtrl,
-                              keyboardType: TextInputType.emailAddress,
-                              textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                labelText: 'Email',
-                                prefixIcon: Icon(Icons.mail_outline, size: 20),
-                              ),
-                              validator: (v) => (v == null || !v.contains('@'))
-                                  ? 'Enter a valid email'
-                                  : null,
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            TextFormField(
-                              controller: _passwordCtrl,
-                              obscureText: _obscure,
-                              textInputAction: TextInputAction.done,
-                              onFieldSubmitted: (_) => _submit(),
-                              decoration: InputDecoration(
-                                labelText: 'Password',
-                                prefixIcon: const Icon(
-                                  Icons.lock_outline,
-                                  size: 20,
-                                ),
-                                suffixIcon: IconButton(
-                                  tooltip: _obscure
-                                      ? 'Show password'
-                                      : 'Hide password',
-                                  icon: Icon(
-                                    _obscure
-                                        ? Icons.visibility_outlined
-                                        : Icons.visibility_off_outlined,
-                                    size: 20,
-                                    color: AppPalette.of(context).textMuted,
-                                  ),
-                                  onPressed: () =>
-                                      setState(() => _obscure = !_obscure),
-                                ),
-                              ),
-                              validator: (v) => (v == null || v.length < 6)
-                                  ? 'Minimum 6 characters'
-                                  : null,
-                            ),
-                            const SizedBox(height: AppSpacing.xs),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              // Was shrunk to text-bounds via
-                              // tapTargetSize.shrinkWrap/minimumSize.zero — well
-                              // under the ~44px tap-target guideline. A normal
-                              // TextButton already has a sane default hit area;
-                              // removing that override is the whole fix.
-                              child: TextButton(
-                                onPressed: () =>
-                                    context.push('/forgot-password'),
-                                child: Text(
-                                  'Forgot password?',
-                                  style: TextStyle(
-                                    color: AppPalette.of(context).textMuted,
-                                    fontSize: 12.5,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (_error != null) ...[
-                              const SizedBox(height: AppSpacing.md),
-                              Container(
-                                padding: const EdgeInsets.all(AppSpacing.md),
-                                decoration: BoxDecoration(
-                                  color: AppPalette.of(context).accentSoft,
-                                  borderRadius: BorderRadius.circular(
-                                    AppRadius.sm,
-                                  ),
-                                ),
-                                child: Text(
-                                  _error!,
-                                  style: TextStyle(
-                                    color: AppPalette.of(context).accent,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: AppSpacing.xl),
-                            ElevatedButton(
-                              onPressed: _loading ? null : _submit,
-                              child: _loading
-                                  ? const SizedBox(
-                                      height: 18,
-                                      width: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppColors.white,
-                                      ),
-                                    )
-                                  : const Text('Log In'),
-                            ),
-                            const SizedBox(height: AppSpacing.xl),
-                            Row(
-                              children: [
-                                const Expanded(child: Divider()),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: AppSpacing.md,
-                                  ),
-                                  child: Text(
-                                    'OR',
-                                    style: TextStyle(
-                                      color: AppPalette.of(context).textMuted,
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 0.6,
-                                    ),
-                                  ),
-                                ),
-                                const Expanded(child: Divider()),
-                              ],
-                            ),
-                            const SizedBox(height: AppSpacing.lg),
-                            OutlinedButton.icon(
-                              onPressed: _oauthLoading
-                                  ? null
-                                  : () => _oauthSignIn(
-                                      () => ref
-                                          .read(authRepositoryProvider)
-                                          .signInWithGoogle(),
-                                    ),
-                              icon: const Icon(Icons.g_mobiledata, size: 24),
-                              label: const Text('Continue with Google'),
-                            ),
-                            const SizedBox(height: AppSpacing.md),
-                            OutlinedButton.icon(
-                              onPressed: _oauthLoading
-                                  ? null
-                                  : () => _oauthSignIn(
-                                      () => ref
-                                          .read(authRepositoryProvider)
-                                          .signInWithApple(),
-                                    ),
-                              icon: const Icon(Icons.apple, size: 20),
-                              label: const Text('Continue with Apple'),
-                            ),
-                            const SizedBox(height: AppSpacing.lg),
-                            Wrap(
-                              alignment: WrapAlignment.center,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              spacing: 4,
-                              runSpacing: 4,
-                              children: [
-                                Text(
-                                  "Don't have an account?",
-                                  style: TextStyle(
-                                    color: AppPalette.of(context).textMuted,
-                                    fontSize: 13.5,
-                                  ),
-                                ),
-                                // TextButton (not a bare GestureDetector) so
-                                // this gets a real ~44px tap target and a
-                                // splash/highlight, not just the glyph bounds.
-                                TextButton(
-                                  style: TextButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                    ),
-                                  ),
-                                  onPressed: () => context.push(
-                                    authRouteWithRedirect(
-                                      '/signup',
-                                      GoRouterState.of(context)
-                                          .uri
-                                          .queryParameters['redirect'],
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'Sign up',
-                                    style: TextStyle(
-                                      color: AppPalette.of(context).accent,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 13.5,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            TextButton(
-                              onPressed: () => context.push('/privacy'),
-                              child: const Text('Privacy Policy'),
                             ),
                           ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Form sheet
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).background,
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(AppRadius.lg),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          AppSpacing.xl,
+                          roomyPhone
+                              ? 20
+                              : compact
+                              ? AppSpacing.lg
+                              : AppSpacing.xxl,
+                          AppSpacing.xl,
+                          roomyPhone
+                              ? AppSpacing.lg
+                              : compact
+                              ? AppSpacing.sm
+                              : AppSpacing.xl,
+                        ),
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                'Welcome back',
+                                style: TextStyle(
+                                  fontSize: roomyPhone ? 26 : 22,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Log in to continue shopping',
+                                style: TextStyle(
+                                  fontSize: roomyPhone ? 16 : 13.5,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
+                              ),
+                              SizedBox(height: sectionGap),
+                              TextFormField(
+                                controller: _emailCtrl,
+                                keyboardType: TextInputType.emailAddress,
+                                textInputAction: TextInputAction.next,
+                                decoration: const InputDecoration(
+                                  errorMaxLines: 4,
+                                  labelText: 'Email',
+                                  prefixIcon: Icon(
+                                    Icons.mail_outline,
+                                    size: 20,
+                                  ),
+                                ),
+                                validator: (v) =>
+                                    (v == null || !v.contains('@'))
+                                    ? 'Enter a valid email'
+                                    : null,
+                              ),
+                              SizedBox(
+                                height: roomyPhone
+                                    ? AppSpacing.sm
+                                    : compact
+                                    ? AppSpacing.sm
+                                    : AppSpacing.md,
+                              ),
+                              TextFormField(
+                                controller: _passwordCtrl,
+                                obscureText: _obscure,
+                                textInputAction: TextInputAction.done,
+                                onFieldSubmitted: (_) => _submit(),
+                                decoration: InputDecoration(
+                                  errorMaxLines: 4,
+                                  labelText: 'Password',
+                                  prefixIcon: const Icon(
+                                    Icons.lock_outline,
+                                    size: 20,
+                                  ),
+                                  suffixIcon: IconButton(
+                                    tooltip: _obscure
+                                        ? 'Show password'
+                                        : 'Hide password',
+                                    icon: Icon(
+                                      _obscure
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                      size: 20,
+                                      color: AppPalette.of(context).textMuted,
+                                    ),
+                                    onPressed: () =>
+                                        setState(() => _obscure = !_obscure),
+                                  ),
+                                ),
+                                validator: (v) => (v == null || v.length < 6)
+                                    ? 'Minimum 6 characters'
+                                    : null,
+                              ),
+                              const SizedBox(height: AppSpacing.xs),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                // Was shrunk to text-bounds via
+                                // tapTargetSize.shrinkWrap/minimumSize.zero — well
+                                // under the ~44px tap-target guideline. A normal
+                                // TextButton already has a sane default hit area;
+                                // removing that override is the whole fix.
+                                child: TextButton(
+                                  onPressed: () =>
+                                      context.push('/forgot-password'),
+                                  child: Text(
+                                    'Forgot password?',
+                                    style: TextStyle(
+                                      color: AppPalette.of(context).textMuted,
+                                      fontSize: roomyPhone ? 14 : 12.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (_error != null) ...[
+                                SizedBox(
+                                  height: compact
+                                      ? AppSpacing.sm
+                                      : AppSpacing.md,
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.all(AppSpacing.md),
+                                  decoration: BoxDecoration(
+                                    color: AppPalette.of(context).accentSoft,
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.sm,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _error!,
+                                    style: TextStyle(
+                                      color: AppPalette.of(context).accent,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              SizedBox(
+                                height: compact ? AppSpacing.xs : sectionGap,
+                              ),
+                              ElevatedButton(
+                                style: buttonStyle,
+                                onPressed: _loading ? null : _submit,
+                                child: _loading
+                                    ? const SizedBox(
+                                        height: 18,
+                                        width: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.white,
+                                        ),
+                                      )
+                                    : const Text('Log In'),
+                              ),
+                              SizedBox(height: sectionGap),
+                              Row(
+                                children: [
+                                  const Expanded(child: Divider()),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.md,
+                                    ),
+                                    child: Text(
+                                      'OR',
+                                      style: TextStyle(
+                                        color: AppPalette.of(context).textMuted,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.6,
+                                      ),
+                                    ),
+                                  ),
+                                  const Expanded(child: Divider()),
+                                ],
+                              ),
+                              SizedBox(height: groupGap),
+                              OutlinedButton.icon(
+                                style: buttonStyle,
+                                onPressed: _oauthLoading
+                                    ? null
+                                    : () => _oauthSignIn(
+                                        () => ref
+                                            .read(authRepositoryProvider)
+                                            .signInWithGoogle(),
+                                      ),
+                                icon: const Icon(Icons.g_mobiledata, size: 24),
+                                label: const Text('Continue with Google'),
+                              ),
+                              if (Theme.of(context).platform !=
+                                  TargetPlatform.android) ...[
+                                SizedBox(
+                                  height: roomyPhone
+                                      ? AppSpacing.sm
+                                      : compact
+                                      ? AppSpacing.sm
+                                      : AppSpacing.md,
+                                ),
+                                OutlinedButton.icon(
+                                  style: buttonStyle,
+                                  onPressed: _oauthLoading
+                                      ? null
+                                      : () => _oauthSignIn(
+                                          () => ref
+                                              .read(authRepositoryProvider)
+                                              .signInWithApple(),
+                                        ),
+                                  icon: const Icon(Icons.apple, size: 20),
+                                  label: const Text('Continue with Apple'),
+                                ),
+                              ],
+                              SizedBox(height: groupGap),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                spacing: 4,
+                                runSpacing: 4,
+                                children: [
+                                  Text(
+                                    "Don't have an account?",
+                                    style: TextStyle(
+                                      color: AppPalette.of(context).textMuted,
+                                      fontSize: roomyPhone ? 16 : 13.5,
+                                    ),
+                                  ),
+                                  // TextButton (not a bare GestureDetector) so
+                                  // this gets a real ~44px tap target and a
+                                  // splash/highlight, not just the glyph bounds.
+                                  TextButton(
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                      ),
+                                    ),
+                                    onPressed: () => context.push(
+                                      authRouteWithRedirect(
+                                        '/signup',
+                                        GoRouterState.of(context)
+                                            .uri
+                                            .queryParameters['redirect'],
+                                      ),
+                                    ),
+                                    child: Text(
+                                      'Sign up',
+                                      style: TextStyle(
+                                        color: AppPalette.of(context).accent,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: roomyPhone ? 16 : 13.5,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              TextButton(
+                                onPressed: () => context.push('/privacy'),
+                                child: const Text('Privacy Policy'),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

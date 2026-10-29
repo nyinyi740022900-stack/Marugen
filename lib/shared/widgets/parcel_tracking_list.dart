@@ -30,6 +30,11 @@ class ParcelTrackingList extends StatelessWidget {
         if (parcel.carrierName != null) Text(parcel.carrierName!),
         if (parcel.trackingNumber?.isNotEmpty == true && !parcel.isSample)
           SelectableText('Tracking: ${parcel.trackingNumber}'),
+        if (showMeasurements && parcel.bookingError != null)
+          Text(
+            parcel.bookingError!,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
         if (showMeasurements && parcel.quotedTotalCents != null)
           Text('Delivery: ${formatPrice(parcel.quotedTotalCents! / 100)}'),
         if (showMeasurements)

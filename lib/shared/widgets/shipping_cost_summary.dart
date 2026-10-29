@@ -26,6 +26,16 @@ class ShippingCostSummary extends StatelessWidget {
         order.sellerShippingCents == null) {
       return const Text('Delivery cost needs review. Open the order for help.');
     }
+    // A split order is billed per box, so the checkout quote understates it.
+    final parcels = order.parcels;
+    final parcelTotal =
+        parcels.length > 1 && parcels.every((p) => p.quotedTotalCents != null)
+        ? parcels.fold<int>(0, (sum, p) => sum + p.quotedTotalCents!)
+        : null;
+    final total = parcelTotal ?? order.totalShippingCents!;
+    final shopCovers = parcelTotal == null
+        ? order.sellerShippingCents!
+        : (parcelTotal - order.buyerShippingCents!).clamp(0, parcelTotal);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -33,9 +43,13 @@ class ShippingCostSummary extends StatelessWidget {
           '${order.shippingCarrierName ?? 'Courier'} delivery · SGD',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        Text('Total shipping: ${formatPrice(order.totalShippingCents! / 100)}'),
         Text(
-          'Buyer paid: ${formatPrice(order.buyerShippingCents! / 100)} · Shop covers: ${formatPrice(order.sellerShippingCents! / 100)}',
+          parcelTotal == null
+              ? 'Total shipping: ${formatPrice(total / 100)}'
+              : 'Total shipping (${parcels.length} parcels): ${formatPrice(total / 100)}',
+        ),
+        Text(
+          'Buyer paid: ${formatPrice(order.buyerShippingCents! / 100)} · Shop covers: ${formatPrice(shopCovers / 100)}',
         ),
       ],
     );

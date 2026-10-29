@@ -176,6 +176,65 @@ class _ParcelFulfillmentPanelState
     }
   }
 
+  Future<void> _retryBooking() async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        scrollable: true,
+        title: const Text('Retry booking?'),
+        content: const Text(
+          'EasyParcel did not confirm these parcels. A request that timed out '
+          'can still have created a shipment, so open EasyParcel first and '
+          'check that this order has no shipment there.\n\n'
+          'Retrying returns the parcels to draft. You will get a fresh quote '
+          'and approve the booking again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Nothing in EasyParcel — retry'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await _action('reset', data: {'confirmed_not_in_easyparcel': true});
+    }
+  }
+
+  Future<void> _discardPlan() async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        scrollable: true,
+        title: const Text('Ship as one parcel?'),
+        content: const Text(
+          'EasyParcel charges every parcel as its own shipment. Packing '
+          'everything in one box to the same address is usually cheaper.\n\n'
+          'This removes the parcel split. You can then book one courier '
+          'shipment for the whole order.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep parcels'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Ship as one parcel'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await _action('discard_plan');
+  }
+
   Future<void> _open(String url) async {
     final uri = Uri.tryParse(url);
     if (uri?.scheme != 'https') return;
@@ -264,12 +323,16 @@ class _ParcelFulfillmentPanelState
             onPressed: disabled ? null : () => _action('quote'),
             child: const Text('Get parcel quotes'),
           ),
-        if (_editable)
+        if (_editable) ...[
           TextButton(
             onPressed: disabled ? null : _edit,
             child: const Text('Edit parcels'),
-          )
-        else ...[
+          ),
+          TextButton(
+            onPressed: disabled ? null : _discardPlan,
+            child: const Text('Ship as one parcel'),
+          ),
+        ] else ...[
           if (parcels.any((p) => p.needsAttention || !p.canPrintLabel))
             TextButton.icon(
               onPressed: disabled
@@ -277,6 +340,12 @@ class _ParcelFulfillmentPanelState
                   : () => _open('https://app.easyparcel.com/shipment/list'),
               icon: const Icon(Icons.open_in_new, size: 18),
               label: const Text('Check EasyParcel'),
+            ),
+          if (parcels.every((p) => p.canRetryBooking))
+            OutlinedButton.icon(
+              onPressed: disabled ? null : _retryBooking,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Retry booking'),
             ),
         ],
         if (_busy) const LinearProgressIndicator(),

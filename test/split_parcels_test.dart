@@ -7,12 +7,14 @@ import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:marugen_app/shared/models/order.dart';
+import 'package:marugen_app/shared/widgets/shipping_cost_summary.dart';
 
 import 'delivery_workflow_test.dart' as delivery;
 
 Order splitOrder({
   List<Map<String, dynamic>> parcels = const [],
   bool legacy = false,
+  Map<String, dynamic> extra = const {},
 }) => Order.fromMap({
   'id': 'o',
   'user_id': 'buyer',
@@ -44,6 +46,7 @@ Order splitOrder({
     },
   ],
   'parcels': parcels,
+  ...extra,
 });
 Map<String, dynamic> box(int n, String state) => {
   'id': 'box-$n',
@@ -250,6 +253,63 @@ void main() {
       await captureSplit(tester, 'partial-parcel-progress');
     },
   );
+  test('failed unidentified booking can be retried; identified one cannot', () {
+    Map<String, dynamic> failed(int n, String code, {String? shipment}) => {
+      ...box(n, 'needs_attention'),
+      'diagnostic_code': code,
+      'shipment_number': shipment,
+      'tracking_number': null,
+      'awb_url': null,
+      'booking_error': n == 1 ? 'EasyParcel 400: Insufficient balance' : null,
+    };
+    final order = splitOrder(
+      parcels: [
+        failed(1, 'submission_uncertain'),
+        failed(2, 'not_attempted_after_failure'),
+      ],
+    );
+    expect(order.parcels.every((p) => p.canRetryBooking), isTrue);
+    expect(
+      order.parcels.first.statusLabel,
+      'Booking not confirmed by EasyParcel',
+    );
+    expect(
+      order.parcels.first.bookingError,
+      'EasyParcel 400: Insufficient balance',
+    );
+    expect(
+      order.parcels.last.statusLabel,
+      'Not booked — an earlier parcel failed',
+    );
+    final identified = splitOrder(
+      parcels: [failed(1, 'submission_uncertain', shipment: 'EP1')],
+    );
+    expect(identified.parcels.single.canRetryBooking, isFalse);
+  });
+  testWidgets('split order shows what every parcel actually costs', (
+    tester,
+  ) async {
+    final order = splitOrder(
+      parcels: [
+        {...box(1, 'draft'), 'quoted_total_cents': 379},
+        {...box(2, 'draft'), 'quoted_total_cents': 379},
+      ],
+      extra: {
+        'shipping_quote_id': 'q',
+        'shipping_currency': 'SGD',
+        'seller_shipping_cents': 200,
+      },
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ShippingCostSummary(order: order, showAllocation: true),
+        ),
+      ),
+    );
+    expect(find.text('Total shipping (2 parcels): S\$7.58'), findsOneWidget);
+    expect(find.textContaining('Shop covers: S\$5.58'), findsOneWidget);
+  });
   test('partial delivery does not claim the whole order delivered', () {
     final order = splitOrder(
       parcels: [box(1, 'delivered'), box(2, 'in_transit')],
@@ -272,7 +332,8 @@ void main() {
     (tester) async {
       final rows = [
         box(1, 'booked')..['awb_url'] = 'https://carrier.example/label-1.pdf',
-        box(2, 'in_transit')..['awb_url'] = 'https://carrier.example/label-2.pdf',
+        box(2, 'in_transit')
+          ..['awb_url'] = 'https://carrier.example/label-2.pdf',
       ];
       final order = splitOrder(parcels: rows);
       await delivery.showDelivery(tester, order);

@@ -2,6 +2,7 @@
 \ir ../migrations/0062_order_parcels.sql
 \ir ../migrations/0063_tracking_progress_guards.sql
 \ir ../migrations/0064_tracking_return_after_custody.sql
+\ir ../migrations/0070_parcel_booking_recovery.sql
 create function pg_temp.reject_write(statement text) returns void language plpgsql as $$ declare rejected boolean:=false; begin begin execute statement; exception when others then rejected:=true; end; if not rejected then raise exception 'Expected parcel write rejection: %',statement; end if; end $$;
 -- Fixtures committed by the shipping finance test before this suite.
 insert into public.order_items(order_id,product_id,variant_id,product_name,product_category,quantity,unit_price) select 'd5820000-0000-0000-0000-000000000001',product_id,id,'Test food','fish_food',2,5 from public.product_variants where label='500g';
@@ -29,6 +30,39 @@ select public.claim_order_parcel_plan('d5820000-0000-0000-0000-000000000001','si
 reset role;
 select pg_temp.reject_write($$select public.claim_order_parcel_plan('d5820000-0000-0000-0000-000000000001','sig',1000)$$);
 select pg_temp.reject_write(format('select public.save_order_parcel_plan(%L,%L::jsonb)',order_id,jsonb_build_array(pg_temp.box(item_id),pg_temp.box(item_id)))) from parcel_fixture;
+-- A request may still be in flight: no reset while the claim is fresh.
+select pg_temp.reject_write($$select public.reset_unsubmitted_parcel_plan('d5820000-0000-0000-0000-000000000001')$$);
+-- The booking function's failure write must land, not revert to booking.
+update public.order_parcels set state='needs_attention',tracking_status='Needs attention',tracking_updated_at=now(),
+ diagnostic_code=case parcel_number when 1 then 'submission_uncertain' else 'not_attempted_after_failure' end,
+ booking_error=case parcel_number when 1 then 'EasyParcel 400: Insufficient balance' end;
+do $$ begin if exists(select 1 from public.order_parcels where state<>'needs_attention' or tracking_status<>'Needs attention')then raise exception 'Failed booking stayed in booking';end if;end $$;
+-- A box EasyParcel identified can never be reset and rebooked.
+update public.order_parcels set shipment_number='EPSHIP1' where parcel_number=1;
+select pg_temp.reject_write($$select public.reset_unsubmitted_parcel_plan('d5820000-0000-0000-0000-000000000001')$$);
+update public.order_parcels set shipment_number=null where parcel_number=1;
+set role authenticated;
+select pg_temp.reject_write($$select public.reset_unsubmitted_parcel_plan('d5820000-0000-0000-0000-000000000001')$$);
+reset role;
+set role service_role;
+select public.reset_unsubmitted_parcel_plan('d5820000-0000-0000-0000-000000000001');
+reset role;
+do $$ begin if exists(select 1 from public.order_parcels where state<>'draft' or quote_signature is not null or booking_error is not null or diagnostic_code is not null)then raise exception 'Reset did not return a clean draft';end if;end $$;
+-- An unsubmitted split can be dropped so the order ships as one parcel.
+set role authenticated;
+select pg_temp.reject_write($$select public.discard_order_parcel_plan('d5820000-0000-0000-0000-000000000001')$$);
+reset role;
+set role service_role;
+select public.discard_order_parcel_plan('d5820000-0000-0000-0000-000000000001');
+reset role;
+do $$ begin if exists(select 1 from public.order_parcels)then raise exception 'Discard left parcel rows';end if;end $$;
+select public.save_order_parcel_plan(order_id,jsonb_build_array(pg_temp.box(item_id),pg_temp.box(item_id))) from parcel_fixture;
+-- A reset plan needs a fresh quote and approval before it can be claimed again.
+select pg_temp.reject_write($$select public.claim_order_parcel_plan('d5820000-0000-0000-0000-000000000001','sig',1000)$$);
+select public.quote_order_parcel_plan('d5820000-0000-0000-0000-000000000001',(select jsonb_agg(jsonb_build_object('id',id,'service_id','single','carrier_name','Carrier','quoted_total_cents',500)) from public.order_parcels),'sig2',now()+interval '10 minutes');
+set role service_role;
+select public.claim_order_parcel_plan('d5820000-0000-0000-0000-000000000001','sig2',1000);
+reset role;
 do $$ begin
  if (select buyer_shipping_cents from public.orders where id='d5820000-0000-0000-0000-000000000001')<>202 then raise exception 'Buyer repriced';end if;
 end $$;

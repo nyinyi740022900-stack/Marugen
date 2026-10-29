@@ -13,7 +13,9 @@ import { signature } from "../_shared/shipping_finance.ts";
 import {
   assertParcelApproval,
   cheapestPickupRate,
+  ParcelSubmitError,
   parcelPackingHints,
+  providerRejectionReason,
   runParcelBookings,
   validateAllocation,
 } from "../_shared/order_parcels.ts";
@@ -77,6 +79,28 @@ Deno.serve(async (req) => {
       return json({
         parcels: await refreshOrderParcels(admin, order.id, body.parcel_id),
       });
+    }
+    if (body.action === "discard_plan") {
+      const { error } = await admin.rpc("discard_order_parcel_plan", {
+        p_order_id: order.id,
+      });
+      if (error) throw new DeliveryError(error.message, 409);
+      return json({ parcels: [] });
+    }
+    if (body.action === "reset") {
+      // Staff must have checked EasyParcel: a timed-out request can still
+      // have created a shipment there, and the database cannot see that.
+      if (body.confirmed_not_in_easyparcel !== true) {
+        throw new DeliveryError(
+          "Confirm EasyParcel has no shipment for this order before retrying",
+          409,
+        );
+      }
+      const { data, error } = await admin.rpc("reset_unsubmitted_parcel_plan", {
+        p_order_id: order.id,
+      });
+      if (error) throw new DeliveryError(error.message, 409);
+      return json({ parcels: data });
     }
     if (!["quote", "book"].includes(body.action)) {
       throw new DeliveryError("Unknown parcel action");
@@ -264,7 +288,11 @@ Deno.serve(async (req) => {
           !paymentRequired &&
           (!response.ok || (result.status_code && result.status_code !== 200) ||
             shipment?.status !== "success")
-        ) throw new Error("Provider did not confirm submission");
+        ) {
+          const reason = providerRejectionReason(response.status, result);
+          console.error("[order-parcels] submission rejected", order.id, reason);
+          throw new ParcelSubmitError(reason);
+        }
         return {
           trackingNumber: typeof shipment?.awb_number === "string"
             ? shipment.awb_number

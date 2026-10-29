@@ -81,7 +81,42 @@ export type BookingOutcome = {
   shipment_number: string | null;
   awb_url: string | null;
   diagnostic_code: string | null;
+  booking_error: string | null;
 };
+/// EasyParcel answered but did not confirm the shipment. `reason` is the
+/// provider's short status/message only — never the request or full body,
+/// which carry the customer's address and phone.
+export class ParcelSubmitError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+  }
+}
+export function providerRejectionReason(
+  httpStatus: number,
+  result: unknown,
+): string {
+  const body = (result ?? {}) as Record<string, unknown>;
+  const shipment = (body.data as { shipments?: Record<string, unknown>[] }[])
+    ?.[0]?.shipments?.[0];
+  const code = typeof body.status_code === "number"
+    ? body.status_code
+    : httpStatus;
+  const message = [shipment?.message, shipment?.status, body.message]
+    .find((m) => typeof m === "string" && m.trim()) as string | undefined;
+  const clean = (message ?? "no reason given")
+    .replace(/[\x00-\x1F\x7F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return `EasyParcel ${code}: ${clean}`;
+}
+function bookingErrorFor(error: unknown): string {
+  if (error instanceof ParcelSubmitError) return error.reason;
+  const name = (error as { name?: string })?.name;
+  return name === "TimeoutError" || name === "AbortError"
+    ? "EasyParcel did not respond in time. Check EasyParcel for this order before retrying."
+    : "Could not reach EasyParcel. Check EasyParcel for this order before retrying.";
+}
 export async function runParcelBookings<T extends { id: string }>(
   parcels: T[],
   port: {
@@ -105,6 +140,7 @@ export async function runParcelBookings<T extends { id: string }>(
       diagnostic_code: stopped
         ? "not_attempted_after_failure"
         : "submission_uncertain",
+      booking_error: null,
     };
     if (!stopped) {
       try {
@@ -129,9 +165,11 @@ export async function runParcelBookings<T extends { id: string }>(
             : safe
             ? null
             : "missing_tracking",
+          booking_error: null,
         };
         if (!safe) stopped = true;
-      } catch {
+      } catch (error) {
+        outcome = { ...outcome, booking_error: bookingErrorFor(error) };
         stopped = true;
       }
     }

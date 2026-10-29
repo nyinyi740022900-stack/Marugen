@@ -6,6 +6,8 @@ import {
 import {
   cheapestPickupRate,
   parcelTrackingState,
+  ParcelSubmitError,
+  providerRejectionReason,
   runParcelBookings,
   validateAllocation,
 } from "./order_parcels.ts";
@@ -89,6 +91,11 @@ Deno.test("whole-plan claim precedes all submits and partial failure retains suc
     "booked",
     "needs_attention",
     "needs_attention",
+  ]);
+  assertEquals(saved.map((s) => s.booking_error), [
+    null,
+    "Could not reach EasyParcel. Check EasyParcel for this order before retrying.",
+    null,
   ]);
   await assertRejects(() =>
     runParcelBookings([{ id: "a" }], {
@@ -300,4 +307,44 @@ Deno.test("selected variants never inherit disabled parent packing hints", async
     weight_kg: 4,
     packed_dimensions: product.packed_dimensions,
   });
+});
+Deno.test("provider rejection keeps EasyParcel's short reason and timeouts say so", async () => {
+  assertEquals(
+    providerRejectionReason(200, {
+      status_code: 400,
+      message: "Failed",
+      data: [{ shipments: [{ status: "fail", message: "Insufficient\n balance" }] }],
+    }),
+    "EasyParcel 400: Insufficient balance",
+  );
+  assertEquals(providerRejectionReason(502, null), "EasyParcel 502: no reason given");
+  const saved: Record<string, unknown>[] = [];
+  await runParcelBookings([{ id: "a" }, { id: "b" }], {
+    claim: async () => true,
+    submit: async (p) => {
+      if (p.id === "a") throw new ParcelSubmitError("EasyParcel 400: Insufficient balance");
+      throw Error("must not submit after a failure");
+    },
+    persist: async (p, result) => {
+      saved.push({ id: p.id, ...result });
+    },
+  });
+  assertEquals(saved.map((s) => [s.diagnostic_code, s.booking_error]), [
+    ["submission_uncertain", "EasyParcel 400: Insufficient balance"],
+    ["not_attempted_after_failure", null],
+  ]);
+  const timedOut: Record<string, unknown>[] = [];
+  await runParcelBookings([{ id: "a" }], {
+    claim: async () => true,
+    submit: async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    },
+    persist: async (_, result) => {
+      timedOut.push(result);
+    },
+  });
+  assertEquals(
+    timedOut[0].booking_error,
+    "EasyParcel did not respond in time. Check EasyParcel for this order before retrying.",
+  );
 });

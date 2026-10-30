@@ -35,6 +35,7 @@ import 'purchase_intent.dart';
 import 'shipping_quote_providers.dart';
 import '../domain/shipping_quote.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/undo_snack_bar.dart';
 
 /// A random per-attempt key for `create-payment-intent` — see
 /// CheckoutScreen's `_idempotencyKey` doc. Just needs to be unique per
@@ -116,27 +117,20 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       final index = _buyNowItems!.indexWhere((i) => i.lineKey == item.lineKey);
       if (index < 0) return;
       setState(() => _buyNowItems.removeAt(index));
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${item.product.name} removed'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              if (!_ownsCheckout ||
-                  _processing ||
-                  _buyNowItems.any((i) => i.lineKey == item.lineKey)) {
-                return;
-              }
-              setState(
-                () => _buyNowItems.insert(
-                  index.clamp(0, _buyNowItems.length),
-                  item,
-                ),
-              );
-            },
-          ),
-        ),
+      showUndoSnackBar(
+        ScaffoldMessenger.of(context),
+        message: '${item.product.name} removed',
+        onAction: () {
+          if (!_ownsCheckout ||
+              _processing ||
+              _buyNowItems.any((i) => i.lineKey == item.lineKey)) {
+            return;
+          }
+          setState(
+            () =>
+                _buyNowItems.insert(index.clamp(0, _buyNowItems.length), item),
+          );
+        },
       );
     } else {
       ref
@@ -147,29 +141,24 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             size: item.selectedSize,
           );
       final ownerId = _checkoutOwner;
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${item.product.name} removed'),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              if (!_ownsCheckout || _processing) return;
-              final restored = ref
-                  .read(cartProvider.notifier)
-                  .restoreRemoved(item, ownerId: ownerId);
-              if (!restored && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'This item could not be restored. Check your cart and availability.',
-                    ),
-                  ),
-                );
-              }
-            },
-          ),
-        ),
+      showUndoSnackBar(
+        ScaffoldMessenger.of(context),
+        message: '${item.product.name} removed',
+        onAction: () {
+          if (!_ownsCheckout || _processing) return;
+          final restored = ref
+              .read(cartProvider.notifier)
+              .restoreRemoved(item, ownerId: ownerId);
+          if (!restored && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'This item could not be restored. Check your cart and availability.',
+                ),
+              ),
+            );
+          }
+        },
       );
     }
   }

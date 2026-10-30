@@ -441,4 +441,31 @@ void main() {
     );
     expect(find.textContaining('22.02 with Stripe'), findsOneWidget);
   });
+  testWidgets('removal Undo counts down and closes after five seconds', (
+    tester,
+  ) async {
+    await showCheckout(
+      tester,
+      Future.value({'gst_percent': 9, 'gst_included_in_price': true}),
+    );
+    await tester.pumpAndSettle();
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Remove'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Remove'));
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsOneWidget);
+    expect(find.text('5'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsNothing);
+    expect(
+      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      isNull,
+    );
+  });
 }

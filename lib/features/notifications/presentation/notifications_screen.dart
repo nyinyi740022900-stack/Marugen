@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/app_notification.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/undo_snack_bar.dart';
 import 'notification_providers.dart';
 
 /// Shared between the customer and admin apps — each only ever sees their
@@ -97,29 +98,23 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         }
       } catch (_) {
         if (!messenger.mounted || !notifier.isCurrentDismissal(batch)) return;
-        messenger.showSnackBar(
-          SnackBar(
-            content: const Text("Couldn't restore notifications. Try again."),
-            action: SnackBarAction(label: 'Retry', onPressed: undo),
-          ),
+        showUndoSnackBar(
+          messenger,
+          message: "Couldn't restore notifications. Try again.",
+          actionLabel: 'Retry',
+          onAction: undo,
         );
       }
     }
 
     final count = batch.items.length;
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            partial
-                ? '$count deleted. Remaining notifications are still selected.'
-                : '$count notification${count == 1 ? '' : 's'} deleted',
-          ),
-          duration: const Duration(seconds: 8),
-          action: SnackBarAction(label: 'Undo', onPressed: undo),
-        ),
-      );
+    showUndoSnackBar(
+      messenger,
+      message: partial
+          ? '$count deleted. Remaining notifications are still selected.'
+          : '$count notification${count == 1 ? '' : 's'} deleted',
+      onAction: undo,
+    );
   }
 
   @override

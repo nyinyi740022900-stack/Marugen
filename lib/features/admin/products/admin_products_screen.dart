@@ -8,6 +8,7 @@ import '../../../shared/providers/paged_notifier.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/product_grid.dart';
+import '../../../shared/widgets/undo_snack_bar.dart';
 import '../../shop/data/product_repository.dart';
 import '../../shop/presentation/shop_providers.dart';
 
@@ -381,25 +382,17 @@ class _AvailabilityToggle extends StatelessWidget {
     await repo.updateProduct(product.id, {'stock_quantity': newStock});
     refreshAdminProducts(ref);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            wasAvailable
-                ? '${product.name} marked sold'
-                : '${product.name} marked available',
-          ),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () async {
-              await repo.updateProduct(product.id, {
-                'stock_quantity': wasAvailable ? 1 : 0,
-              });
-              refreshAdminProducts(ref);
-            },
-          ),
-        ),
-      );
+    showUndoSnackBar(
+      ScaffoldMessenger.of(context),
+      message: wasAvailable
+          ? '${product.name} marked sold'
+          : '${product.name} marked available',
+      onAction: () async {
+        await repo.updateProduct(product.id, {
+          'stock_quantity': wasAvailable ? 1 : 0,
+        });
+        refreshAdminProducts(ref);
+      },
+    );
   }
 }

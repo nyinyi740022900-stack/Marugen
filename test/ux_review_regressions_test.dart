@@ -119,6 +119,38 @@ void main() {
     expect((container.read(cartProvider.notifier) as ReviewCart).restores, 0);
     expect(container.read(cartProvider).length, 1);
   });
+  testWidgets('Cart removal Undo counts down and closes after five seconds', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        currentUserIdProvider.overrideWithValue('customer'),
+        cartProvider.overrideWith(ReviewCart.new),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = GoRouter(
+      initialLocation: '/cart',
+      routes: [GoRoute(path: '/cart', builder: (_, _) => const CartScreen())],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(theme: AppTheme.light, routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Remove from cart'));
+    await tester.pumpAndSettle();
+    expect(find.text('Undo'), findsOneWidget);
+    expect(find.text('5'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.byType(SnackBar), findsNothing);
+    expect((container.read(cartProvider.notifier) as ReviewCart).restores, 0);
+    expect(container.read(cartProvider).length, 1);
+  });
 
   testWidgets(
     'Reduced-motion product tabs jump without a zero-duration animation',

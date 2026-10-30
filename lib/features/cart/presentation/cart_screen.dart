@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/undo_snack_bar.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../orders/presentation/purchase_intent.dart';
 import '../domain/cart_item.dart';
@@ -31,32 +32,25 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           variantId: item.selectedVariant?.id,
           size: item.selectedSize,
         );
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('Removed ${item.product.name}'),
-          duration: const Duration(seconds: 6),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
-              final restored = ref
-                  .read(cartProvider.notifier)
-                  .restoreRemoved(item, ownerId: ownerId);
-              if (!restored) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Your cart has changed. Add this item from the shop if needed.',
-                    ),
-                  ),
-                );
-              }
-            },
-          ),
-        ),
-      );
+    showUndoSnackBar(
+      ScaffoldMessenger.of(context),
+      message: 'Removed ${item.product.name}',
+      onAction: () {
+        if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+        final restored = ref
+            .read(cartProvider.notifier)
+            .restoreRemoved(item, ownerId: ownerId);
+        if (!restored) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Your cart has changed. Add this item from the shop if needed.',
+              ),
+            ),
+          );
+        }
+      },
+    );
   }
 
   @override

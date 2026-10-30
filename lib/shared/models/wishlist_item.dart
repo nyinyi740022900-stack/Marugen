@@ -1,4 +1,5 @@
 import 'product.dart';
+import '../utils/server_time.dart';
 
 /// A saved (favorited) product in the customer's wishlist.
 /// See `supabase/migrations/0004_wishlist.sql`.
@@ -22,7 +23,7 @@ class WishlistItem {
       id: map['id'] as String,
       userId: map['user_id'] as String,
       productId: map['product_id'] as String,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: parseServerTime(map['created_at'] as String),
       product: map['product'] != null
           ? Product.fromMap(map['product'] as Map<String, dynamic>)
           : null,

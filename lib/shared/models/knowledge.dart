@@ -1,3 +1,5 @@
+import '../utils/server_time.dart';
+
 /// One growth/size stage of a variety (e.g. "Tosai — under 1yr", "Nisai —
 /// 2yr") with its own photo, shown as a gallery so customers can see how
 /// the pattern/colour develops as the fish matures.
@@ -99,7 +101,7 @@ class KnowledgeArticle {
       bodyMarkdown: map['body_markdown'] as String? ?? '',
       coverImageUrl: map['cover_image_url'] as String?,
       publishedAt: map['published_at'] != null
-          ? DateTime.tryParse(map['published_at'] as String)
+          ? tryParseServerTime(map['published_at'])
           : null,
       active: map['active'] as bool? ?? true,
     );

@@ -81,7 +81,7 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
       // Only stamp published_at on first publish — editing shouldn't bump
       // it back to the top of the "newest first" guide list.
       if (_savedId == null) {
-        payload['published_at'] = DateTime.now().toIso8601String();
+        payload['published_at'] = DateTime.now().toUtc().toIso8601String();
       }
       final id = await repo.upsertArticle(payload, id: _savedId);
       _savedId = id;

@@ -1,3 +1,5 @@
+import '../utils/server_time.dart';
+
 /// One row from `public.notifications` — the in-app inbox counterpart to
 /// a push notification (see supabase/functions/send-order-notification
 /// and 0016_notifications.sql). Written for every recipient regardless of
@@ -47,8 +49,8 @@ class AppNotification {
       orderId: map['order_id'] as String?,
       type: map['type'] as String? ?? 'order_status',
       read: map['read'] as bool? ?? false,
-      createdAt: DateTime.parse(map['created_at'] as String),
-      dismissedAt: DateTime.tryParse(map['dismissed_at'] as String? ?? ''),
+      createdAt: parseServerTime(map['created_at'] as String),
+      dismissedAt: tryParseServerTime(map['dismissed_at']),
     );
   }
 }

@@ -72,11 +72,14 @@ export async function checkoutBinding(
   if (settingsError) throw settingsError;
   let promotion: unknown = null;
   if (normalized.promo) {
-    const { data, error } = await admin.from("promo_codes").select(
+    // Same exact lookup as create-payment-intent; never ILIKE wildcards.
+    const { data, error } = await admin.rpc("find_promo_code", {
+      p_code: normalized.promo,
+    }).select(
       "id,code,discount_type,discount_value,active,expires_at,max_redemptions",
-    ).ilike("code", normalized.promo).maybeSingle();
+    );
     if (error) throw error;
-    promotion = data;
+    promotion = (Array.isArray(data) ? data[0] : data) ?? null;
   }
   const ordered = (rows: unknown[]) =>
     rows.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));

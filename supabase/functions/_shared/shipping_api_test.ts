@@ -172,3 +172,39 @@ Deno.test("single packed SKU dimensions quote its box; multiple units do not inv
   );
   assert(many.parcel?.weight_kg === 1 && many.parcel?.length_cm === undefined);
 });
+
+Deno.test("promo pricing uses the exact-match RPC, never an ILIKE table read", async () => {
+  const base = client();
+  const lookups: unknown[] = [];
+  const promo = {
+    id: "promo",
+    code: "SAVE10",
+    discount_type: "percent",
+    discount_value: 10,
+    active: true,
+    expires_at: null,
+    max_redemptions: null,
+  };
+  const admin = {
+    from(table: string) {
+      if (table === "promo_codes") {
+        throw new Error("promo_codes must not be queried directly");
+      }
+      return base.from(table);
+    },
+    rpc(fn: string, params: Record<string, unknown>) {
+      lookups.push([fn, params]);
+      return {
+        select: () => Promise.resolve({ data: [promo], error: null }),
+      };
+    },
+  } as unknown as SupabaseClient;
+  const items = [{ product_id: "p", variant_id: "v", quantity: 1 }];
+  const withPromo = await checkoutBinding(admin, items, address, " save10 ");
+  assert(
+    JSON.stringify(lookups) ===
+      JSON.stringify([["find_promo_code", { p_code: "SAVE10" }]]),
+  );
+  const without = await checkoutBinding(base, items, address, null);
+  assert(withPromo.pricing_signature !== without.pricing_signature);
+});

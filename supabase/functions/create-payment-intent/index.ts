@@ -487,13 +487,19 @@ Deno.serve(async (req) => {
     let promoCode: string | null = null;
     let promoId: string | null = null;
     if (promoCodeRaw) {
-      const { data: promo } = await admin
-        .from("promo_codes")
+      // Exact, case-insensitive match (0071_private_promo_codes.sql) — an
+      // ILIKE lookup let `%`/`*` apply a code the customer never knew.
+      const { data: promoRows, error: promoError } = await admin
+        .rpc("find_promo_code", { p_code: promoCodeRaw })
         .select(
           "id, code, discount_type, discount_value, active, expires_at, max_redemptions, times_redeemed",
-        )
-        .ilike("code", promoCodeRaw)
-        .maybeSingle();
+        );
+      if (promoError) {
+        console.error("Promo lookup failed", promoError);
+        return jsonResponse({ error: "Could not check promo code" }, 500);
+      }
+      const promo = (Array.isArray(promoRows) ? promoRows[0] : promoRows) ??
+        null;
 
       if (!promo || !promo.active) {
         return jsonResponse({ error: "Invalid promo code" }, 400);

@@ -342,6 +342,39 @@ void main() {
       isNotNull,
     );
   });
+  testWidgets('a code the customer already used is rejected when applied', (
+    tester,
+  ) async {
+    final repo = PendingPromoRepository();
+    await showCheckout(
+      tester,
+      Future.value({'gst_percent': 9, 'gst_included_in_price': true}),
+      promoRepository: repo,
+    );
+    await tester.pumpAndSettle();
+    final promoField = find.byKey(const ValueKey('promo-code'));
+    await tester.scrollUntilVisible(
+      promoField,
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(promoField, 'SAVE10');
+    await tester.ensureVisible(find.text('Apply'));
+    await tester.tap(find.text('Apply'));
+    repo.result.complete(
+      const PromoCode(
+        id: 'p1',
+        code: 'SAVE10',
+        discountType: DiscountType.percent,
+        discountValue: 10,
+        active: true,
+        alreadyRedeemed: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('You have already used this promo code.'), findsOneWidget);
+    expect(find.textContaining('22.02 with Stripe'), findsOneWidget);
+  });
   testWidgets(
     'payment stays disabled until totals are loaded then shows tax-inclusive amount',
     (tester) async {

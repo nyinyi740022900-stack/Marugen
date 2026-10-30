@@ -1,3 +1,5 @@
+import '../utils/server_time.dart';
+
 enum UserRole { customer, staff, owner }
 
 UserRole userRoleFromString(String? value) {
@@ -47,7 +49,7 @@ class AppUser {
       role: userRoleFromString(map['role'] as String?),
       notificationsEnabled: map['notifications_enabled'] as bool? ?? true,
       createdAt: map['created_at'] != null
-          ? DateTime.tryParse(map['created_at'] as String)
+          ? tryParseServerTime(map['created_at'])
           : null,
     );
   }

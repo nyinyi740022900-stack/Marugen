@@ -1,3 +1,5 @@
+import '../utils/server_time.dart';
+
 /// A single customer's rating + optional comment on a product.
 /// `product_reviews` has a `unique(product_id, user_id)` constraint, so a
 /// user can only ever have one review per product — update/delete instead
@@ -42,12 +44,12 @@ class ProductReview {
       userId: map['user_id'] as String,
       rating: map['rating'] as int? ?? 0,
       comment: map['comment'] as String?,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: parseServerTime(map['created_at'] as String),
       authorName: profile?['full_name'] as String?,
       authorAvatarUrl: profile?['avatar_url'] as String?,
       isHidden: map['is_hidden'] as bool? ?? false,
       shopReply: map['admin_reply'] as String?,
-      shopReplyAt: replyAt == null ? null : DateTime.parse(replyAt),
+      shopReplyAt: replyAt == null ? null : parseServerTime(replyAt),
     );
   }
 }

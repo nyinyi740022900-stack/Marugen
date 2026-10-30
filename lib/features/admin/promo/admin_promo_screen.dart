@@ -338,7 +338,9 @@ class AdminPromoScreen extends ConsumerWidget {
                               'discount_type': type.name,
                               'discount_value': value,
                               'active': active,
-                              'expires_at': expiresAt?.toIso8601String(),
+                              'expires_at': expiresAt == null
+                                  ? null
+                                  : promoExpiryStorageValue(expiresAt!),
                               'max_redemptions': maxRedemptionsText.isEmpty
                                   ? null
                                   : int.tryParse(maxRedemptionsText),

@@ -1,5 +1,6 @@
 import 'order_parcel.dart';
 import 'order_cancellation_request.dart';
+import '../utils/server_time.dart';
 
 enum OrderStatus {
   pending,
@@ -381,7 +382,7 @@ class Order {
       refundPendingAmount:
           (map['refund_pending_amount'] as num?)?.toDouble() ?? 0,
       total: (map['total'] as num?)?.toDouble() ?? 0,
-      createdAt: DateTime.parse(map['created_at'] as String),
+      createdAt: parseServerTime(map['created_at'] as String),
       items:
           (map['items'] as List?)
               ?.map((e) => OrderItem.fromMap(e as Map<String, dynamic>))
@@ -410,7 +411,7 @@ class Order {
           ? 'The shop is checking a shipping booking issue.'
           : map['tracking_status_detail'] as String?,
       trackingUpdatedAt: map['tracking_updated_at'] != null
-          ? DateTime.tryParse(map['tracking_updated_at'] as String)
+          ? tryParseServerTime(map['tracking_updated_at'])
           : null,
       trackingRegistered: map['tracking_registered'] as bool? ?? false,
       trackingProvider: map['tracking_provider'] as String?,
@@ -426,8 +427,8 @@ class Order {
       shippingParcel: (map['shipping_parcel'] as Map?)?.cast<String, dynamic>(),
       easyparcelBookingState: map['easyparcel_booking_state'] as String?,
       easyparcelShipmentId: map['easyparcel_shipment_id'] as String?,
-      easyparcelBookingStartedAt: DateTime.tryParse(
-        map['easyparcel_booking_started_at']?.toString() ?? '',
+      easyparcelBookingStartedAt: tryParseServerTime(
+        map['easyparcel_booking_started_at'],
       ),
       cancellationRequest: OrderCancellationRequest.fromRelation(
         map['order_cancellation_requests'],

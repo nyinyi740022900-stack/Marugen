@@ -1,3 +1,5 @@
+import '../utils/server_time.dart';
+
 /// A cancellation decision and its payment refund are separate states.
 class OrderCancellationRequest {
   final String status;
@@ -20,8 +22,8 @@ class OrderCancellationRequest {
       status: value['status'] as String? ?? 'unknown',
       reason: value['reason'] as String?,
       reviewNote: value['review_note'] as String?,
-      requestedAt: DateTime.tryParse(value['requested_at']?.toString() ?? ''),
-      reviewedAt: DateTime.tryParse(value['reviewed_at']?.toString() ?? ''),
+      requestedAt: tryParseServerTime(value['requested_at']),
+      reviewedAt: tryParseServerTime(value['reviewed_at']),
     );
   }
 }

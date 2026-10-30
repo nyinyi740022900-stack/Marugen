@@ -192,13 +192,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     try {
       final promo = await ref.read(promoRepositoryProvider).lookupCode(code);
       if (!_ownsCheckout) return;
-      if (promo == null || !promo.isUsable) {
+      if (promo == null || !promo.isUsable || promo.alreadyRedeemed) {
         setState(() {
           _appliedPromo = null;
           _promoError = promo == null
               ? 'Invalid promo code.'
               : promo.isExpired
               ? 'This promo code has expired.'
+              : promo.alreadyRedeemed
+              ? 'You have already used this promo code.'
               : promo.isRedemptionCapReached
               ? 'This promo code has reached its usage limit.'
               : 'This promo code is no longer active.';

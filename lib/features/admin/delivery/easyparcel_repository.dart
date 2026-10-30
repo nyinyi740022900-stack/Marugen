@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart' show FunctionException;
 
 import '../../../core/supabase/supabase_client.dart';
+import '../../../shared/utils/server_time.dart';
 
 /// Talks to the `easyparcel-*` Supabase Edge Functions — the automated
 /// shipment-booking path that replaces manually typing a tracking number
@@ -38,7 +39,7 @@ class EasyParcelRepository {
     return EasyParcelStatus(
       connected: data['connected'] as bool? ?? false,
       connectedAt: data['connected_at'] != null
-          ? DateTime.tryParse(data['connected_at'].toString())
+          ? tryParseServerTime(data['connected_at'])
           : null,
     );
   }

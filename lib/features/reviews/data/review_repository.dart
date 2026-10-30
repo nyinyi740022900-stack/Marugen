@@ -61,7 +61,7 @@ class ReviewRepository {
     final trimmed = reply?.trim();
     await _client.from('product_reviews').update({
       'admin_reply': (trimmed == null || trimmed.isEmpty) ? null : trimmed,
-      'admin_reply_at': (trimmed == null || trimmed.isEmpty) ? null : DateTime.now().toIso8601String(),
+      'admin_reply_at': (trimmed == null || trimmed.isEmpty) ? null : DateTime.now().toUtc().toIso8601String(),
     }).eq('id', reviewId);
   }
 

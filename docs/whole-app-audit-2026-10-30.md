@@ -15,7 +15,13 @@ P0-1 နဲ့ P0-2 ကို source မှာ ပြင်ပြီး local te
 - Deno: `deno test --allow-env supabase/functions` **104 passed**၊ new RPC test သည် မူလ `shipping_api.ts` ပေါ်မှာ fail ပြီး fix ပေါ်မှာ pass။ `create-payment-intent`၊ `checkout-shipping-quote` type-check pass။
 - Flutter: `test/promo_repository_test.dart` (RPC request/body၊ wildcard literal၊ blank input)၊ checkout "already used" widget test၊ `test/server_time_test.dart` (local wall-clock၊ SGT 07:30 order = Oct 30၊ promo expiry round trip)။ Timezone tests သည် မူလ models ပေါ်မှာ fail ပြီး fix ပေါ်မှာ pass။
 
-### Rollout (owner လုပ်ရမည်၊ အစဉ်လိုက်)
+### Rollout status (2026-10-30)
+
+- Step 1 — owner က 0071 ကို apply လုပ်ပြီး။ Public key probe: anonymous `promo_codes` listing 0 rows၊ RPC ၂ ခု anon ကို ပိတ် (42501)။
+- Step 2 — CLI နဲ့ deploy ပြီး: `create-payment-intent` v30၊ `checkout-shipping-quote` v6 (`verify_jwt` မပြောင်း)။
+- Step 3 — 1.0.25 (30) ကို Closed testing — Alpha review ပို့ပြီး ([closed-beta-1.0.25.md](closed-beta-1.0.25.md))။ Google approval မရသေး။
+
+### Rollout (မူလ အစီအစဉ်၊ အစဉ်လိုက်)
 
 1. Production DB မှာ `0071_private_promo_codes.sql` apply (SQL editor သို့ authorized migration process)။
 2. `create-payment-intent` နဲ့ `checkout-shipping-quote` ကို redeploy (function ၂ ခုလုံး `find_promo_code` ကို သုံးလို့ step 1 ပြီးမှ)။

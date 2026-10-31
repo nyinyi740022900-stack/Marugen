@@ -2,6 +2,57 @@
 
 Dev tester အမြင်ဖြင့် app တစ်ခုလုံး (customer app၊ owner/staff admin၊ Supabase backend) ကို `main` @ `5db01fb` / 1.0.24 (29) အပေါ်မှာ စစ်ထားသည်။ Code မပြင်ရသေးပါ။ Production data ကို မပြောင်းထားပါ။ (Debug build ကလည်း analytics ကို prod ထဲ ရေးသောကြောင့် — D2 — live run မလုပ်ခဲ့ပါ။)
 
+## Re-check — 2026-10-31 (`main` @ `6143952`, 1.0.26 (31))
+
+Read-only စစ်ဆေးမှုသာ — code၊ production data၊ release မပြောင်းထားပါ။
+
+### Passed
+
+- **Code:** `flutter analyze` issue မရှိ။ Flutter **511 passed / 4 failed** (`pdftoppm` မရှိလို့ print test ၄ ခုပဲ)။ Deno **104 passed**။ Edge Function entry point **22 ခုလုံး** `deno check` pass။ SQL suite **၈ ခုလုံး** pass (private promo၊ promo release၊ stock/review၊ delivery၊ order parcels၊ shipping finance၊ notification dismissal၊ support contacts)။
+- **Git:** Working tree သန့်၊ branch = `main` = `origin/main` = `6143952`။
+- **Production (public key probe):** Anonymous `promo_codes` listing 0 rows၊ `check_promo_code` / `find_promo_code` anon ကို 42501 နဲ့ ပိတ်။ Guest catalog (`products`) နဲ့ `settings` ဖတ်လို့ရဆဲ။
+- **Edge Functions:** CORS handle လုပ်တဲ့ function ၁၆ ခုလုံး OPTIONS → 200 (boot ဖြစ်)။ `stripe-webhook` (signature မပါ → 400)၊ `reconcile-pending-orders` (403)၊ `easyparcel-webhook` (untrusted IP → 403) guard တွေ မှန်။
+- **Store policy pages:** GitHub Pages မှ privacy / data-deletion / terms စာမျက်နှာ 200။
+- **Stripe live webhook:** "Marugen App Production" Active၊ event ၇ မျိုး၊ ဒီတစ်ပတ် delivery 16 / failed 0 (avg 2.7 s၊ max 6.0 s)။ Oct 29 က live `payment_intent.succeeded`၊ `refund.*`၊ `charge.refunded` အားလုံး 200 OK — live secret key နဲ့ payment→webhook လမ်းကြောင်း အလုပ်လုပ်ကြောင်း အတည်ပြု။
+- **Play Console:** 1.0.26 (31) approve ဖြစ်ပြီး Closed testing — Alpha မှာ live (Oct 31)။ Android vitals: ၂၈ ရက်အတွင်း user-perceived crash/ANR မရှိ။
+- **iPhone:** Owner ရဲ့ iPhone 17 Pro Max မှာ Marugen 1.0.26 (31)။ Push / Apple sign-in entitlement မပါ (free team၊ မျှော်လင့်ထားသည့်အတိုင်း)။
+
+### Needs attention
+
+- **iPhone provisioning profile 2026-11-03 00:57 SGT မှာ သက်တမ်းကုန်** — ထို့နောက် app မဖွင့်နိုင်၊ ပြန် build/install လိုသည် (free team ကန့်သတ်ချက်)။
+- **Supabase CLI က Marugen project ကို ဒီနေ့ မမြင်ရတော့ (403)** — 10-30 က deploy လုပ်ခဲ့ပေမဲ့ access ပြန်ရုပ်သိမ်းခံရပုံ။ ဒါကြောင့် deployed function version/drift နဲ့ cron job status ကို ဒီတစ်ကြိမ် မစစ်နိုင်ပါ။ Chrome ထဲက Supabase account (YaPi) ကလည်း project ကို မမြင်ရ။
+- **CI မရှိ** — GitHub Actions မှာ Pages build ပဲရှိပြီး analyze/test/deno ကို local မှာပဲ run။
+- **Play pre-launch report မရှိ** — upload တိုင်း device test အလိုအလျောက် မထွက်ပါ (Play Console setting စစ်ရန်)။
+- **Repo အမှိုက်:** `origin/claude/issue-report-0ad7il` (၆ ပတ် ဟောင်း၊ main က ဖယ်ထားခဲ့တဲ့ Apple Pay config ပြန်ထည့်ထား) နဲ့ merge ပြီးသား worktree `.claude/worktrees/agent-aba6b2857140ad260`။
+- P1 / P2 စာရင်း (အောက်တွင်) မပြင်ရသေး။
+
+## Fix status — CI, P1, P2 (2026-10-31, branch `codex/whole-app-audit-fixes`, push မလုပ်ရသေး)
+
+Commit ၇ ခု: `1c0f264` CI → `a961875` → `74aabbf` → `1203817` → `f37e8e7` → `5efbd69` → `027a45d`။ Batch တိုင်း Flutter test အပြည့်၊ Deno test၊ SQL suite အားလုံး pass ပြီးမှ commit လုပ်ထားသည်။ Test အသစ်တိုင်းကို code ဟောင်းပေါ်မှာ fail ဖြစ်ကြောင်းလည်း စစ်ထားသည်။
+
+- **CI:** [.github/workflows/ci.yml](../.github/workflows/ci.yml) — `flutter analyze` + `flutter test` (Singapore time၊ poppler ပါ)၊ `deno check` + `deno test`၊ `supabase/tests/run_*.sh` ၁၂ ခု။ Secret မလို။ Poppler မရှိတဲ့ စက်မှာ print test ၄ ခု skip ဖြစ်သည် (fail မဟုတ်တော့)။
+- **Repo:** `origin/claude/issue-report-0ad7il` ဖျက်ပြီး (PR #2 closed)။ Local backup branch `backup/claude-issue-report-0ad7il`။
+- **Play pre-launch report:** Play Console မှာ ဖွင့်/ပိတ် ခလုတ် မရှိတော့ — upload တိုင်း Google ရဲ့ device lab မှာ နေရာရှိမှ အလိုအလျောက် run သည် (Play Console Help)။ Setting က default (credential မပေး၊ deep link မရှိ)။ မ run ခဲ့သည်မှာ lab capacity ကြောင့်ဖြစ်ပြီး ကျွန်ုပ်တို့ဘက်က ပြင်စရာ မရှိ။
+- **P1-1** Push နှိပ်ရင် order (သို့) inbox ကို ဖွင့် (app ပိတ်ထားချိန် cold start အပါအဝင်)၊ foreground banner မှာ View။ **A2** Android status bar icon အဖြူ ငါးပုံ။
+- **P1-2** Address form မှာ SG ဖုန်း/postal code စစ်၊ checkout မှာ မှားနေတဲ့ လိပ်စာဟောင်းကို Edit ခိုင်း။
+- **P1-3** Upload ပုံ 1600px (avatar 512px)၊ thumbnail တွေကို ပြတဲ့ size လောက်ပဲ decode။
+- **P1-4** Admin ဈေးနှုန်း/sale/stock validation + migration **0072** (S$0၊ အနုတ်ဈေး၊ အနုတ် stock ကို DB မှာ ပိတ်)။
+- **P1-5 / D1** Dashboard revenue နဲ့ analytics ကို server ဘက်မှာ တွက် — migration **0074** (`admin_order_summary`၊ `admin_daily_activity`၊ `admin_top_viewed_products`)။ Refund နုတ်၊ 1000-row ကန့်သတ်ချက် မရှိတော့။
+- **P1-6** Shop/PDP pull-to-refresh၊ PDP ဖွင့်တိုင်း ပြန်ဆွဲ၊ ဝယ်ပြီးရင် catalog ပြန်ဆွဲ။ **A1** Android back က tab ပထမကို ပြန်သွား။
+- **P1-7** Device token ကို migration **0073** (`device_tokens`) နဲ့ — ဖုန်းတစ်လုံး account တစ်ခုပဲ ပိုင်၊ account တစ်ခုမှာ device အများ ရ။ Migration မတင်ရသေးရင် app က နည်းဟောင်း (`profiles.fcm_token`) ကို ဆက်သုံး။
+- **P1-8** Pending order မှာ "Complete payment" (Edge Function အသစ် `resume-order-payment`)၊ ဈေးမကိုက်ရင် pending order ကို ချက်ချင်း cancel၊ ငွေမပေးဘဲ ပယ်ဖျက်ထားတဲ့ checkout တွေကို My Orders မှာ default ဖျောက်။
+- **P1-9** မမျှော်လင့်တဲ့ handled error တွေကို Crashlytics non-fatal အဖြစ် ပို့။
+- **P2:** U1 review ကို delivered မှသာ (migration **0075**)၊ U2 Edit name / Change password၊ U3 guest cart ကို login ပြီးရင် ပေါင်း၊ U4 PDP ပုံ "2 / 5"၊ U5 live fish ခလုတ် bolt icon၊ U6 server/auth error စာ၊ U7 offline cart မပျောက်၊ U8 guest heart → login ပြီး product ဆီ ပြန်၊ U9 My Orders tabs၊ A3 WhatsApp/Call ရွေးခိုင်း (+65 ထည့်)၊ I2 Apple official button၊ I3 iOS permission စာ + `ITSAppUsesNonExemptEncryption`၊ I5 ဖုန်း portrait lock၊ D2 debug build က prod analytics မရေး။
+
+**မပြင်ရသေး:** I1 (paid Apple Developer account — owner ဆုံးဖြတ်ရန်)၊ I2 ရဲ့ Google official "G" logo (asset လို)၊ I4 iOS screenshot ပြန်ရိုက်၊ P3 (R1–R6)။
+
+### Rollout (အစဉ်လိုက်)
+
+1. Owner က SQL editor မှာ **0072 → 0073 → 0074 → 0075** apply။ 0072 ကို 2026-10-31 public read နဲ့ ကြိုစစ်ပြီး — production product 20 / variant 48 မှာ S$0 / အနုတ် row မရှိလို့ ပိတ်မိမှာ မဟုတ်။
+2. Supabase CLI access ပြန်ရပြီးမှ deploy: `resume-order-payment` (အသစ်၊ `cancel-order` နဲ့ verify_jwt တူ)၊ `create-payment-intent`၊ `send-order-notification`၊ `order-cancellation` (`_shared/push.ts` ပြောင်းလို့)။
+3. Branch push → CI ပထမဆုံး run။
+4. App 1.0.27 ထုတ် (Android closed beta + iPhone)။ Step 1–2 မတိုင်ခင် ထုတ်ရင် dashboard/analytics က "—" ပြပြီး "Complete payment" က error ပြမည်။
+
 ## Fix status — P0 (2026-10-30, local only)
 
 P0-1 နဲ့ P0-2 ကို source မှာ ပြင်ပြီး local tests နဲ့ အတည်ပြုထားသည်။ **Commit / production deploy / app release မလုပ်ရသေးပါ။**

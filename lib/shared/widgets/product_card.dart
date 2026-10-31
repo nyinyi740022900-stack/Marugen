@@ -273,8 +273,10 @@ class _CardActionButtons extends ConsumerWidget {
     }
 
     if (product.isLiveFish && !product.hasVariants) {
+      // One fish, straight to checkout: a cart icon here suggested it would
+      // only be added to the cart.
       return _RoundIconButton(
-        icon: Icons.add_shopping_cart,
+        icon: Icons.bolt,
         tooltip: 'Buy ${product.name} now',
         onTap: () => beginCheckout(
           context,
@@ -413,7 +415,9 @@ class _FavoriteButton extends ConsumerWidget {
                 ? null
                 : () async {
                     if (!isLoggedIn) {
-                      context.push('/login');
+                      context.push(
+                        authRouteWithRedirect('/login', '/product/$productId'),
+                      );
                       return;
                     }
                     if (idsAsync.hasError) {

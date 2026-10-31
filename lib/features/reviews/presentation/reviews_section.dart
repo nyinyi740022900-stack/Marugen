@@ -1,3 +1,5 @@
+import '../../orders/presentation/purchase_intent.dart'
+    show authRouteWithRedirect;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -155,7 +157,9 @@ class _MyReviewCard extends ConsumerWidget {
               ),
             ),
             TextButton(
-              onPressed: () => context.push('/login'),
+              onPressed: () => context.push(
+                authRouteWithRedirect('/login', '/product/$productId'),
+              ),
               child: const Text('Log In'),
             ),
           ],

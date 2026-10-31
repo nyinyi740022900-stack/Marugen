@@ -432,6 +432,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                   ),
                                 ),
                               ),
+                              if (product.imageUrls.length > 1)
+                                Positioned(
+                                  right: AppSpacing.md,
+                                  bottom: AppSpacing.md,
+                                  child: _ImagePageBadge(
+                                    page: _imagePage + 1,
+                                    count: product.imageUrls.length,
+                                  ),
+                                ),
                             ],
                           )
                         : Container(
@@ -1314,7 +1323,9 @@ class _FavoriteAppBarButton extends ConsumerWidget {
           ? null
           : () async {
               if (!isLoggedIn) {
-                context.push('/login');
+                context.push(
+                  authRouteWithRedirect('/login', '/product/$productId'),
+                );
                 return;
               }
               if (idsAsync.hasError) {
@@ -1467,4 +1478,35 @@ class _PdpTabBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _PdpTabBarDelegate oldDelegate) =>
       oldDelegate.child != child || oldDelegate.height != height;
+}
+
+/// "2 / 5" over the product photos, so shoppers can tell there are more to
+/// swipe through.
+class _ImagePageBadge extends StatelessWidget {
+  final int page;
+  final int count;
+  const _ImagePageBadge({required this.page, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Photo $page of $count',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          '$page / $count',
+          style: const TextStyle(
+            color: AppColors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
 }

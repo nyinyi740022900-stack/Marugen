@@ -66,7 +66,20 @@ String friendlyErrorMessage(
     return ('Could not upload or load the file. Please try again.', true);
   }
   if (error is AuthException) {
-    return ('Your session expired. Please log in again.', false);
+    // Only a rejected token means the session expired; other auth errors
+    // (a weak new password, a rate limit) carry their own explanation.
+    final code = error.code ?? '';
+    if (error.statusCode == '401' ||
+        code.contains('session') ||
+        code.contains('refresh_token') ||
+        code == 'bad_jwt') {
+      return ('Your session expired. Please log in again.', false);
+    }
+    final message = error.message.trim();
+    return (
+      message.isNotEmpty && message.length < 200 ? message : fallback,
+      false,
+    );
   }
 
   final raw = error.toString();

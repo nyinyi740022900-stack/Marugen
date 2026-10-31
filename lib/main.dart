@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_stripe/flutter_stripe.dart';
 
 import 'core/config/env.dart';
@@ -96,6 +97,25 @@ Future<void> _runApp() async {
   runApp(const ProviderScope(child: MarugenApp()));
 }
 
+/// Phones stay in portrait: in landscape the product page's header, tabs
+/// and buy bar left almost no room for the product. Tablets, iPads and
+/// unfolded foldables (shortest side 600dp or more) still rotate. Decided
+/// from the first laid-out size, since the window can still be empty when
+/// `main` runs, and again whenever a foldable changes size class.
+abstract final class OrientationPolicy {
+  static bool? _portraitOnly;
+
+  static void apply(Size size) {
+    if (size.isEmpty) return;
+    final phone = size.shortestSide < 600;
+    if (_portraitOnly == phone) return;
+    _portraitOnly = phone;
+    SystemChrome.setPreferredOrientations(
+      phone ? const [DeviceOrientation.portraitUp] : const [],
+    );
+  }
+}
+
 class MarugenApp extends ConsumerWidget {
   const MarugenApp({super.key});
 
@@ -112,30 +132,33 @@ class MarugenApp extends ConsumerWidget {
       themeMode: ref.watch(themeModeProvider),
       routerConfig: router,
       scaffoldMessengerKey: PushNotificationService.messengerKey,
-      builder: (context, child) => ListenableBuilder(
-        listenable: router.routeInformationProvider,
-        builder: (context, _) {
-          final path = router.routeInformationProvider.value.uri.path;
-          final authentication = {
-            '/login',
-            '/signup',
-            '/forgot-password',
-            '/reset-password',
-          }.contains(path);
-          return Theme(
-            data: AppTheme.forViewport(
-              Theme.of(context),
-              width: MediaQuery.sizeOf(context).width,
-              authentication: authentication,
-            ),
-            child: _NonProdReleaseBanner(
-              child: KeyboardDismissRegion(
-                child: child ?? const SizedBox.shrink(),
+      builder: (context, child) {
+        OrientationPolicy.apply(MediaQuery.sizeOf(context));
+        return ListenableBuilder(
+          listenable: router.routeInformationProvider,
+          builder: (context, _) {
+            final path = router.routeInformationProvider.value.uri.path;
+            final authentication = {
+              '/login',
+              '/signup',
+              '/forgot-password',
+              '/reset-password',
+            }.contains(path);
+            return Theme(
+              data: AppTheme.forViewport(
+                Theme.of(context),
+                width: MediaQuery.sizeOf(context).width,
+                authentication: authentication,
               ),
-            ),
-          );
-        },
-      ),
+              child: _NonProdReleaseBanner(
+                child: KeyboardDismissRegion(
+                  child: child ?? const SizedBox.shrink(),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

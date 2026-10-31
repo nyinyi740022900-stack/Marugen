@@ -497,7 +497,7 @@ String friendlyAuthError(Object e) {
   }
   if (raw.contains('password') &&
       (raw.contains('weak') || raw.contains('short'))) {
-    return 'Please choose a stronger password (at least 6 characters).';
+    return 'Please choose a stronger password: at least 8 characters with a letter and a number.';
   }
   if (raw.contains('google sign-in is not configured') ||
       raw.contains('google_web_client_id')) {

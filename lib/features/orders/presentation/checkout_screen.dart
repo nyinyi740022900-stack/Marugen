@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Address;
 import 'package:go_router/go_router.dart';
 
+import '../../../core/crash/crash_reporting.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
 import '../../../shared/models/promo_code.dart';
@@ -456,11 +457,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               : 'Payment could not be completed. Check your payment details and try again.',
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (_ownsCheckout) {
         ref.invalidate(checkoutShippingQuoteProvider(shippingKey));
       }
       developer.log('Checkout failed', name: 'CheckoutScreen', error: e);
+      // A total the server disagrees with means app and server pricing
+      // drifted apart: worth seeing even though the customer gets clear copy.
+      if (e is StateError) {
+        CrashReporting.recordError(e, st, reason: 'checkout.payment');
+      }
       if (mounted) {
         setState(
           () => _error = e is StateError
@@ -469,6 +475,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   e,
                   fallback: 'We couldn’t complete checkout. Check your connection and try again. If payment was taken, check My Orders before retrying.',
                   context: 'checkout.payment',
+                  stackTrace: st,
                 ),
         );
       }

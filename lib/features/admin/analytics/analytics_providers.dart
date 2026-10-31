@@ -2,12 +2,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'analytics_repository.dart';
 
-final analyticsRepositoryProvider = Provider<AnalyticsRepository>((ref) => AnalyticsRepository());
+final analyticsRepositoryProvider = Provider<AnalyticsRepository>(
+  (ref) => AnalyticsRepository(),
+);
 
-final productViewsProvider = FutureProvider((ref) {
-  return ref.watch(analyticsRepositoryProvider).fetchProductViews();
+/// Enough days for the monthly view's six months.
+final dailyActivityProvider = FutureProvider<List<DailyActivity>>((ref) {
+  return ref.watch(analyticsRepositoryProvider).fetchDailyActivity();
 });
 
-final appVisitsProvider = FutureProvider((ref) {
-  return ref.watch(analyticsRepositoryProvider).fetchAppVisits();
-});
+/// Most viewed products over the last N days.
+final topViewedProductsProvider =
+    FutureProvider.family<List<TopViewedProduct>, int>((ref, days) {
+      return ref
+          .watch(analyticsRepositoryProvider)
+          .fetchTopViewedProducts(days: days);
+    });

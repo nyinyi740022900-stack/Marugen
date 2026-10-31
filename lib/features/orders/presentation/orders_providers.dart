@@ -168,8 +168,13 @@ final adminOrdersPagedProvider =
 /// (adminOrdersProvider)` — keeps both the legacy unbounded list (still
 /// used during search) and the new paged list in sync after a status
 /// change/delete, instead of only one of them going stale.
+final adminOrderSummaryProvider = FutureProvider<AdminOrderSummary>((ref) {
+  return ref.watch(orderRepositoryProvider).fetchAdminOrderSummary();
+});
+
 void refreshAdminOrders(WidgetRef ref) {
   ref.invalidate(adminOrdersProvider);
+  ref.invalidate(adminOrderSummaryProvider);
   ref.invalidate(fulfillmentOrdersProvider);
   ref.read(adminOrdersPagedProvider.notifier).refresh();
 }

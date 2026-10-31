@@ -102,6 +102,8 @@ class MarugenApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(routerProvider);
+    PushNotificationService.openLocation = (location) =>
+        openFromNotification(router, location);
     return MaterialApp.router(
       title: 'Marugen Fish Farm',
       debugShowCheckedModeBanner: false,

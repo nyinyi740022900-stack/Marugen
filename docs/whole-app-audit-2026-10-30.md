@@ -26,11 +26,11 @@ Read-only စစ်ဆေးမှုသာ — code၊ production data၊ relea
 - **Repo အမှိုက်:** `origin/claude/issue-report-0ad7il` (၆ ပတ် ဟောင်း၊ main က ဖယ်ထားခဲ့တဲ့ Apple Pay config ပြန်ထည့်ထား) နဲ့ merge ပြီးသား worktree `.claude/worktrees/agent-aba6b2857140ad260`။
 - P1 / P2 စာရင်း (အောက်တွင်) မပြင်ရသေး။
 
-## Fix status — CI, P1, P2 (2026-10-31, branch `codex/whole-app-audit-fixes`, push မလုပ်ရသေး)
+## Fix status — CI, P1, P2 (2026-10-31, branch `codex/whole-app-audit-fixes`, [PR #3](https://github.com/nyinyi740022900-stack/Marugen/pull/3)၊ merge မလုပ်ရသေး)
 
 Commit ၇ ခု: `1c0f264` CI → `a961875` → `74aabbf` → `1203817` → `f37e8e7` → `5efbd69` → `027a45d`။ Batch တိုင်း Flutter test အပြည့်၊ Deno test၊ SQL suite အားလုံး pass ပြီးမှ commit လုပ်ထားသည်။ Test အသစ်တိုင်းကို code ဟောင်းပေါ်မှာ fail ဖြစ်ကြောင်းလည်း စစ်ထားသည်။
 
-- **CI:** [.github/workflows/ci.yml](../.github/workflows/ci.yml) — `flutter analyze` + `flutter test` (Singapore time၊ poppler ပါ)၊ `deno check` + `deno test`၊ `supabase/tests/run_*.sh` ၁၂ ခု။ Secret မလို။ Poppler မရှိတဲ့ စက်မှာ print test ၄ ခု skip ဖြစ်သည် (fail မဟုတ်တော့)။
+- **CI:** [.github/workflows/ci.yml](../.github/workflows/ci.yml) — `flutter analyze` + `flutter test` (Singapore time၊ poppler ပါ)၊ `deno check` + `deno test`၊ `supabase/tests/run_*.sh` ၁၂ ခု။ Secret မလို။ Poppler မရှိတဲ့ စက်မှာ print test ၄ ခု skip ဖြစ်သည် (fail မဟုတ်တော့)။ ပထမဆုံး run (PR #3၊ 2026-10-31) မှာ job ၃ ခုလုံး pass — Flutter analyze issue မရှိ၊ test **544 passed / 1 skipped**၊ Deno **107 passed**၊ SQL suite ၁၂ ခုလုံး pass။ Skip ဖြစ်တဲ့ test (`official carrier source remains complete on A4 placements and 4x6`) က gitignored ဖြစ်တဲ့ တကယ့် carrier label `output/split-parcels/QSP223261096.pdf` ကို လိုလို့ CI မှာ skip တာ မှန်သည် (customer လိပ်စာ ပါနိုင်လို့ public repo ထဲ မထည့်ရ)။
 - **Repo:** `origin/claude/issue-report-0ad7il` ဖျက်ပြီး (PR #2 closed)။ Local backup branch `backup/claude-issue-report-0ad7il`။
 - **Play pre-launch report:** Play Console မှာ ဖွင့်/ပိတ် ခလုတ် မရှိတော့ — upload တိုင်း Google ရဲ့ device lab မှာ နေရာရှိမှ အလိုအလျောက် run သည် (Play Console Help)။ Setting က default (credential မပေး၊ deep link မရှိ)။ မ run ခဲ့သည်မှာ lab capacity ကြောင့်ဖြစ်ပြီး ကျွန်ုပ်တို့ဘက်က ပြင်စရာ မရှိ။
 - **P1-1** Push နှိပ်ရင် order (သို့) inbox ကို ဖွင့် (app ပိတ်ထားချိန် cold start အပါအဝင်)၊ foreground banner မှာ View။ **A2** Android status bar icon အဖြူ ငါးပုံ။
@@ -50,7 +50,7 @@ Commit ၇ ခု: `1c0f264` CI → `a961875` → `74aabbf` → `1203817` → `f
 
 1. Owner က SQL editor မှာ **0072 → 0073 → 0074 → 0075** apply။ 0072 ကို 2026-10-31 public read နဲ့ ကြိုစစ်ပြီး — production product 20 / variant 48 မှာ S$0 / အနုတ် row မရှိလို့ ပိတ်မိမှာ မဟုတ်။
 2. Supabase CLI access ပြန်ရပြီးမှ deploy: `resume-order-payment` (အသစ်၊ `cancel-order` နဲ့ verify_jwt တူ)၊ `create-payment-intent`၊ `send-order-notification`၊ `order-cancellation` (`_shared/push.ts` ပြောင်းလို့)။
-3. Branch push → CI ပထမဆုံး run။
+3. Branch push → CI ပထမဆုံး run — ✅ 2026-10-31 [PR #3](https://github.com/nyinyi740022900-stack/Marugen/pull/3) မှာ job ၃ ခုလုံး pass။ PR #3 merge ကျန် (merge က Supabase / store ကို ဘာမှ deploy မလုပ်၊ GitHub Pages က `docs/` ကိုပဲ ပြန် build)။
 4. App 1.0.27 ထုတ် (Android closed beta + iPhone)။ Step 1–2 မတိုင်ခင် ထုတ်ရင် dashboard/analytics က "—" ပြပြီး "Complete payment" က error ပြမည်။
 
 ## Fix status — P0 (2026-10-30, local only)

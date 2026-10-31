@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../shared/widgets/back_to_first_tab.dart';
+
 import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/view_tracker.dart';
@@ -50,10 +52,16 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
   @override
   Widget build(BuildContext context) {
     final index = ref.watch(customerTabIndexProvider);
-    return AdaptiveCustomerNavigation(
+    return BackToFirstTab(
       index: index,
-      onSelected: (i) => ref.read(customerTabIndexProvider.notifier).state = i,
-      body: IndexedStack(key: _contentKey, index: index, children: _tabs),
+      onBackToFirst: () =>
+          ref.read(customerTabIndexProvider.notifier).state = 0,
+      child: AdaptiveCustomerNavigation(
+        index: index,
+        onSelected: (i) =>
+            ref.read(customerTabIndexProvider.notifier).state = i,
+        body: IndexedStack(key: _contentKey, index: index, children: _tabs),
+      ),
     );
   }
 }

@@ -25,6 +25,7 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../profile/presentation/address_providers.dart';
 import '../../promo/presentation/promo_providers.dart';
+import '../../shop/presentation/shop_providers.dart';
 import '../data/payment_repository.dart';
 import '../utils/payment_confirmation.dart';
 import '../utils/payment_sheet.dart';
@@ -403,6 +404,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           stillWanted: () => _ownsCheckout,
         ),
       );
+
+      // Bought (or reserved) stock changed: the shop must not keep showing
+      // a sold koi as available.
+      ref.invalidate(productListProvider);
 
       // Buy Now never touched the persistent cart, so there's nothing to
       // clear — whatever was already in the cart before this purchase

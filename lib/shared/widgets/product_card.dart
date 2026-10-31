@@ -1,4 +1,5 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'sized_network_image.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -58,7 +59,7 @@ class ProductCard extends ConsumerWidget {
                   fit: StackFit.expand,
                   children: [
                     product.imageUrls.isNotEmpty
-                        ? CachedNetworkImage(
+                        ? SizedNetworkImage(
                             imageUrl: product.imageUrls.first,
                             fit: BoxFit.cover,
                             placeholder: (_, _) => Container(

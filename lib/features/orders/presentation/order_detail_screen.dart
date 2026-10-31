@@ -1,6 +1,7 @@
 import '../../../shared/widgets/parcel_tracking_list.dart';
 
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/sized_network_image.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/content_width.dart';
@@ -666,7 +667,7 @@ class _OrderItemTile extends ConsumerWidget {
                   width: 60,
                   height: 60,
                   child: item.imageUrl != null
-                      ? CachedNetworkImage(
+                      ? SizedNetworkImage(
                           imageUrl: item.imageUrl!,
                           fit: BoxFit.cover,
                           placeholder: (_, _) => Container(

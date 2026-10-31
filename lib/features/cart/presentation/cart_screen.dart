@@ -1,4 +1,5 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/sized_network_image.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/content_width.dart';
@@ -125,7 +126,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                                 width: 60,
                                 height: 60,
                                 child: item.product.imageUrls.isNotEmpty
-                                    ? CachedNetworkImage(
+                                    ? SizedNetworkImage(
                                         imageUrl: item.product.imageUrls.first,
                                         fit: BoxFit.cover,
                                         placeholder: (_, _) => Container(

@@ -1,3 +1,6 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show uploadImageMaxSide;
+
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -281,7 +284,11 @@ class _AdminProductEditScreenState
 
   Future<void> _pickImages() async {
     if (_loading) return;
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 85,
+      maxWidth: uploadImageMaxSide,
+      maxHeight: uploadImageMaxSide,
+    );
     if (mounted && !_loading) setState(() => _newImages.addAll(picked));
   }
 

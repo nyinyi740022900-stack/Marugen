@@ -1,3 +1,6 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show avatarImageMaxSide;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -44,6 +47,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
+      maxWidth: avatarImageMaxSide,
+      maxHeight: avatarImageMaxSide,
     );
     if (picked == null || !mounted) return;
     setState(() => _uploadingAvatar = true);

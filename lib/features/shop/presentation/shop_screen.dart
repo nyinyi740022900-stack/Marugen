@@ -118,11 +118,16 @@ class ShopScreen extends ConsumerWidget {
                         )
                       : const _EmptyState();
                 }
-                return ProductGrid(
-                  itemCount: products.length,
-                  itemBuilder: (context, i) => ProductCard(
-                    product: products[i],
-                    onTap: () => context.push('/product/${products[i].id}'),
+                // Pull down for stock and prices changed since opening the
+                // app (e.g. a koi sold to someone else).
+                return RefreshIndicator(
+                  onRefresh: () => ref.refresh(productListProvider.future),
+                  child: ProductGrid(
+                    itemCount: products.length,
+                    itemBuilder: (context, i) => ProductCard(
+                      product: products[i],
+                      onTap: () => context.push('/product/${products[i].id}'),
+                    ),
                   ),
                 );
               },

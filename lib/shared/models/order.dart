@@ -198,6 +198,15 @@ class Order {
   final double refundAmount;
   final double refundPendingAmount;
 
+  /// A checkout that was cancelled before any payment: dismissing the
+  /// payment sheet does this. Paid orders end as `refunded`, never here
+  /// without a refund.
+  bool get isCancelledUnpaid =>
+      status == OrderStatus.cancelled &&
+      refundAmount == 0 &&
+      refundPendingAmount == 0 &&
+      (refundStatus?.isEmpty ?? true);
+
   String? get refundStatusLabel => switch (refundStatus) {
     'pending' => 'Refund pending',
     'requires_action' => 'Refund needs attention — contact shop',

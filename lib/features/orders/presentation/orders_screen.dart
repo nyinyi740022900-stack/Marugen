@@ -34,6 +34,15 @@ class OrdersScreen extends ConsumerWidget {
     final rawOrdersAsync = ref.watch(myOrdersProvider);
     final visibleOrdersAsync = ref.watch(visibleMyOrdersProvider);
     final hasQuery = ref.watch(myOrdersSearchQueryProvider).trim().isNotEmpty;
+    final showUnpaid = ref.watch(showCancelledUnpaidOrdersProvider);
+    final unpaidCount = hasQuery
+        ? 0
+        : (rawOrdersAsync.valueOrNull ?? const [])
+              .where((order) => order.isCancelledUnpaid)
+              .length;
+    void toggleUnpaid() =>
+        ref.read(showCancelledUnpaidOrdersProvider.notifier).state =
+            !showUnpaid;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Orders')),
@@ -49,6 +58,16 @@ class OrdersScreen extends ConsumerWidget {
             Expanded(
               child: visibleOrdersAsync.when(
                 data: (orders) {
+                  if (orders.isEmpty && unpaidCount > 0) {
+                    return EmptyState(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'No orders yet',
+                      subtitle:
+                          'Checkouts you cancelled before paying are hidden.',
+                      actionLabel: 'Show cancelled checkouts',
+                      onAction: toggleUnpaid,
+                    );
+                  }
                   if (orders.isEmpty) {
                     return hasQuery
                         ? const EmptyState(
@@ -81,9 +100,20 @@ class OrdersScreen extends ConsumerWidget {
                     child: ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.all(16),
-                      itemCount: orders.length,
+                      itemCount: orders.length + (unpaidCount > 0 ? 1 : 0),
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, i) {
+                        if (i == orders.length) {
+                          return TextButton(
+                            onPressed: toggleUnpaid,
+                            child: Text(
+                              showUnpaid
+                                  ? 'Hide cancelled checkouts'
+                                  : 'Show $unpaidCount cancelled '
+                                        '${unpaidCount == 1 ? 'checkout' : 'checkouts'}',
+                            ),
+                          );
+                        }
                         final order = orders[i];
                         return Card(
                           child: InkWell(

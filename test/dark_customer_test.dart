@@ -72,7 +72,7 @@ void main() {
                   id: 'address',
                   userId: 'customer',
                   recipientName: 'Customer',
-                  phone: '12345678',
+                  phone: '81234567',
                   line1: '1 Street',
                   postalCode: '123456',
                 ),

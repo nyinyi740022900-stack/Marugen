@@ -101,13 +101,22 @@ final myOrdersProvider = FutureProvider<List<Order>>((ref) {
 /// order number, status label, or any item's product name.
 final myOrdersSearchQueryProvider = StateProvider<String>((ref) => '');
 
+/// Whether My Orders lists checkouts that were cancelled before payment
+/// (see [Order.isCancelledUnpaid]). Off by default; a search always does.
+final showCancelledUnpaidOrdersProvider = StateProvider<bool>((ref) => false);
+
 /// [myOrdersProvider] filtered by [myOrdersSearchQueryProvider].
 final visibleMyOrdersProvider = Provider<AsyncValue<List<Order>>>((ref) {
   final ordersAsync = ref.watch(myOrdersProvider);
   final query = ref.watch(myOrdersSearchQueryProvider).trim().toLowerCase();
+  final showUnpaid = ref.watch(showCancelledUnpaidOrdersProvider);
 
   return ordersAsync.whenData((orders) {
-    if (query.isEmpty) return orders;
+    if (query.isEmpty) {
+      return showUnpaid
+          ? orders
+          : orders.where((o) => !o.isCancelledUnpaid).toList();
+    }
     return orders.where((o) {
       if (o.displayNumber.toLowerCase().contains(query)) return true;
       if (o.fulfillmentStatusLabel.toLowerCase().contains(query)) return true;

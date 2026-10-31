@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -691,6 +692,12 @@ class _AdminProductEditScreenState
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
+                          inputFormatters: _moneyInput,
+                          // Variant prices replace this one once any exist.
+                          validator: (v) =>
+                              supportsVariants && _variants.isNotEmpty
+                              ? null
+                              : _validatePrice(v, required: _showPrice),
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         TextFormField(
@@ -702,6 +709,23 @@ class _AdminProductEditScreenState
                           keyboardType: const TextInputType.numberWithOptions(
                             decimal: true,
                           ),
+                          inputFormatters: _moneyInput,
+                          validator: (v) {
+                            if (supportsVariants && _variants.isNotEmpty) {
+                              return null;
+                            }
+                            final error = _validatePrice(v, required: false);
+                            if (error != null || v!.trim().isEmpty) {
+                              return error;
+                            }
+                            final price = double.tryParse(
+                              _priceCtrl.text.trim(),
+                            );
+                            return price != null &&
+                                    double.parse(v.trim()) >= price
+                                ? 'Sale price must be lower than the price'
+                                : null;
+                          },
                         ),
                         const SizedBox(height: AppSpacing.sm),
                         SwitchListTile(
@@ -740,6 +764,9 @@ class _AdminProductEditScreenState
                               labelText: 'Stock quantity',
                             ),
                             keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
                           ),
                       ],
                     ),
@@ -845,6 +872,9 @@ class _AdminProductEditScreenState
                               isDense: true,
                             ),
                             keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
@@ -1070,6 +1100,10 @@ class _VariantEditRow extends StatelessWidget {
       controller: row.priceCtrl,
       decoration: const InputDecoration(labelText: 'Price', isDense: true),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: _moneyInput,
+      // Rows without a label are skipped on save.
+      validator: (v) =>
+          row.labelCtrl.text.trim().isEmpty ? null : _validatePrice(v),
     );
     final weight = TextFormField(
       controller: row.weightCtrl,
@@ -1085,6 +1119,7 @@ class _VariantEditRow extends StatelessWidget {
       controller: row.stockCtrl,
       decoration: const InputDecoration(labelText: 'Stock', isDense: true),
       keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
     );
     final remove = IconButton(
       tooltip: 'Remove option',
@@ -1316,6 +1351,9 @@ class _SizeStockMatrix extends StatelessWidget {
                             ),
                           ),
                           keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                          ],
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -1330,6 +1368,18 @@ class _SizeStockMatrix extends StatelessWidget {
       ),
     );
   }
+}
+
+final _moneyInput = [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))];
+final _money = RegExp(r'^\d+(\.\d{1,2})?$');
+
+/// A mistyped variant price used to save as S$0.00 and a mistyped product
+/// price as "Contact for price"; migration 0072 refuses both server-side.
+String? _validatePrice(String? value, {bool required = true}) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return required ? 'Enter a price' : null;
+  if (!_money.hasMatch(text)) return 'Enter an amount like 12.50';
+  return double.parse(text) > 0 ? null : 'Price must be more than 0';
 }
 
 String? _validateShippingWeight(String? value) {

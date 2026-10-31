@@ -7,6 +7,8 @@ import '../../../shared/widgets/content_width.dart';
 
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_stripe/flutter_stripe.dart'
+    show FailureCode, StripeException;
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -24,7 +26,11 @@ import '../../reviews/presentation/review_providers.dart';
 import '../../reviews/presentation/reviews_section.dart' show openReviewForm;
 import '../../shop/presentation/shell_tab_provider.dart';
 import '../../shop/presentation/shop_providers.dart';
+import '../../../shared/utils/error_message.dart';
+import '../data/payment_repository.dart';
 import '../utils/invoice_pdf.dart';
+import '../utils/payment_confirmation.dart';
+import '../utils/payment_sheet.dart';
 import 'order_status_timeline.dart';
 import 'orders_providers.dart';
 import 'order_pull_to_refresh.dart';
@@ -614,6 +620,8 @@ class _OrderDetailBody extends ConsumerWidget {
             return Column(
               children: [
                 if (order.status == OrderStatus.pending) ...[
+                  _CompletePaymentButton(order: order),
+                  const SizedBox(height: AppSpacing.md),
                   _CancelOrderButton(order: order),
                   const SizedBox(height: AppSpacing.lg),
                 ],
@@ -937,6 +945,95 @@ class _ReorderButtonState extends ConsumerState<_ReorderButton> {
 
 /// Unpaid orders can be cancelled directly. Paid orders use the reviewed
 /// cancellation request above and the verified refund backend.
+/// Reopens the payment sheet for the customer's own pending order while its
+/// stock is still reserved (`resume-order-payment`), instead of making them
+/// check out again. Dismissing the sheet keeps the order pending.
+class _CompletePaymentButton extends ConsumerStatefulWidget {
+  final Order order;
+  const _CompletePaymentButton({required this.order});
+
+  @override
+  ConsumerState<_CompletePaymentButton> createState() =>
+      _CompletePaymentButtonState();
+}
+
+class _CompletePaymentButtonState
+    extends ConsumerState<_CompletePaymentButton> {
+  bool _loading = false;
+
+  Future<void> _completePayment() async {
+    final ownerId = ref.read(currentUserIdProvider);
+    if (ownerId == null || widget.order.userId != ownerId) return;
+    bool stillOwner() => mounted && ref.read(currentUserIdProvider) == ownerId;
+    final brightness = Theme.of(context).brightness;
+    setState(() => _loading = true);
+    String? message;
+    try {
+      final intent = await ref
+          .read(paymentRepositoryProvider)
+          .resumePayment(widget.order.id);
+      await presentPendingPayment(
+        intent: intent,
+        ownsCheckout: stillOwner,
+        presentPayment: (secret) => showStripePaymentSheet(
+          secret,
+          brightness: brightness,
+          stillWanted: stillOwner,
+        ),
+      );
+      if (!stillOwner()) return;
+      final paid = await confirmOrderPayment(
+        orderId: widget.order.id,
+        ownerId: ownerId,
+        ownsCheckout: stillOwner,
+        fetchOrder: ref.read(orderRepositoryProvider).fetchOrderById,
+      );
+      message = paid
+          ? 'Payment received. Thank you!'
+          : 'Payment sent. This order updates once the payment is confirmed.';
+    } on StripeException catch (e) {
+      message = e.error.code == FailureCode.Canceled ? null : 'Payment could not be completed. Check your payment details and try again.';
+    } catch (e) {
+      message = friendlyErrorMessage(
+        e,
+        fallback:
+            "We couldn't reopen this payment. Refresh the order and try again.",
+        context: 'orders.completePayment',
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+    if (!mounted || !stillOwner()) return;
+    ref.invalidate(orderByIdProvider(widget.order.id));
+    ref.invalidate(myOrdersProvider);
+    if (message != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _loading ? null : _completePayment,
+        icon: _loading
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.white,
+                ),
+              )
+            : const Icon(Icons.lock_outline, size: 18),
+        label: const Text('Complete payment'),
+      ),
+    );
+  }
+}
+
 class _CancelOrderButton extends ConsumerStatefulWidget {
   final Order order;
   const _CancelOrderButton({required this.order});

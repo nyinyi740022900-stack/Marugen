@@ -5,6 +5,8 @@ import {
   completedCheckoutResponse,
   type PaymentOrder,
   type PaymentPort,
+  PaymentResumeError,
+  resumePendingPayment,
 } from "./payment_lifecycle.ts";
 function assert(v: unknown, m: string) {
   if (!v) throw new Error(m);
@@ -218,4 +220,39 @@ Deno.test("completed checkout returns its known order rather than another client
     completedCheckoutResponse(f.order) === null,
     "cancelled key cannot restart",
   );
+});
+Deno.test("only the customer's own pending payment can be reopened", async () => {
+  const f = fixture();
+  f.intent.status = "requires_payment_method";
+  f.intent.client_secret = "pi_secret";
+  const reopened = await resumePendingPayment("o", "u", f.port);
+  assert(reopened?.clientSecret === "pi_secret", "client secret missing");
+  assert(reopened?.amountCents === 2000, "amount missing");
+  assert(f.order.status === "pending", "resume changed the order");
+  const refusal = async (userId: string, status: number) => {
+    try {
+      await resumePendingPayment("o", userId, f.port);
+    } catch (e) {
+      return e instanceof PaymentResumeError && e.status === status;
+    }
+    return false;
+  };
+  assert(await refusal("someone-else", 404), "another customer reopened it");
+  f.intent.status = "processing";
+  assert(await refusal("u", 409), "processing payment reopened");
+  f.intent.status = "canceled";
+  assert(await refusal("u", 409), "cancelled payment reopened");
+  f.order.status = "cancelled";
+  f.intent.status = "requires_payment_method";
+  assert(await refusal("u", 409), "cancelled order reopened");
+});
+Deno.test("reopening an already-paid payment records it instead", async () => {
+  const f = fixture();
+  const paid = await resumePendingPayment("o", "u", f.port);
+  assert(paid?.paymentStatus === "paid" && paid.clientSecret === null, "paid");
+  assert(f.order.status === "paid", "succeeded payment left pending");
+  assert(f.notifications === 1, "paid notification missing");
+  const again = await resumePendingPayment("o", "u", f.port);
+  assert(again?.paymentStatus === "paid", "paid order not reported");
+  assert(f.notifications === 1, "duplicate paid notification");
 });

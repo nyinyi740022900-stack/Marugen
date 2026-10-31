@@ -152,4 +152,41 @@ void main() {
     expect(find.text('Order #MG-2'), findsOneWidget);
     expect(find.text('Hide cancelled checkouts'), findsOneWidget);
   });
+
+  testWidgets('My Orders tabs group orders by what happens next', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isLoggedInProvider.overrideWithValue(true),
+          myOrdersProvider.overrideWith(
+            (ref) async => [
+              order(OrderStatus.pending, id: 'a', number: 'MG-PAY'),
+              order(OrderStatus.packing, id: 'b', number: 'MG-SHIP'),
+              order(OrderStatus.shipped, id: 'c', number: 'MG-RECEIVE'),
+              order(OrderStatus.delivered, id: 'd', number: 'MG-DONE'),
+            ],
+          ),
+        ],
+        child: MaterialApp(theme: AppTheme.light, home: const OrdersScreen()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    Iterable<String> shown() => find
+        .textContaining('Order #MG-')
+        .evaluate()
+        .map((e) => (e.widget as Text).data!);
+    expect(shown(), hasLength(4));
+    for (final (tab, number) in [
+      ('To pay', 'MG-PAY'),
+      ('To ship', 'MG-SHIP'),
+      ('To receive', 'MG-RECEIVE'),
+      ('Completed', 'MG-DONE'),
+    ]) {
+      await tester.tap(find.widgetWithText(ChoiceChip, tab));
+      await tester.pumpAndSettle();
+      expect(shown(), ['Order #$number'], reason: tab);
+    }
+  });
 }

@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../../../shared/widgets/content_width.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart'
+    show SignInWithAppleButton, SignInWithAppleButtonStyle;
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -404,8 +406,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       ? AppSpacing.sm
                                       : AppSpacing.md,
                                 ),
-                                OutlinedButton.icon(
-                                  style: buttonStyle,
+                                // Apple's own button: App Review expects
+                                // the HIG style, not a generic outline.
+                                SignInWithAppleButton(
+                                  text: 'Continue with Apple',
+                                  height: 48,
+                                  style:
+                                      Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? SignInWithAppleButtonStyle.white
+                                      : SignInWithAppleButtonStyle.black,
                                   onPressed: _oauthLoading
                                       ? null
                                       : () => _oauthSignIn(
@@ -413,8 +423,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                               .read(authRepositoryProvider)
                                               .signInWithApple(),
                                         ),
-                                  icon: const Icon(Icons.apple, size: 20),
-                                  label: const Text('Continue with Apple'),
                                 ),
                               ],
                               SizedBox(height: groupGap),

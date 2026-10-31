@@ -14,6 +14,7 @@ import '../../../shared/widgets/guest_account_state.dart';
 import '../../../shared/widgets/content_width.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
+import 'account_details_tiles.dart';
 import 'auth_providers.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -254,6 +255,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     const SizedBox(height: 24),
                     const Divider(),
+                    AccountDetailsTiles(
+                      fullName: user?.fullName,
+                      usesPassword: user?.usesPassword ?? false,
+                    ),
                     ListTile(
                       leading: const Icon(Icons.location_on_outlined),
                       title: const Text('Delivery Addresses'),

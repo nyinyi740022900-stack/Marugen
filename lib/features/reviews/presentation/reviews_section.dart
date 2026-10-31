@@ -172,9 +172,9 @@ class _MyReviewCard extends ConsumerWidget {
     return myReviewAsync.when(
       data: (myReview) {
         if (myReview == null) {
-          // Verified-purchase gate: only customers with a paid-or-later
-          // order containing this product get the form. The database
-          // enforces the same rule (0009_verified_reviews.sql); this just
+          // Verified-purchase gate: only customers with a delivered order
+          // containing this product get the form. The database enforces
+          // the same rule (0075_reviews_after_delivery.sql); this just
           // explains it instead of letting the insert fail.
           final canReview = canReviewAsync.valueOrNull;
           if (canReview == null) {
@@ -202,7 +202,7 @@ class _MyReviewCard extends ConsumerWidget {
                   SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Text(
-                      'Only customers who purchased this item can leave a review.',
+                      'You can review this item once your order with it has been delivered.',
                       style: TextStyle(
                         fontSize: 13.5,
                         color: AppPalette.of(context).textMuted,

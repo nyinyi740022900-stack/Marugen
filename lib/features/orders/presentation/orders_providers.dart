@@ -101,6 +101,25 @@ final myOrdersProvider = FutureProvider<List<Order>>((ref) {
 /// order number, status label, or any item's product name.
 final myOrdersSearchQueryProvider = StateProvider<String>((ref) => '');
 
+/// My Orders tabs, the way Shopee and Lazada group a customer's orders.
+enum OrderListTab {
+  all('All', null),
+  toPay('To pay', {OrderStatus.pending}),
+  toShip('To ship', {OrderStatus.paid, OrderStatus.packing}),
+  toReceive('To receive', {OrderStatus.shipped}),
+  completed('Completed', {OrderStatus.delivered});
+
+  const OrderListTab(this.label, this.statuses);
+  final String label;
+  final Set<OrderStatus>? statuses;
+
+  bool includes(Order order) => statuses?.contains(order.status) ?? true;
+}
+
+final myOrdersTabProvider = StateProvider<OrderListTab>(
+  (ref) => OrderListTab.all,
+);
+
 /// Whether My Orders lists checkouts that were cancelled before payment
 /// (see [Order.isCancelledUnpaid]). Off by default; a search always does.
 final showCancelledUnpaidOrdersProvider = StateProvider<bool>((ref) => false);
@@ -110,12 +129,13 @@ final visibleMyOrdersProvider = Provider<AsyncValue<List<Order>>>((ref) {
   final ordersAsync = ref.watch(myOrdersProvider);
   final query = ref.watch(myOrdersSearchQueryProvider).trim().toLowerCase();
   final showUnpaid = ref.watch(showCancelledUnpaidOrdersProvider);
+  final tab = ref.watch(myOrdersTabProvider);
 
   return ordersAsync.whenData((orders) {
     if (query.isEmpty) {
-      return showUnpaid
-          ? orders
-          : orders.where((o) => !o.isCancelledUnpaid).toList();
+      return orders
+          .where((o) => tab.includes(o) && (showUnpaid || !o.isCancelledUnpaid))
+          .toList();
     }
     return orders.where((o) {
       if (o.displayNumber.toLowerCase().contains(query)) return true;

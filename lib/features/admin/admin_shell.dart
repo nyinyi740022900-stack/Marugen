@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../shared/widgets/back_to_first_tab.dart';
+
 import '../../core/notifications/push_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../orders/presentation/orders_providers.dart';
@@ -108,34 +110,38 @@ class AdminShell extends ConsumerWidget {
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => PushNotificationService.requestPermission(),
     );
-    return Scaffold(
-      body: IndexedStack(
-        index: index,
-        children: [
-          for (var i = 0; i < _tabs.length; i++)
-            TickerMode(
-              enabled: i == index,
-              child: HeroMode(enabled: i == index, child: _tabs[i]),
+    return BackToFirstTab(
+      index: index,
+      onBackToFirst: () => ref.read(adminTabIndexProvider.notifier).state = 0,
+      child: Scaffold(
+        body: IndexedStack(
+          index: index,
+          children: [
+            for (var i = 0; i < _tabs.length; i++)
+              TickerMode(
+                enabled: i == index,
+                child: HeroMode(enabled: i == index, child: _tabs[i]),
+              ),
+          ],
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _isMoreSelected(index) ? 3 : index,
+          onDestinationSelected: (i) {
+            if (i == 3) {
+              _openMoreSheet(context, ref, index);
+            } else {
+              if (i == 2) refreshAdminOrders(ref);
+              ref.read(adminTabIndexProvider.notifier).state = i;
+            }
+          },
+          destinations: [
+            ..._primaryDestinations,
+            NavigationDestination(
+              icon: Icon(_moreTabIcon(index)),
+              label: _moreTabLabel(index),
             ),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _isMoreSelected(index) ? 3 : index,
-        onDestinationSelected: (i) {
-          if (i == 3) {
-            _openMoreSheet(context, ref, index);
-          } else {
-            if (i == 2) refreshAdminOrders(ref);
-            ref.read(adminTabIndexProvider.notifier).state = i;
-          }
-        },
-        destinations: [
-          ..._primaryDestinations,
-          NavigationDestination(
-            icon: Icon(_moreTabIcon(index)),
-            label: _moreTabLabel(index),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

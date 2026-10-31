@@ -1,7 +1,12 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/utils/order_remarks.dart';
+
+final paymentRepositoryProvider = Provider<PaymentRepository>(
+  (ref) => PaymentRepository(),
+);
 
 /// Talks to the `create-payment-intent` Edge Function, which validates
 /// cart lines against DB prices/stock, creates a pending order, and
@@ -54,6 +59,17 @@ class PaymentRepository {
           : 'Payment setup failed (${res.status})';
       throw Exception(message);
     }
+    return Map<String, dynamic>.from(res.data as Map);
+  }
+
+  /// Reopens the PaymentIntent of the customer's own pending order
+  /// (`resume-order-payment`). The result has the same shape as
+  /// [createPaymentIntent]'s: a client secret, or `paymentStatus` once paid.
+  Future<Map<String, dynamic>> resumePayment(String orderId) async {
+    final res = await _client.functions.invoke(
+      'resume-order-payment',
+      body: {'order_id': orderId},
+    );
     return Map<String, dynamic>.from(res.data as Map);
   }
 }

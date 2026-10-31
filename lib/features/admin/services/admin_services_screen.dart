@@ -1,3 +1,6 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show uploadImageMaxSide;
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -164,7 +167,11 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
   }
 
   Future<void> _pickImages() async {
-    final picked = await ImagePicker().pickMultiImage(imageQuality: 85);
+    final picked = await ImagePicker().pickMultiImage(
+      imageQuality: 85,
+      maxWidth: uploadImageMaxSide,
+      maxHeight: uploadImageMaxSide,
+    );
     if (mounted) setState(() => _newImages.addAll(picked));
   }
 

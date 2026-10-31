@@ -1,4 +1,5 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/sized_network_image.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -512,7 +513,7 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                         child:
                             firstItem.imageUrl != null &&
                                 firstItem.imageUrl!.isNotEmpty
-                            ? CachedNetworkImage(
+                            ? SizedNetworkImage(
                                 imageUrl: firstItem.imageUrl!,
                                 fit: BoxFit.cover,
                                 placeholder: (_, _) => const SizedBox.shrink(),

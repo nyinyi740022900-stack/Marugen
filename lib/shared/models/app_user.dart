@@ -28,6 +28,10 @@ class AppUser {
   final bool notificationsEnabled;
   final DateTime? createdAt;
 
+  /// Signs in with email and password (not Google or Apple), so Profile
+  /// offers "Change password". Comes from the auth session, not the row.
+  final bool usesPassword;
+
   const AppUser({
     required this.id,
     this.email,
@@ -37,9 +41,13 @@ class AppUser {
     this.role = UserRole.customer,
     this.notificationsEnabled = true,
     this.createdAt,
+    this.usesPassword = false,
   });
 
-  factory AppUser.fromMap(Map<String, dynamic> map) {
+  factory AppUser.fromMap(
+    Map<String, dynamic> map, {
+    bool usesPassword = false,
+  }) {
     return AppUser(
       id: map['id'] as String,
       email: map['email'] as String?,
@@ -51,6 +59,7 @@ class AppUser {
       createdAt: map['created_at'] != null
           ? tryParseServerTime(map['created_at'])
           : null,
+      usesPassword: usesPassword,
     );
   }
 }

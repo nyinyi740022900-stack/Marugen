@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../shared/widgets/content_width.dart';
 
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
+import '../../../shared/utils/sg_address.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
 import 'address_providers.dart';
@@ -313,7 +315,7 @@ class _AddressFormState extends ConsumerState<AddressForm> {
         userId: _owner!,
         label: _labelCtrl.text.trim().isEmpty ? 'Home' : _labelCtrl.text.trim(),
         recipientName: _nameCtrl.text.trim(),
-        phone: _phoneCtrl.text.trim(),
+        phone: normalizeSgPhone(_phoneCtrl.text),
         line1: _line1Ctrl.text.trim(),
         line2: _line2Ctrl.text.trim().isEmpty ? null : _line2Ctrl.text.trim(),
         city: _cityCtrl.text.trim().isEmpty
@@ -362,117 +364,139 @@ class _AddressFormState extends ConsumerState<AddressForm> {
       child: SingleChildScrollView(
         child: Form(
           key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                widget.existing != null ? 'Edit Address' : 'Add Address',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              TextFormField(
-                controller: _labelCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Label (e.g. Home, Office)',
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _nameCtrl,
-                decoration: const InputDecoration(labelText: 'Recipient name'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Phone'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _line1Ctrl,
-                decoration: const InputDecoration(labelText: 'Address line 1'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Required' : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextFormField(
-                controller: _line2Ctrl,
-                decoration: const InputDecoration(
-                  labelText: 'Address line 2 (optional)',
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _cityCtrl,
-                      decoration: const InputDecoration(labelText: 'City'),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    ),
+          child: AutofillGroup(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  widget.existing != null ? 'Edit Address' : 'Add Address',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _postalCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Postal code',
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                TextFormField(
+                  controller: _labelCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Label (e.g. Home, Office)',
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _nameCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  autofillHints: const [AutofillHints.name],
+                  decoration: const InputDecoration(
+                    labelText: 'Recipient name',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  autofillHints: const [AutofillHints.telephoneNumber],
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s()-]')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'Phone',
+                    hintText: '8123 4567',
+                  ),
+                  validator: validateSgPhone,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _line1Ctrl,
+                  autofillHints: const [AutofillHints.streetAddressLine1],
+                  decoration: const InputDecoration(
+                    labelText: 'Address line 1',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Required' : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _line2Ctrl,
+                  autofillHints: const [AutofillHints.streetAddressLine2],
+                  decoration: const InputDecoration(
+                    labelText: 'Address line 2 (optional)',
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _cityCtrl,
+                        autofillHints: const [AutofillHints.addressCity],
+                        decoration: const InputDecoration(labelText: 'City'),
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _postalCtrl,
+                        keyboardType: TextInputType.number,
+                        autofillHints: const [AutofillHints.postalCode],
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(6),
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: 'Postal code',
+                        ),
+                        validator: validateSgPostalCode,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Set as default address'),
+                  value: _isDefault,
+                  onChanged: (v) => setState(() => _isDefault = v),
+                  activeTrackColor: AppPalette.of(context).accent,
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppPalette.of(context).accentSoft,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Text(
+                      _error!,
+                      style: TextStyle(
+                        color: AppPalette.of(context).accent,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Set as default address'),
-                value: _isDefault,
-                onChanged: (v) => setState(() => _isDefault = v),
-                activeTrackColor: AppPalette.of(context).accent,
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).accentSoft,
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                  ),
-                  child: Text(
-                    _error!,
-                    style: TextStyle(
-                      color: AppPalette.of(context).accent,
-                      fontSize: 13,
-                    ),
-                  ),
+                const SizedBox(height: AppSpacing.lg),
+                ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.white,
+                          ),
+                        )
+                      : const Text('Save Address'),
                 ),
               ],
-              const SizedBox(height: AppSpacing.lg),
-              ElevatedButton(
-                onPressed: _saving ? null : _save,
-                child: _saving
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.white,
-                        ),
-                      )
-                    : const Text('Save Address'),
-              ),
-            ],
+            ),
           ),
         ),
       ),

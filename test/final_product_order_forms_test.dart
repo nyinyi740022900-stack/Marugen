@@ -241,6 +241,7 @@ void main() {
       await tester.pumpAndSettle();
       await reveal(tester, field('Label'));
       await tester.enterText(field('Label'), 'Fixture option');
+      await tester.enterText(field('Price'), '120');
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       await reveal(tester, find.widgetWithText(ElevatedButton, 'Save'));
@@ -385,6 +386,12 @@ void main() {
         await tester.enterText(field('Width (cm)').last, '10');
         await reveal(tester, field('Height (cm)').last);
         await tester.enterText(field('Height (cm)').last, '8');
+        // A labelled weight option needs its own price (no more S$0.00).
+        expect(form.validate(), isFalse);
+        await tester.pumpAndSettle();
+        expect(find.text('Enter a price'), findsOneWidget);
+        await reveal(tester, field('Price'));
+        await tester.enterText(field('Price'), '18.90');
         expect(form.validate(), isTrue);
         await tester.pumpAndSettle();
         await shot(tester, 'product-variant-$brightness');

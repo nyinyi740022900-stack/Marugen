@@ -1,4 +1,5 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'sized_network_image.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -58,7 +59,7 @@ class ProductCard extends ConsumerWidget {
                   fit: StackFit.expand,
                   children: [
                     product.imageUrls.isNotEmpty
-                        ? CachedNetworkImage(
+                        ? SizedNetworkImage(
                             imageUrl: product.imageUrls.first,
                             fit: BoxFit.cover,
                             placeholder: (_, _) => Container(
@@ -272,8 +273,10 @@ class _CardActionButtons extends ConsumerWidget {
     }
 
     if (product.isLiveFish && !product.hasVariants) {
+      // One fish, straight to checkout: a cart icon here suggested it would
+      // only be added to the cart.
       return _RoundIconButton(
-        icon: Icons.add_shopping_cart,
+        icon: Icons.bolt,
         tooltip: 'Buy ${product.name} now',
         onTap: () => beginCheckout(
           context,
@@ -412,7 +415,9 @@ class _FavoriteButton extends ConsumerWidget {
                 ? null
                 : () async {
                     if (!isLoggedIn) {
-                      context.push('/login');
+                      context.push(
+                        authRouteWithRedirect('/login', '/product/$productId'),
+                      );
                       return;
                     }
                     if (idsAsync.hasError) {

@@ -1,3 +1,6 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show uploadImageMaxSide;
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -96,6 +99,8 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
+      maxWidth: uploadImageMaxSide,
+      maxHeight: uploadImageMaxSide,
     );
     if (mounted && picked != null) setState(() => _newCoverImage = picked);
   }
@@ -104,6 +109,8 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
+      maxWidth: uploadImageMaxSide,
+      maxHeight: uploadImageMaxSide,
     );
     if (mounted && picked != null) setState(() => stage.newImage = picked);
   }

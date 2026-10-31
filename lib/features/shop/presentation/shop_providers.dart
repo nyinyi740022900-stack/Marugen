@@ -105,8 +105,10 @@ final visibleProductListProvider = Provider<AsyncValue<List<Product>>>((ref) {
   });
 });
 
+/// Auto-disposed so reopening a product fetches its current stock and
+/// price instead of whatever was cached on the first visit.
 final productDetailProvider =
-    FutureProvider.family<Product?, String>((ref, id) async {
+    FutureProvider.autoDispose.family<Product?, String>((ref, id) async {
   final repo = ref.watch(productRepositoryProvider);
   return repo.fetchProductById(id);
 });

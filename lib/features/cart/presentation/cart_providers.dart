@@ -86,6 +86,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
     // was in memory for the previous account and hydrating fresh from
     // that user's own scoped storage key.
     _userId = ref.watch(currentUserIdProvider);
+    _unrestored = const [];
     // Notifier.build() is synchronous, so kick the async hydration off in
     // a microtask and populate state once the saved cart (if any) has
     // been re-fetched from Supabase.
@@ -93,26 +94,38 @@ class CartNotifier extends Notifier<List<CartItem>> {
     return [];
   }
 
+  /// Saved lines that could not be checked (offline at launch, say). They
+  /// stay in storage with the cart instead of being overwritten by the next
+  /// change, and come back on a later launch.
+  List<Map<String, dynamic>> _unrestored = const [];
+
   Future<void> _hydrate() async {
     final userId = _userId;
-    final initialState = state;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_cartPrefsKey(userId));
-      if (raw == null || raw.isEmpty) return;
-
-      final saved = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
-      if (saved.isEmpty) return;
+      final saved = _savedLines(prefs, userId);
+      // A guest's cart joins the account they sign in to.
+      final guest = userId == null
+          ? const <Map<String, dynamic>>[]
+          : _savedLines(prefs, null);
+      if (saved.isEmpty && guest.isEmpty) return;
 
       final repo = ref.read(productRepositoryProvider);
       final items = <CartItem>[];
-      for (final entry in saved) {
+      final unrestored = <Map<String, dynamic>>[];
+      for (final entry in [...saved, ...guest]) {
         final productId = entry['product_id'] as String?;
         final variantId = entry['variant_id'] as String?;
         final sizeLabel = entry['size_label'] as String?;
         final quantity = entry['quantity'] as int? ?? 1;
         if (productId == null) continue;
-        final product = await repo.fetchProductById(productId);
+        final Product? product;
+        try {
+          product = await repo.fetchProductById(productId);
+        } catch (_) {
+          unrestored.add(entry);
+          continue;
+        }
         // Skip items that were deleted, sold out, or went out of stock while
         // the app was closed — mirrors the check in refreshFromServer() so a
         // restored cart never briefly shows a phantom in-stock line.
@@ -135,28 +148,39 @@ class CartNotifier extends Notifier<List<CartItem>> {
             continue;
           }
         }
-        items.add(
-          CartItem(
-            product: product,
-            quantity: quantity,
-            selectedVariant: variant,
-            selectedSize: product.hasSizeOptions ? sizeLabel : null,
-          ),
+        final item = CartItem(
+          product: product,
+          quantity: quantity,
+          selectedVariant: variant,
+          selectedSize: product.hasSizeOptions ? sizeLabel : null,
         );
+        if (items.any((i) => i.lineKey == item.lineKey)) continue;
+        items.add(item);
       }
-      // Only apply if the user hasn't already started shopping while
-      // hydration was in flight, and — since fetching each product is
-      // several awaits deep — the signed-in user hasn't changed again in
-      // the meantime (a fast logout/login during hydration would otherwise
-      // let the previous account's items land in the new account's state).
-      if (state.isEmpty &&
-          _userId == userId &&
-          identical(state, initialState)) {
-        state = items;
-      }
+      // Fetching each product is several awaits deep: a fast logout/login
+      // in the meantime must not land the previous account's items here.
+      if (_userId != userId) return;
+      _unrestored = unrestored;
+      // Lines added while this ran stay; restored ones join them.
+      state = [
+        ...state,
+        ...items.where((i) => !state.any((s) => s.lineKey == i.lineKey)),
+      ];
+      // Store the combined cart: lines added meanwhile were saved alone.
+      await _persist();
+      if (guest.isNotEmpty) await prefs.remove(_cartPrefsKey(null));
     } catch (_) {
       // Corrupt/unavailable local storage — just start with an empty cart.
     }
+  }
+
+  static List<Map<String, dynamic>> _savedLines(
+    SharedPreferences prefs,
+    String? userId,
+  ) {
+    final raw = prefs.getString(_cartPrefsKey(userId));
+    if (raw == null || raw.isEmpty) return const [];
+    return (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
   }
 
   Future<void> _persist() async {
@@ -171,6 +195,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
           'quantity': item.quantity,
         },
     ];
+    String key(Map<String, dynamic> line) =>
+        '${line['product_id']}::${line['variant_id'] ?? ''}::${line['size_label'] ?? ''}';
+    final kept = payload.map(key).toSet();
+    payload.addAll(_unrestored.where((line) => !kept.contains(key(line))));
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_cartPrefsKey(userId), jsonEncode(payload));

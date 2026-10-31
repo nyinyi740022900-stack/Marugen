@@ -1,3 +1,6 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show uploadImageMaxSide;
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -59,6 +62,8 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
+      maxWidth: uploadImageMaxSide,
+      maxHeight: uploadImageMaxSide,
     );
     if (mounted && picked != null) setState(() => _newCoverImage = picked);
   }

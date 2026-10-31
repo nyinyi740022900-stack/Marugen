@@ -48,6 +48,8 @@ class ProductGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       return GridView.builder(
+        // Pull-to-refresh must work even when a few products fit on screen.
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         gridDelegate: productGridDelegate(context, constraints.maxWidth - 32),
         itemCount: itemCount,

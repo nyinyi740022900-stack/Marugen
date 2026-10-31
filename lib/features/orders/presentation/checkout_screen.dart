@@ -13,7 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_stripe/flutter_stripe.dart' hide Address;
 import 'package:go_router/go_router.dart';
 
-import '../../../core/config/env.dart';
+import '../../../core/crash/crash_reporting.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
 import '../../../shared/models/promo_code.dart';
@@ -26,9 +26,10 @@ import '../../cart/presentation/cart_providers.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../profile/presentation/address_providers.dart';
 import '../../promo/presentation/promo_providers.dart';
-import '../data/order_repository.dart';
+import '../../shop/presentation/shop_providers.dart';
 import '../data/payment_repository.dart';
 import '../utils/payment_confirmation.dart';
+import '../utils/payment_sheet.dart';
 import '../utils/checkout_totals.dart';
 import 'orders_providers.dart';
 import 'purchase_intent.dart';
@@ -346,25 +347,28 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         return;
       }
 
-      final intent = await PaymentRepository().createPaymentIntent(
-        currency: 'sgd',
-        shippingQuoteId: quote.quoteId,
-        shippingAddress: shippingAddress.toShippingJson(),
-        promoCode: _appliedPromo?.code,
-        idempotencyKey: _idempotencyKey,
-        customerRemarks: remarks,
-        customerRemarksRevision: remarksRevision,
-        items: [
-          for (final item in freshItems)
-            {
-              'product_id': item.product.id,
-              'quantity': item.quantity,
-              if (item.selectedVariant != null)
-                'variant_id': item.selectedVariant!.id,
-              if (item.selectedSize != null) 'size_label': item.selectedSize,
-            },
-        ],
-      );
+      final intent = await ref
+          .read(paymentRepositoryProvider)
+          .createPaymentIntent(
+            currency: 'sgd',
+            shippingQuoteId: quote.quoteId,
+            shippingAddress: shippingAddress.toShippingJson(),
+            promoCode: _appliedPromo?.code,
+            idempotencyKey: _idempotencyKey,
+            customerRemarks: remarks,
+            customerRemarksRevision: remarksRevision,
+            items: [
+              for (final item in freshItems)
+                {
+                  'product_id': item.product.id,
+                  'quantity': item.quantity,
+                  if (item.selectedVariant != null)
+                    'variant_id': item.selectedVariant!.id,
+                  if (item.selectedSize != null)
+                    'size_label': item.selectedSize,
+                },
+            ],
+          );
       pendingOrderId = intent['orderId'] as String?;
       if (!mounted || !_ownsCheckout) return;
 
@@ -384,6 +388,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (intent['paymentStatus'] == null &&
           (intent['amountCents'] != expectedCents ||
               intent['currency']?.toString().toLowerCase() != 'sgd')) {
+        // Nothing was charged: release the reserved stock (a live fish
+        // especially) now instead of holding it for the 30-minute cleanup.
+        await _releasePendingOrder(pendingOrderId);
         throw StateError(
           'Checkout total changed. Review your order before paying.',
         );
@@ -392,44 +399,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       await presentPendingPayment(
         intent: intent,
         ownsCheckout: () => _ownsCheckout,
-        presentPayment: (clientSecret) async {
-          await Stripe.instance.initPaymentSheet(
-            paymentSheetParameters: SetupPaymentSheetParameters(
-              paymentIntentClientSecret: clientSecret,
-              style: Theme.of(context).brightness == Brightness.dark
-                  ? ThemeMode.dark
-                  : ThemeMode.light,
-              merchantDisplayName: 'Marugen Fish Farm',
-              // Required for PayNow (and any other redirect/voucher-based
-              // method) to bring the customer back into the app instead of
-              // stranding them in Safari — matches the `marugen` URL scheme
-              // registered in ios/Runner/Info.plist.
-              returnURL: 'marugen://stripe-redirect',
-              // Apple Pay is deliberately left out: without a real merchant ID
-              // (needs a paid Apple Developer Program membership) and the
-              // matching Xcode entitlement, configuring `applePay:` here was
-              // observed to crash the app when the sheet opens rather than
-              // just hiding the button. Re-add once that account/entitlement
-              // exists. Google Pay is Android-only — harmless to leave on here,
-              // it's simply ignored on iOS.
-              googlePay: PaymentSheetGooglePay(
-                merchantCountryCode: 'SG',
-                currencyCode: 'SGD',
-                // Was hardcoded `true` — meant every build, including a real
-                // production release, would only ever offer Google Pay's test
-                // environment, silently failing/faking real customer charges
-                // via Google Pay. Derived from the actual publishable key in
-                // use (not just Env.appEnv) so it's correct even if a build is
-                // mislabeled: `pk_live_...` always means real money.
-                testEnv: !Env.stripePublishableKey.startsWith('pk_live'),
-              ),
-            ),
-          );
-          // Native initialization may outlive this screen or its signed-in owner.
-          if (!_ownsCheckout) return;
-          await Stripe.instance.presentPaymentSheet();
-        },
+        presentPayment: (clientSecret) => showStripePaymentSheet(
+          clientSecret,
+          brightness: Theme.of(context).brightness,
+          stillWanted: () => _ownsCheckout,
+        ),
       );
+
+      // Bought (or reserved) stock changed: the shop must not keep showing
+      // a sold koi as available.
+      ref.invalidate(productListProvider);
 
       // Buy Now never touched the persistent cart, so there's nothing to
       // clear — whatever was already in the cart before this purchase
@@ -466,19 +445,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (pendingOrderId != null &&
           e.error.code == FailureCode.Canceled &&
           _ownsCheckout) {
-        try {
-          await OrderRepository().cancelMyOrder(pendingOrderId);
-        } catch (cancelError) {
-          // Best-effort: the order is left `pending` (auto-cancelled by
-          // cancel-stale-pending-orders after 30 min, see 0014_stale_order_
-          // cleanup.sql) rather than crashing the payment-failure path —
-          // logged so a real recurring failure isn't invisible.
-          developer.log(
-            'Could not cancel pending order after Stripe error',
-            name: 'CheckoutScreen',
-            error: cancelError,
-          );
-        }
+        await _releasePendingOrder(pendingOrderId);
       }
       if (_ownsCheckout && e.error.code == FailureCode.Canceled) {
         ref.invalidate(checkoutShippingQuoteProvider(shippingKey));
@@ -490,11 +457,16 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               : 'Payment could not be completed. Check your payment details and try again.',
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       if (_ownsCheckout) {
         ref.invalidate(checkoutShippingQuoteProvider(shippingKey));
       }
       developer.log('Checkout failed', name: 'CheckoutScreen', error: e);
+      // A total the server disagrees with means app and server pricing
+      // drifted apart: worth seeing even though the customer gets clear copy.
+      if (e is StateError) {
+        CrashReporting.recordError(e, st, reason: 'checkout.payment');
+      }
       if (mounted) {
         setState(
           () => _error = e is StateError
@@ -503,11 +475,29 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   e,
                   fallback: 'We couldn’t complete checkout. Check your connection and try again. If payment was taken, check My Orders before retrying.',
                   context: 'checkout.payment',
+                  stackTrace: st,
                 ),
         );
       }
     } finally {
       if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  /// Cancels an unpaid order this checkout created so its stock is free
+  /// again. Best-effort: on failure the order stays `pending` and is
+  /// auto-cancelled by cancel-stale-pending-orders after 30 minutes (see
+  /// 0014_stale_order_cleanup.sql) rather than crashing the failure path —
+  /// logged so a real recurring failure isn't invisible.
+  Future<void> _releasePendingOrder(String orderId) async {
+    try {
+      await ref.read(orderRepositoryProvider).cancelMyOrder(orderId);
+    } catch (cancelError) {
+      developer.log(
+        'Could not cancel unpaid pending order',
+        name: 'CheckoutScreen',
+        error: cancelError,
+      );
     }
   }
 
@@ -588,6 +578,18 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     if (mounted) ref.invalidate(myAddressesProvider);
   }
 
+  /// Opens a saved address the server would reject (see
+  /// [Address.isDeliverable]) so the customer can fix it here.
+  Future<void> _editAddress(Address address) async {
+    if (_processing) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => AddressForm(existing: address),
+    );
+    if (mounted) ref.invalidate(myAddressesProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final ownerValid = ref.watch(currentUserIdProvider) == _checkoutOwner;
@@ -612,11 +614,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final selected = addresses.where(
       (address) => address.id == selectedId && address.userId == _checkoutOwner,
     );
+    final addressNeedsFix =
+        selected.isNotEmpty && !selected.first.isDeliverable;
     final quoteKey =
         ownerValid &&
             settingsReady &&
             items.isNotEmpty &&
             selected.isNotEmpty &&
+            !addressNeedsFix &&
             !addressesAsync.isLoading &&
             !addressesAsync.hasError
         ? _shippingKey(items, selected.first)
@@ -738,12 +743,35 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                             fontSize: 13.5,
                                           ),
                                         ),
-                                        subtitle: Text(
-                                          address.oneLine,
+                                        subtitle: Text.rich(
+                                          TextSpan(
+                                            text: address.oneLine,
+                                            children: [
+                                              if (!address.isDeliverable)
+                                                TextSpan(
+                                                  text: '\nUpdate the phone or postal code to deliver here',
+                                                  style: TextStyle(
+                                                    color: AppPalette.of(
+                                                      context,
+                                                    ).accent,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
                                           style: const TextStyle(
                                             fontSize: 12.5,
                                           ),
                                         ),
+                                        trailing: address.isDeliverable
+                                            ? null
+                                            : TextButton(
+                                                onPressed: _processing
+                                                    ? null
+                                                    : () =>
+                                                          _editAddress(address),
+                                                child: const Text('Edit'),
+                                              ),
                                       ),
                                     ),
                                   const Divider(
@@ -1094,6 +1122,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   addressesAsync: addressesAsync,
                   resolveSelectedId: _resolveSelectedId,
                   onPayDelivery: (address) => _pay(shippingAddress: address),
+                  onFixAddress: _editAddress,
                 ),
               ],
             ),
@@ -1153,6 +1182,7 @@ class _PayButton extends StatelessWidget {
   final AsyncValue<List<Address>> addressesAsync;
   final String? Function(List<Address>) resolveSelectedId;
   final void Function(Address) onPayDelivery;
+  final void Function(Address) onFixAddress;
 
   const _PayButton({
     required this.shippingFailed,
@@ -1166,6 +1196,7 @@ class _PayButton extends StatelessWidget {
     required this.addressesAsync,
     required this.resolveSelectedId,
     required this.onPayDelivery,
+    required this.onFixAddress,
   });
 
   @override
@@ -1175,6 +1206,11 @@ class _PayButton extends StatelessWidget {
         final selectedId = resolveSelectedId(addresses);
         final matching = addresses.where((a) => a.id == selectedId);
         final selectedAddress = matching.isNotEmpty ? matching.first : null;
+        final addressNeedsFix =
+            hasItems &&
+            remarksValid &&
+            selectedAddress != null &&
+            !selectedAddress.isDeliverable;
         final canPay =
             remarksValid &&
             checkoutCanPay(
@@ -1185,11 +1221,12 @@ class _PayButton extends StatelessWidget {
               processing: processing,
             );
         return ElevatedButton(
-          onPressed:
-              shippingFailed &&
-                  !processing &&
-                  hasItems &&
-                  selectedAddress != null
+          onPressed: addressNeedsFix
+              ? (processing ? null : () => onFixAddress(selectedAddress))
+              : shippingFailed &&
+                    !processing &&
+                    hasItems &&
+                    selectedAddress != null
               ? onRetryShipping
               : canPay
               ? () => onPayDelivery(selectedAddress!)
@@ -1208,6 +1245,8 @@ class _PayButton extends StatelessWidget {
                       ? 'No items to check out'
                       : !remarksValid
                       ? 'Review your order requests'
+                      : addressNeedsFix
+                      ? 'Update delivery address'
                       : shippingFailed
                       ? 'Retry delivery'
                       : !totalsReady

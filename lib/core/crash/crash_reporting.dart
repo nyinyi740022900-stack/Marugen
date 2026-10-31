@@ -56,9 +56,18 @@ class CrashReporting {
     }
   }
 
+  /// Receives non-fatal reports instead of Crashlytics while set (tests).
+  @visibleForTesting
+  static void Function(Object error, String? reason)? debugReporter;
+
   /// Records a non-fatal error, e.g. from a caught exception a caller still
   /// wants visibility into. No-op if Crashlytics isn't initialized.
   static void recordError(Object error, StackTrace stack, {String? reason}) {
+    final reporter = debugReporter;
+    if (reporter != null) {
+      reporter(error, reason);
+      return;
+    }
     if (!_initialized) return;
     FirebaseCrashlytics.instance.recordError(error, stack, reason: reason);
   }

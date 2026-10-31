@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -34,6 +36,25 @@ import 'unknown_route_screen.dart';
 /// browse the shop, product pages and cart as a guest. Login is only
 /// enforced here (plus everything under `/admin`).
 const _authRequiredRoutes = ['/checkout'];
+
+/// Opens [location] from a tapped push once the router has left the splash
+/// screen, so a cold start lands on the order after sign-in resolves instead
+/// of being bounced back through splash. Never navigates during a build.
+void openFromNotification(GoRouter router, String location) {
+  final info = router.routeInformationProvider;
+  bool settled() => info.value.uri.path != '/splash';
+  if (settled()) {
+    scheduleMicrotask(() => router.push(location));
+    return;
+  }
+  late final VoidCallback listener;
+  listener = () {
+    if (!settled()) return;
+    info.removeListener(listener);
+    router.push(location);
+  };
+  info.addListener(listener);
+}
 
 final routerProvider = Provider<GoRouter>((ref) {
   // Deliberately NOT `ref.watch`-ing authStateProvider/currentAppUserProvider

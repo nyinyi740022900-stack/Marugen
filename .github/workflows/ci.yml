@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  flutter:
+    name: Flutter analyze + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The shop and its tests run on Singapore time.
+      TZ: Asia/Singapore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+      - name: Install poppler for the PDF print checks
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+      # `.env` is a bundled asset but gitignored; placeholders are enough for tests.
+      - name: Placeholder .env
+        run: cp .env.example .env
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  edge-functions:
+    name: Edge Functions (Deno)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.x
+      - name: Type-check every function
+        run: deno check supabase/functions/*/index.ts
+      - name: Unit tests
+        run: deno test --allow-env supabase/functions
+
+  sql:
+    name: SQL regression suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Put PostgreSQL server tools on PATH
+        run: |
+          if ! ls -d /usr/lib/postgresql/*/bin >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql
+          fi
+          ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1 >> "$GITHUB_PATH"
+      - name: Run suites
+        run: |
+          for suite in supabase/tests/run_*.sh; do
+            echo "::group::$suite"
+            bash "$suite"
+            echo "::endgroup::"
+          done

@@ -8,7 +8,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:marugen_app/features/auth/data/auth_repository.dart';
 import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
+import 'package:marugen_app/features/orders/data/order_repository.dart';
+import 'package:marugen_app/features/orders/data/payment_repository.dart';
+import 'package:marugen_app/features/orders/presentation/orders_providers.dart';
 import 'package:marugen_app/features/cart/domain/cart_item.dart';
 import 'package:marugen_app/features/orders/presentation/checkout_screen.dart';
 import 'package:marugen_app/features/orders/presentation/purchase_intent.dart';
@@ -49,7 +53,7 @@ const address = Address(
   id: 'address',
   userId: 'a',
   recipientName: 'Customer',
-  phone: '12345678',
+  phone: '81234567',
   line1: '1 Street',
   postalCode: '123456',
 );
@@ -61,7 +65,9 @@ Future<void> showCheckout(
   double textScale = 1,
   ThemeData? theme,
   List<CartItem> items = const [selectedItem],
+  List<Address> addresses = const [address],
   Future<ShippingQuote> Function(String)? quoteLoader,
+  List<Override> extraOverrides = const [],
 }) async {
   await tester.pumpWidget(
     ProviderScope(
@@ -72,12 +78,13 @@ Future<void> showCheckout(
         if (promoRepository != null)
           promoRepositoryProvider.overrideWithValue(promoRepository),
         shopSettingsProvider.overrideWith((ref) => settings),
-        myAddressesProvider.overrideWith((ref) async => [address]),
+        myAddressesProvider.overrideWith((ref) async => addresses),
         checkoutShippingQuoteProvider.overrideWith(
           (ref, key) async => quoteLoader == null
               ? fixtureShippingQuote(key)
               : quoteLoader(key),
         ),
+        ...extraOverrides,
       ],
       child: MaterialApp(
         theme: theme,
@@ -93,6 +100,42 @@ Future<void> showCheckout(
   await tester.pump();
 }
 
+class MismatchedPayments implements PaymentRepository {
+  @override
+  Future<Map<String, dynamic>> createPaymentIntent({
+    required List<Map<String, dynamic>> items,
+    Map<String, dynamic>? shippingAddress,
+    String currency = 'sgd',
+    String? promoCode,
+    String? shippingQuoteId,
+    String? idempotencyKey,
+    String? customerRemarks,
+    int customerRemarksRevision = 0,
+  }) async => {
+    'orderId': 'pending-order',
+    'clientSecret': 'secret',
+    'amountCents': 1,
+    'currency': 'sgd',
+  };
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class CancellingOrders implements OrderRepository {
+  final cancelled = <String>[];
+  @override
+  Future<void> cancelMyOrder(String orderId) async => cancelled.add(orderId);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class VerifiedAuth implements AuthRepository {
+  @override
+  bool get isEmailVerified => true;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class PendingPromoRepository implements PromoRepository {
   final Completer<PromoCode?> result = Completer<PromoCode?>();
   @override
@@ -102,6 +145,60 @@ class PendingPromoRepository implements PromoRepository {
 }
 
 void main() {
+  testWidgets('a total that changed on the server releases the reserved '
+      'order instead of holding its stock', (tester) async {
+    final orders = CancellingOrders();
+    await showCheckout(
+      tester,
+      Future.value({'gst_percent': 9, 'gst_included_in_price': true}),
+      extraOverrides: [
+        paymentRepositoryProvider.overrideWithValue(MismatchedPayments()),
+        orderRepositoryProvider.overrideWithValue(orders),
+        authRepositoryProvider.overrideWithValue(VerifiedAuth()),
+      ],
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('with Stripe'));
+    await tester.pumpAndSettle();
+    expect(orders.cancelled, ['pending-order']);
+    expect(
+      find.text('Checkout total changed. Review your order before paying.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a saved address the server would reject asks for an update '
+      'instead of failing the delivery price', (tester) async {
+    var quotes = 0;
+    const oldAddress = Address(
+      id: 'old',
+      userId: 'a',
+      recipientName: 'Customer',
+      phone: '1234 5678',
+      line1: '1 Street',
+      postalCode: '12345',
+    );
+    await showCheckout(
+      tester,
+      Future.value({'gst_percent': 9, 'gst_included_in_price': true}),
+      addresses: const [oldAddress],
+      quoteLoader: (key) {
+        quotes++;
+        return Future.value(testShippingQuote());
+      },
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Update the phone or postal code'),
+      findsOneWidget,
+    );
+    expect(find.text('Update delivery address'), findsOneWidget);
+    expect(quotes, 0);
+    await tester.tap(find.text('Update delivery address'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit Address'), findsOneWidget);
+  });
+
   testWidgets('payment waits for shipping and includes only buyer share once', (
     tester,
   ) async {

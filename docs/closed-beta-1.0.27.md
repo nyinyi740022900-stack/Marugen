@@ -1,6 +1,6 @@
 # Closed beta 1.0.27 (32)
 
-Built 2026-11-08 from `codex/whole-app-audit-fixes` (PR #3, not yet merged to main) at e6c1911 plus the version bump, for Closed testing — Alpha. Upload and submission are done by the owner in Play Console (the bundle is too large for the Chrome extension).
+Built 2026-11-08 from `codex/whole-app-audit-fixes` (PR #3, not yet merged to main) at e6c1911 plus the version bump, for Closed testing — Alpha. The owner uploaded the bundle (too large for the Chrome extension); Claude filled the release name and notes and saved the release. Submitted for review on 2026-11-08, full rollout replacing 31 (1.0.26); Publishing overview shows **Changes in review** with Google's quick checks still running. Preview: Ready to release, 0 devices lost (12,609 phones, 6,829 tablets), 19.3 MB new installs, 2.6 MB updates.
 
 - Release name: `1.0.27 (32) – Smoother shop and order fixes`.
 - Release notes (en-US): "Smoother product photos (swipe down to close), clearer option buttons, faster wishlist hearts, finish payment on pending orders, reviews after delivery, and many fixes."
@@ -16,7 +16,11 @@ Everything in PR #3:
 
 ## Production backend
 
-Requires migrations 0072–0075 and the deployed Edge Functions resume-order-payment, create-payment-intent, send-order-notification and order-cancellation. The owner confirmed on 2026-11-08 that all of these are applied in production; the Supabase CLI here returned 403 for the project, so this was not verified from this machine.
+Rolled out to production (gexgcwdkbeythrnqmihe) on 2026-11-08 by Claude, after the owner re-logged the Supabase CLI:
+
+- Migrations 0072–0075 applied with `supabase db query --linked -f` (in order; no price/stock rows needed fixing). Verified: 5 price/stock checks, `device_tokens` + `register_device_token`, 3 admin aggregate functions, review insert policy now `delivered` only. `device_tokens` is empty because no profile had a legacy `fcm_token`.
+- Edge Functions deployed with `--use-api`, all `verify_jwt = true` (unauthenticated POST returns 401): resume-order-payment v1 (new), create-payment-intent v31, send-order-notification v29, order-cancellation v4. `_shared/push.ts` still reads legacy `profiles.fcm_token`, so the live 1.0.26 keeps getting pushes.
+- Not exercised end to end yet: resume payment, admin dashboard totals and push delivery with a real signed-in device.
 
 ## Verification
 

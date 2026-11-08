@@ -8,6 +8,8 @@ import 'package:marugen_app/features/orders/utils/print_document.dart';
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
+import 'pdf_tools.dart';
+
 void main() {
   testWidgets(
     'invoice page selection, paper, scale and save destination affect the output',
@@ -200,5 +202,6 @@ void main() {
       expect(shared, orderedEquals(bytes));
       expect(tester.takeException(), isNull);
     },
+    skip: popplerMissing,
   );
 }

@@ -1,5 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/sized_network_image.dart';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +12,7 @@ import '../../../shared/utils/price_format.dart';
 import '../../../shared/utils/view_tracker.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/fullscreen_image_gallery.dart';
+import '../../../shared/widgets/heart_icon.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/product_grid.dart';
 import '../../../shared/widgets/product_video_player.dart';
@@ -40,6 +43,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   String? _selectedVariantForProductId;
   int _quantity = 1;
   int _imagePage = 0;
+  final _imageController = PageController();
   bool _isSharing = false;
   final _shareButtonKey = GlobalKey();
 
@@ -79,10 +83,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
     _scrollController.addListener(_onScroll);
   }
 
+  static String _heroPrefix(Product product) => 'product-image-${product.id}';
+
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _imageController.dispose();
     _tabController.dispose();
     _optionsFocus.dispose();
     _sizeFocus.dispose();
@@ -315,522 +322,556 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
           final fish = product.fishDetails;
           final hasFishDetails = fish != null && fish.hasAnyDetail;
           final hasImages = product.imageUrls.isNotEmpty;
-          return CustomScrollView(
-            controller: _scrollController,
-            slivers: [
-              SliverAppBar(
-                expandedHeight: hasImages ? 320 : 200,
-                pinned: true,
-                backgroundColor: AppColors.black,
-                foregroundColor: AppColors.white,
-                actions: [
-                  SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: IconButton(
-                      key: _shareButtonKey,
-                      tooltip: 'Share product',
-                      constraints: const BoxConstraints(
-                        minWidth: 48,
-                        minHeight: 48,
-                      ),
-                      onPressed: _isSharing
-                          ? null
-                          : () => _shareProduct(
-                              ProductShareDetails.fromProduct(
-                                product,
-                                variant: _selectedVariant,
-                                size: _selectedSize,
-                                imageIndex: _imagePage,
+          return RefreshIndicator.adaptive(
+            onRefresh: () =>
+                ref.refresh(productDetailProvider(widget.productId).future),
+            child: CustomScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverAppBar(
+                  expandedHeight: hasImages ? 320 : 200,
+                  pinned: true,
+                  backgroundColor: AppColors.black,
+                  foregroundColor: AppColors.white,
+                  actions: [
+                    SizedBox(
+                      width: 48,
+                      height: 48,
+                      child: IconButton(
+                        key: _shareButtonKey,
+                        tooltip: 'Share product',
+                        constraints: const BoxConstraints(
+                          minWidth: 48,
+                          minHeight: 48,
+                        ),
+                        onPressed: _isSharing
+                            ? null
+                            : () => _shareProduct(
+                                ProductShareDetails.fromProduct(
+                                  product,
+                                  variant: _selectedVariant,
+                                  size: _selectedSize,
+                                  imageIndex: _imagePage,
+                                ),
                               ),
-                            ),
-                      icon: _isSharing
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
+                        icon: _isSharing
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: AppColors.white,
+                                  semanticsLabel: 'Preparing product share',
+                                ),
+                              )
+                            : const Icon(
+                                Icons.ios_share_outlined,
+                                size: 22,
                                 color: AppColors.white,
-                                semanticsLabel: 'Preparing product share',
                               ),
-                            )
-                          : const Icon(
-                              Icons.ios_share_outlined,
-                              size: 22,
-                              color: AppColors.white,
-                            ),
+                      ),
                     ),
-                  ),
-                  _FavoriteAppBarButton(productId: product.id),
-                ],
-                flexibleSpace: FlexibleSpaceBar(
-                  background: hasImages
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            PageView(
-                              onPageChanged: (i) =>
-                                  setState(() => _imagePage = i),
-                              children: [
-                                for (final url in product.imageUrls)
-                                  GestureDetector(
-                                    onTap: () => FullscreenImageGallery.open(
-                                      context,
-                                      imageUrls: product.imageUrls,
-                                      initialIndex: _imagePage,
-                                    ),
-                                    // BoxFit.contain (not .cover) so the
-                                    // whole uploaded photo is visible
-                                    // up-front — .cover was cropping the
-                                    // top/bottom of tall product photos,
-                                    // only fixable before by tapping into
-                                    // the fullscreen gallery.
-                                    child: Container(
-                                      color: AppColors.black,
-                                      child: CachedNetworkImage(
-                                        imageUrl: url,
-                                        fit: BoxFit.contain,
-                                        placeholder: (_, _) => Container(
-                                          color: AppPalette.of(context)
-                                              .background,
-                                        ),
-                                        errorWidget: (_, _, _) => Container(
-                                          color: AppPalette.of(context)
-                                              .background,
-                                          child: Icon(
-                                            Icons.image_not_supported_outlined,
-                                            color: AppPalette.of(context)
-                                                .textMuted,
+                    _FavoriteAppBarButton(productId: product.id),
+                  ],
+                  flexibleSpace: FlexibleSpaceBar(
+                    background: hasImages
+                        ? Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              PageView(
+                                controller: _imageController,
+                                onPageChanged: (i) =>
+                                    setState(() => _imagePage = i),
+                                children: [
+                                  for (final (i, url)
+                                      in product.imageUrls.indexed)
+                                    GestureDetector(
+                                      onTap: () => FullscreenImageGallery.open(
+                                        context,
+                                        imageUrls: product.imageUrls,
+                                        initialIndex: _imagePage,
+                                        heroTagPrefix: _heroPrefix(product),
+                                        // Follow the gallery so the photo
+                                        // flies back to the matching page.
+                                        onIndexChanged: (page) {
+                                          if (_imageController.hasClients) {
+                                            _imageController.jumpToPage(page);
+                                          }
+                                        },
+                                      ),
+                                      // BoxFit.contain (not .cover) so the
+                                      // whole uploaded photo is visible
+                                      // up-front — .cover was cropping the
+                                      // top/bottom of tall product photos,
+                                      // only fixable before by tapping into
+                                      // the fullscreen gallery.
+                                      child: Container(
+                                        color: AppColors.black,
+                                        child: Hero(
+                                          tag: FullscreenImageGallery.heroTag(
+                                            _heroPrefix(product),
+                                            i,
+                                          ),
+                                          child: SizedNetworkImage(
+                                            imageUrl: url,
+                                            fit: BoxFit.contain,
+                                            placeholder: (_, _) => Container(
+                                              color: AppPalette.of(context)
+                                                  .background,
+                                            ),
+                                            errorWidget: (_, _, _) => Container(
+                                              color: AppPalette.of(context)
+                                                  .background,
+                                              child: Icon(
+                                                Icons
+                                                    .image_not_supported_outlined,
+                                                color: AppPalette.of(context)
+                                                    .textMuted,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                       ),
                                     ),
+                                ],
+                              ),
+                              // Scrim so the back/share/heart icons stay legible
+                              // over bright photos, matching the solid app bar
+                              // treatment used everywhere else in the app.
+                              IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        AppColors.black.withValues(alpha: 0.45),
+                                        Colors.transparent,
+                                      ],
+                                      stops: const [0.0, 0.35],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              if (product.imageUrls.length > 1)
+                                Positioned(
+                                  right: AppSpacing.md,
+                                  bottom: AppSpacing.md,
+                                  child: _ImagePageBadge(
+                                    page: _imagePage + 1,
+                                    count: product.imageUrls.length,
+                                  ),
+                                ),
+                            ],
+                          )
+                        : Container(
+                            color: AppPalette.of(context).surfaceMuted,
+                            child: Icon(
+                              Icons.water,
+                              size: 48,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                  ),
+                ),
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _PdpTabBarDelegate(
+                    height: _tabBarHeight,
+                    child: TabBar(
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+                      controller: _tabController,
+                      onTap: _onTabTap,
+                      // The app's shared TabBarThemeData styles white labels
+                      // for tabs that sit on the black AppBar (Knowledge
+                      // screen) — invisible on this tab bar's white
+                      // background, so this one overrides colors explicitly.
+                      // Equal insets keep every label aligned; long labels
+                      // stay complete in the horizontally scrollable bar.
+                      labelColor: AppPalette.of(context).text,
+                      unselectedLabelColor: AppPalette.of(context).textMuted,
+                      indicatorColor: AppPalette.of(context).accent,
+                      dividerColor: Colors.transparent,
+                      labelStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      unselectedLabelStyle: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      tabs: const [
+                        Tab(text: 'Overview'),
+                        Tab(text: 'Details'),
+                        Tab(text: 'Reviews'),
+                        Tab(text: 'Recommended for you'),
+                      ],
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: Container(
+                    key: _overviewKey,
+                    decoration: BoxDecoration(
+                      color: AppPalette.of(context).background,
+                    ),
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                      AppSpacing.lg,
+                      AppSpacing.xxxl,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          product.name,
+                          style: const TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (product.hasVariants || product.hasSizeOptions) ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            'Choose the listed option and size for your order. Price and availability update with your selection. If you need help choosing, contact the shop.',
+                            style: TextStyle(
+                              color: AppPalette.of(context).textMuted,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                        if (product.hasVariants) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            key: _variantKey,
+                            product.hasSizeOptions
+                                ? 'WEIGHT'
+                                : (product.isLiveFish
+                                      ? 'CHOOSE FISH'
+                                      : 'OPTIONS'),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              letterSpacing: 0.8,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Focus(
+                            focusNode: _optionsFocus,
+                            child: Wrap(
+                              spacing: AppSpacing.sm,
+                              runSpacing: AppSpacing.sm,
+                              children: [
+                                for (final v in product.variants)
+                                  Builder(
+                                    builder: (_) {
+                                      final weightStock = product.hasSizeOptions
+                                          ? product.sizeOptions.fold<int>(0, (
+                                              s,
+                                              size,
+                                            ) {
+                                              final q = product.stockFor(
+                                                variantId: v.id,
+                                                size: size,
+                                              );
+                                              return s + (q > 0 ? q : 0);
+                                            })
+                                          : v.stockQuantity;
+                                      final inStock = weightStock > 0;
+                                      return ChoiceChip(
+                                        label: Text(
+                                          inStock
+                                              ? v.label
+                                              : '${v.label} (Sold out)',
+                                        ),
+                                        selected: _selectedVariant?.id == v.id,
+                                        showCheckmark: false,
+                                        onSelected: inStock
+                                            ? (_) => setState(() {
+                                                HapticFeedback.selectionClick();
+                                                _selectedVariant = v;
+                                                _quantity = 1;
+                                              })
+                                            : null,
+                                      );
+                                    },
                                   ),
                               ],
                             ),
-                            // Scrim so the back/share/heart icons stay legible
-                            // over bright photos, matching the solid app bar
-                            // treatment used everywhere else in the app.
-                            IgnorePointer(
-                              child: DecoratedBox(
+                          ),
+                        ],
+                        if (product.hasSizeOptions) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            key: _sizeKey,
+                            'SIZE',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              letterSpacing: 0.8,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Focus(
+                            focusNode: _sizeFocus,
+                            child: Wrap(
+                              spacing: AppSpacing.sm,
+                              runSpacing: AppSpacing.sm,
+                              children: [
+                                for (final size in product.sizeOptions)
+                                  Builder(
+                                    builder: (_) {
+                                      final sizeStock = _selectedVariant == null
+                                          ? null
+                                          : product.stockFor(
+                                              variantId: _selectedVariant!.id,
+                                              size: size,
+                                            );
+                                      final soldOut =
+                                          sizeStock != null && sizeStock <= 0;
+                                      return ChoiceChip(
+                                        label: Text(
+                                          soldOut ? '$size (Sold out)' : size,
+                                        ),
+                                        selected: _selectedSize == size,
+                                        showCheckmark: false,
+                                        onSelected: soldOut
+                                            ? null
+                                            : (_) => setState(() {
+                                                HapticFeedback.selectionClick();
+                                                _selectedSize = size;
+                                                _quantity = 1;
+                                              }),
+                                      );
+                                    },
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: AppSpacing.sm),
+                        if (product.isPurchasable &&
+                            !product.hasVariants &&
+                            product.hasActiveSale)
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                formatPrice(product.salePrice!),
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppPalette.of(context).accent,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                formatPrice(product.price!),
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: AppPalette.of(context).textMuted,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
                                 decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      AppColors.black.withValues(alpha: 0.45),
-                                      Colors.transparent,
-                                    ],
-                                    stops: const [0.0, 0.35],
+                                  color: AppColors.red,
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.sm,
+                                  ),
+                                ),
+                                child: Text(
+                                  '-${product.discountPercent}%',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.white,
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
-                        )
-                      : Container(
-                          color: AppPalette.of(context).surfaceMuted,
-                          child: Icon(
-                            Icons.water,
-                            size: 48,
-                            color: AppPalette.of(context).textMuted,
-                          ),
-                        ),
-                ),
-              ),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _PdpTabBarDelegate(
-                  height: _tabBarHeight,
-                  child: TabBar(
-                    isScrollable: true,
-                    tabAlignment: TabAlignment.start,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    labelPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    controller: _tabController,
-                    onTap: _onTabTap,
-                    // The app's shared TabBarThemeData styles white labels
-                    // for tabs that sit on the black AppBar (Knowledge
-                    // screen) — invisible on this tab bar's white
-                    // background, so this one overrides colors explicitly.
-                    // Equal insets keep every label aligned; long labels
-                    // stay complete in the horizontally scrollable bar.
-                    labelColor: AppPalette.of(context).text,
-                    unselectedLabelColor: AppPalette.of(context).textMuted,
-                    indicatorColor: AppPalette.of(context).accent,
-                    dividerColor: Colors.transparent,
-                    labelStyle: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                    ),
-                    unselectedLabelStyle: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    tabs: const [
-                      Tab(text: 'Overview'),
-                      Tab(text: 'Details'),
-                      Tab(text: 'Reviews'),
-                      Tab(text: 'Recommended for you'),
-                    ],
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
-                  key: _overviewKey,
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).background,
-                  ),
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.xxxl,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        product.name,
-                        style: const TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (product.hasVariants || product.hasSizeOptions) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          'Choose the listed option and size for your order. Price and availability update with your selection. If you need help choosing, contact the shop.',
-                          style: TextStyle(
-                            color: AppPalette.of(context).textMuted,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                      if (product.hasVariants) ...[
-                        const SizedBox(height: AppSpacing.md),
-                        Text(
-                          key: _variantKey,
-                          product.hasSizeOptions
-                              ? 'WEIGHT'
-                              : (product.isLiveFish
-                                    ? 'CHOOSE FISH'
-                                    : 'OPTIONS'),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppPalette.of(context).textMuted,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Focus(
-                          focusNode: _optionsFocus,
-                          child: Wrap(
-                            spacing: AppSpacing.sm,
-                            runSpacing: AppSpacing.sm,
-                            children: [
-                              for (final v in product.variants)
-                                Builder(
-                                  builder: (_) {
-                                    final weightStock = product.hasSizeOptions
-                                        ? product.sizeOptions.fold<int>(0, (
-                                            s,
-                                            size,
-                                          ) {
-                                            final q = product.stockFor(
-                                              variantId: v.id,
-                                              size: size,
-                                            );
-                                            return s + (q > 0 ? q : 0);
-                                          })
-                                        : v.stockQuantity;
-                                    final inStock = weightStock > 0;
-                                    return ChoiceChip(
-                                      label: Text(
-                                        inStock
-                                            ? v.label
-                                            : '${v.label} (Sold out)',
-                                      ),
-                                      selected: _selectedVariant?.id == v.id,
-                                      showCheckmark: false,
-                                      onSelected: inStock
-                                          ? (_) => setState(() {
-                                              _selectedVariant = v;
-                                              _quantity = 1;
-                                            })
-                                          : null,
-                                    );
-                                  },
-                                ),
                             ],
+                          )
+                        else
+                          Text(
+                            !product.isPurchasable
+                                ? 'Contact us for price'
+                                : product.hasVariants
+                                ? (_selectedVariant != null
+                                      ? formatPrice(_selectedVariant!.price)
+                                      : 'Select an option')
+                                : formatPrice(product.price!),
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: AppPalette.of(context).accent,
+                            ),
                           ),
-                        ),
-                      ],
-                      if (product.hasSizeOptions) ...[
+                        ReviewSummary(productId: product.id),
                         const SizedBox(height: AppSpacing.md),
-                        Text(
-                          key: _sizeKey,
-                          'SIZE',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppPalette.of(context).textMuted,
-                          ),
+                        _StockLine(
+                          product: product,
+                          variant: _selectedVariant,
+                          size: _selectedSize,
                         ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Focus(
-                          focusNode: _sizeFocus,
-                          child: Wrap(
-                            spacing: AppSpacing.sm,
-                            runSpacing: AppSpacing.sm,
-                            children: [
-                              for (final size in product.sizeOptions)
-                                Builder(
-                                  builder: (_) {
-                                    final sizeStock = _selectedVariant == null
-                                        ? null
-                                        : product.stockFor(
-                                            variantId: _selectedVariant!.id,
-                                            size: size,
-                                          );
-                                    final soldOut =
-                                        sizeStock != null && sizeStock <= 0;
-                                    return ChoiceChip(
-                                      label: Text(
-                                        soldOut ? '$size (Sold out)' : size,
-                                      ),
-                                      selected: _selectedSize == size,
-                                      showCheckmark: false,
-                                      onSelected: soldOut
-                                          ? null
-                                          : (_) => setState(() {
-                                              _selectedSize = size;
-                                              _quantity = 1;
-                                            }),
-                                    );
-                                  },
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: AppSpacing.sm),
-                      if (product.isPurchasable &&
-                          !product.hasVariants &&
-                          product.hasActiveSale)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            Text(
-                              formatPrice(product.salePrice!),
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w700,
-                                color: AppPalette.of(context).accent,
-                              ),
+                        if (!product.isLiveFish &&
+                            product.isPurchasable &&
+                            !product.isOutOfStock &&
+                            (!product.hasVariants ||
+                                _selectedVariant != null) &&
+                            (!product.hasSizeOptions ||
+                                _selectedSize != null)) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          _QuantityStepper(
+                            quantity: _quantity,
+                            max: CartNotifier.availableFor(
+                              product,
+                              _selectedVariant,
+                              size: _selectedSize,
                             ),
-                            const SizedBox(width: 8),
-                            Text(
-                              formatPrice(product.price!),
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: AppPalette.of(context).textMuted,
-                                decoration: TextDecoration.lineThrough,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.red,
-                                borderRadius: BorderRadius.circular(
-                                  AppRadius.sm,
-                                ),
-                              ),
-                              child: Text(
-                                '-${product.discountPercent}%',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        Text(
-                          !product.isPurchasable
-                              ? 'Contact us for price'
-                              : product.hasVariants
-                              ? (_selectedVariant != null
-                                    ? formatPrice(_selectedVariant!.price)
-                                    : 'Select an option')
-                              : formatPrice(product.price!),
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                            color: AppPalette.of(context).accent,
+                            onChanged: (q) => setState(() => _quantity = q),
                           ),
-                        ),
-                      ReviewSummary(productId: product.id),
-                      const SizedBox(height: AppSpacing.md),
-                      _StockLine(
-                        product: product,
-                        variant: _selectedVariant,
-                        size: _selectedSize,
-                      ),
-                      if (!product.isLiveFish &&
-                          product.isPurchasable &&
-                          !product.isOutOfStock &&
-                          (!product.hasVariants || _selectedVariant != null) &&
-                          (!product.hasSizeOptions ||
-                              _selectedSize != null)) ...[
-                        const SizedBox(height: AppSpacing.md),
-                        _QuantityStepper(
-                          quantity: _quantity,
-                          max: CartNotifier.availableFor(
-                            product,
-                            _selectedVariant,
-                            size: _selectedSize,
-                          ),
-                          onChanged: (q) => setState(() => _quantity = q),
-                        ),
-                      ],
-                      const SizedBox(height: AppSpacing.xl),
-                      _DeliveryInfoCard(isLiveFish: product.isLiveFish),
-                      const SizedBox(height: AppSpacing.xl),
-                      if (product.videoUrl != null &&
-                          product.videoUrl!.isNotEmpty) ...[
-                        Text(
-                          'VIDEO',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppPalette.of(context).textMuted,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        ProductVideoPlayer(videoUrl: product.videoUrl!),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
-                  key: _detailsKey,
-                  color: AppPalette.of(context).background,
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.xxxl,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (!hasFishDetails && product.description == null)
-                        Text(
-                          'No additional details for this product.',
-                          style: TextStyle(
-                            color: AppPalette.of(context).textMuted,
-                            fontSize: 13.5,
-                          ),
-                        ),
-                      if (hasFishDetails) ...[
-                        Text(
-                          'DETAILS',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppPalette.of(context).textMuted,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: AppPalette.of(context).surface,
-                            borderRadius: BorderRadius.circular(AppRadius.md),
-                            boxShadow: AppShadows.card,
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Column(
-                            children: [
-                              if (fish.variety != null)
-                                _SpecRow('Variety', fish.variety!),
-                              if (fish.sizeCm != null)
-                                _SpecRow(
-                                  'Size',
-                                  '${fish.sizeCm!.toStringAsFixed(0)} cm',
-                                ),
-                              if (fish.gender != null)
-                                _SpecRow('Gender', fish.gender!),
-                              if (fish.breeder != null)
-                                _SpecRow('Breeder', fish.breeder!),
-                              if (fish.hasCertificate)
-                                _SpecRow('Certificate', 'Included'),
-                            ],
-                          ),
-                        ),
+                        ],
                         const SizedBox(height: AppSpacing.xl),
-                      ],
-                      if (product.description != null) ...[
-                        Text(
-                          'DESCRIPTION',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppPalette.of(context).textMuted,
+                        _DeliveryInfoCard(isLiveFish: product.isLiveFish),
+                        const SizedBox(height: AppSpacing.xl),
+                        if (product.videoUrl != null &&
+                            product.videoUrl!.isNotEmpty) ...[
+                          Text(
+                            'VIDEO',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              letterSpacing: 0.8,
+                              color: AppPalette.of(context).textMuted,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(
-                          product.description!,
-                          style: const TextStyle(fontSize: 14, height: 1.5),
-                        ),
+                          const SizedBox(height: AppSpacing.sm),
+                          ProductVideoPlayer(videoUrl: product.videoUrl!),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
-                  key: _reviewsKey,
-                  color: AppPalette.of(context).background,
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.xl,
+                SliverToBoxAdapter(
+                  child: Container(
+                    key: _detailsKey,
+                    color: AppPalette.of(context).background,
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                      AppSpacing.lg,
+                      AppSpacing.xxxl,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (!hasFishDetails && product.description == null)
+                          Text(
+                            'No additional details for this product.',
+                            style: TextStyle(
+                              color: AppPalette.of(context).textMuted,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                        if (hasFishDetails) ...[
+                          Text(
+                            'DETAILS',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              letterSpacing: 0.8,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: AppPalette.of(context).surface,
+                              borderRadius: BorderRadius.circular(AppRadius.md),
+                              boxShadow: AppShadows.card,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: Column(
+                              children: [
+                                if (fish.variety != null)
+                                  _SpecRow('Variety', fish.variety!),
+                                if (fish.sizeCm != null)
+                                  _SpecRow(
+                                    'Size',
+                                    '${fish.sizeCm!.toStringAsFixed(0)} cm',
+                                  ),
+                                if (fish.gender != null)
+                                  _SpecRow('Gender', fish.gender!),
+                                if (fish.breeder != null)
+                                  _SpecRow('Breeder', fish.breeder!),
+                                if (fish.hasCertificate)
+                                  _SpecRow('Certificate', 'Included'),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                        ],
+                        if (product.description != null) ...[
+                          Text(
+                            'DESCRIPTION',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              letterSpacing: 0.8,
+                              color: AppPalette.of(context).textMuted,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            product.description!,
+                            style: const TextStyle(fontSize: 14, height: 1.5),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                  child: ReviewsSection(productId: product.id),
                 ),
-              ),
-              SliverToBoxAdapter(
-                child: Container(
-                  key: _recommendationsKey,
-                  color: AppPalette.of(context).background,
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.lg,
-                    AppSpacing.xl,
-                    AppSpacing.lg,
-                    AppSpacing.xxxl,
+                SliverToBoxAdapter(
+                  child: Container(
+                    key: _reviewsKey,
+                    color: AppPalette.of(context).background,
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                    ),
+                    child: ReviewsSection(productId: product.id),
                   ),
-                  child: _RelatedProductsRow(product: product),
                 ),
-              ),
-            ],
+                SliverToBoxAdapter(
+                  child: Container(
+                    key: _recommendationsKey,
+                    color: AppPalette.of(context).background,
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.xl,
+                      AppSpacing.lg,
+                      AppSpacing.xxxl,
+                    ),
+                    child: _RelatedProductsRow(product: product),
+                  ),
+                ),
+              ],
+            ),
           );
         },
         loading: () => const ProductDetailSkeleton(),
@@ -886,8 +927,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       final cartButton = OutlinedButton(
                         onPressed: canBuy
                             ? () => _showCartMessage(_addToCart(product))
-                            : needsOptionSelection
-                            ? _selectOptions
                             : null,
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
@@ -895,14 +934,29 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                             horizontal: 8,
                           ),
                         ),
+                        child: const Text(
+                          'Add to Cart',
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                      // Until options are chosen, the one thing the customer
+                      // can do is choose them — so that action takes the
+                      // primary (filled) slot instead of a disabled,
+                      // washed-out Buy Now sitting beside it.
+                      final selectButton = ElevatedButton(
+                        onPressed: _selectOptions,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 8,
+                          ),
+                        ),
                         child: Text(
-                          needsOptionSelection
-                              ? (needsVariantSelection && needsSizeSelection
-                                    ? 'Select Options'
-                                    : needsSizeSelection
-                                    ? 'Select a Size'
-                                    : 'Select an Option')
-                              : 'Add to Cart',
+                          needsVariantSelection && needsSizeSelection
+                              ? 'Select Options'
+                              : needsSizeSelection
+                              ? 'Select a Size'
+                              : 'Select an Option',
                           textAlign: TextAlign.center,
                         ),
                       );
@@ -925,6 +979,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       final stackActions =
                           constraints.maxWidth < 500 &&
                           MediaQuery.textScalerOf(context).scale(14) > 20;
+                      if (needsOptionSelection && !contactForPrice) {
+                        return Row(
+                          children: [
+                            chatButton,
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: selectButton),
+                          ],
+                        );
+                      }
                       if (stackActions && !contactForPrice && !soldOut) {
                         return Column(
                           mainAxisSize: MainAxisSize.min,
@@ -1294,19 +1357,21 @@ class _FavoriteAppBarButton extends ConsumerWidget {
     final isLoggedIn = ref.watch(isLoggedInProvider);
     final idsAsync = ref.watch(wishlistProductIdsProvider);
     final isFavorited = idsAsync.valueOrNull?.contains(productId) ?? false;
-    final busy =
-        idsAsync.isLoading ||
-        ref.read(wishlistProductIdsProvider.notifier).isUpdating(productId);
+    final busy = idsAsync.isLoading;
 
     return IconButton(
       tooltip: isFavorited ? 'Remove from wishlist' : 'Add to wishlist',
-      icon: Icon(isFavorited ? Icons.favorite : Icons.favorite_border),
-      color: isFavorited ? AppPalette.of(context).accent : AppColors.white,
+      icon: HeartIcon(
+        filled: isFavorited,
+        color: isFavorited ? AppPalette.of(context).accent : AppColors.white,
+      ),
       onPressed: isLoggedIn && busy
           ? null
           : () async {
               if (!isLoggedIn) {
-                context.push('/login');
+                context.push(
+                  authRouteWithRedirect('/login', '/product/$productId'),
+                );
                 return;
               }
               if (idsAsync.hasError) {
@@ -1318,6 +1383,7 @@ class _FavoriteAppBarButton extends ConsumerWidget {
                 );
                 return;
               }
+              HapticFeedback.lightImpact();
               try {
                 await ref
                     .read(wishlistControllerProvider)
@@ -1459,4 +1525,35 @@ class _PdpTabBarDelegate extends SliverPersistentHeaderDelegate {
   @override
   bool shouldRebuild(covariant _PdpTabBarDelegate oldDelegate) =>
       oldDelegate.child != child || oldDelegate.height != height;
+}
+
+/// "2 / 5" over the product photos, so shoppers can tell there are more to
+/// swipe through.
+class _ImagePageBadge extends StatelessWidget {
+  final int page;
+  final int count;
+  const _ImagePageBadge({required this.page, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Photo $page of $count',
+      excludeSemantics: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          '$page / $count',
+          style: const TextStyle(
+            color: AppColors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
 }

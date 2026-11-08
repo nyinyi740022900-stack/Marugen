@@ -21,14 +21,18 @@ void main() {
             await tester.pumpWidget(
               ProviderScope(
                 overrides: [
-                  appVisitsProvider.overrideWith(
-                    (ref) async => List.filled(1234, now),
+                  dailyActivityProvider.overrideWith(
+                    (ref) async => [
+                      DailyActivity(
+                        day: DateTime(now.year, now.month, now.day),
+                        visits: 1234,
+                      ),
+                    ],
                   ),
-                  productViewsProvider.overrideWith(
-                    (ref) async => List.filled(
-                      1234,
-                      ProductViewRow(productName: 'Koi', viewedAt: now),
-                    ),
+                  topViewedProductsProvider.overrideWith(
+                    (ref, days) async => [
+                      const TopViewedProduct(productName: 'Koi', views: 1234),
+                    ],
                   ),
                 ],
                 child: MaterialApp(

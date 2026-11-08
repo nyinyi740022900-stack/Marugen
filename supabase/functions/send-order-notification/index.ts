@@ -8,7 +8,7 @@
 // (both customer and admin) work from day one, independent of whether
 // push delivery itself is live yet. The client half
 // (lib/core/notifications/push_notification_service.dart) registers each
-// device's FCM token onto `profiles.fcm_token` (0003_fcm_token.sql) and is
+// device's FCM token in `device_tokens` (0073_device_tokens.sql) and is
 // fully wired to *receive* pushes; this is the server-side half that
 // actually sends one, when it can.
 //

@@ -36,10 +36,10 @@ const _monthNames = [
 ];
 
 /// Builds the last [count] period buckets ending today (oldest first) and
-/// fills each with how many of [timestamps] fall inside it.
+/// adds each day's visits to the bucket it falls in.
 List<_Bucket> _buildBuckets(
   _Period period,
-  List<DateTime> timestamps,
+  List<DailyActivity> days,
   int count,
 ) {
   final now = DateTime.now();
@@ -62,12 +62,12 @@ List<_Bucket> _buildBuckets(
     }
   }
 
-  for (final ts in timestamps) {
+  for (final d in days) {
     for (var i = buckets.length - 1; i >= 0; i--) {
       final start = buckets[i].start;
       final end = i + 1 < buckets.length ? buckets[i + 1].start : null;
-      if (!ts.isBefore(start) && (end == null || ts.isBefore(end))) {
-        buckets[i].count++;
+      if (!d.day.isBefore(start) && (end == null || d.day.isBefore(end))) {
+        buckets[i].count += d.visits;
         break;
       }
     }
@@ -75,20 +75,16 @@ List<_Bucket> _buildBuckets(
   return buckets;
 }
 
-Map<String, int> _topProducts(
-  List<ProductViewRow> views,
-  DateTime since, {
-  int take = 10,
-}) {
+Map<String, int> _topProducts(List<TopViewedProduct> rows) {
   final counts = <String, int>{};
-  for (final v in views) {
-    if (v.viewedAt.isBefore(since)) continue;
-    final name = v.productName ?? '(deleted product)';
-    counts[name] = (counts[name] ?? 0) + 1;
+  for (final row in rows) {
+    counts.update(
+      row.productName ?? '(deleted product)',
+      (count) => count + row.views,
+      ifAbsent: () => row.views,
+    );
   }
-  final sorted = counts.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  return {for (final e in sorted.take(take)) e.key: e.value};
+  return counts;
 }
 
 class AdminAnalyticsScreen extends ConsumerStatefulWidget {
@@ -108,16 +104,16 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
     _Period.monthly => 6,
   };
 
-  DateTime get _since => switch (_period) {
-    _Period.daily => DateTime.now().subtract(const Duration(days: 14)),
-    _Period.weekly => DateTime.now().subtract(const Duration(days: 56)),
-    _Period.monthly => DateTime.now().subtract(const Duration(days: 180)),
+  int get _sinceDays => switch (_period) {
+    _Period.daily => 14,
+    _Period.weekly => 56,
+    _Period.monthly => 180,
   };
 
   @override
   Widget build(BuildContext context) {
-    final visitsAsync = ref.watch(appVisitsProvider);
-    final viewsAsync = ref.watch(productViewsProvider);
+    final visitsAsync = ref.watch(dailyActivityProvider);
+    final viewsAsync = ref.watch(topViewedProductsProvider(_sinceDays));
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
@@ -125,8 +121,8 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
       body: RefreshIndicator(
         color: AppPalette.of(context).accent,
         onRefresh: () async {
-          ref.invalidate(appVisitsProvider);
-          ref.invalidate(productViewsProvider);
+          ref.invalidate(dailyActivityProvider);
+          ref.invalidate(topViewedProductsProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(AppSpacing.lg),
@@ -191,7 +187,7 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                   fallback: 'Could not load visits.',
                   context: 'admin.analytics',
                 ),
-                onRetry: () => ref.invalidate(appVisitsProvider),
+                onRetry: () => ref.invalidate(dailyActivityProvider),
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -207,7 +203,7 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
             const SizedBox(height: AppSpacing.sm),
             viewsAsync.when(
               data: (views) {
-                final top = _topProducts(views, _since);
+                final top = _topProducts(views);
                 if (top.isEmpty) {
                   return Container(
                     padding: const EdgeInsets.all(AppSpacing.xl),
@@ -293,7 +289,8 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
                   fallback: 'Could not load product views.',
                   context: 'admin.analytics',
                 ),
-                onRetry: () => ref.invalidate(productViewsProvider),
+                onRetry: () =>
+                    ref.invalidate(topViewedProductsProvider(_sinceDays)),
               ),
             ),
           ],

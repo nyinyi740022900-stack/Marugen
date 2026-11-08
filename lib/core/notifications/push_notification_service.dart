@@ -2,7 +2,9 @@ import 'dart:developer' as developer;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../supabase/supabase_client.dart';
 
@@ -74,6 +76,15 @@ class PushNotificationService {
       // Foreground display: FCM does not show a system banner while the
       // app is open, so surface it ourselves.
       FirebaseMessaging.onMessage.listen(_showForegroundMessage);
+      // A tapped banner opens its order, whether the app was in the
+      // background or (getInitialMessage) not running at all.
+      FirebaseMessaging.onMessageOpenedApp.listen(
+        (message) => openPushData(message.data),
+      );
+      final launch = await messaging.getInitialMessage().timeout(
+        const Duration(seconds: 8),
+      );
+      if (launch != null) openPushData(launch.data);
 
       // Keep the stored token fresh (e.g. after app reinstall/token
       // rotation) and re-register whenever the token refreshes.
@@ -131,15 +142,52 @@ class PushNotificationService {
       SnackBar(
         content: Text(body.isEmpty ? title : '$title — $body'),
         duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: () => openPushData(message.data),
+        ),
       ),
     );
   }
 
-  /// Fetches the device's current FCM token and stores it on the logged-in
-  /// user's `profiles` row (column `fcm_token`, see
-  /// `supabase/migrations/0003_fcm_token.sql`) so a future server-side
-  /// "notify this user" flow has something to target. No-op if Firebase
-  /// isn't initialized or nobody is logged in.
+  /// Where a tapped push lands: its order when it names one, otherwise the
+  /// notifications inbox.
+  static String locationForPush(Map<String, dynamic> data) {
+    final orderId = data['order_id'];
+    return orderId is String && _orderId.hasMatch(orderId)
+        ? '/orders/$orderId'
+        : '/notifications';
+  }
+
+  static final _orderId = RegExp(r'^[0-9a-fA-F-]{8,64}$');
+  static void Function(String location)? _openHandler;
+  static String? _pendingLocation;
+
+  /// Set by the app once its router exists. A push tapped before that (a
+  /// cold start from a notification) is handed over as soon as it is set.
+  static set openLocation(void Function(String location)? handler) {
+    _openHandler = handler;
+    final pending = _pendingLocation;
+    if (handler != null && pending != null) {
+      _pendingLocation = null;
+      handler(pending);
+    }
+  }
+
+  @visibleForTesting
+  static void openPushData(Map<String, dynamic> data) {
+    final location = locationForPush(data);
+    final handler = _openHandler;
+    if (handler == null) {
+      _pendingLocation = location;
+    } else {
+      handler(location);
+    }
+  }
+
+  /// Fetches the device's current FCM token and registers it as one of the
+  /// logged-in account's devices (see [saveDeviceToken]) so order updates
+  /// reach it. No-op if Firebase isn't initialized or nobody is logged in.
   static Future<void> registerTokenForCurrentUser() async {
     if (!_initialized) return;
     try {
@@ -158,11 +206,18 @@ class PushNotificationService {
   static Future<void> _saveTokenIfLoggedIn(String token) async {
     final user = SupabaseService.currentUser;
     if (user == null) return;
+    _deviceToken = token;
     try {
-      await SupabaseService.client
-          .from('profiles')
-          .update({'fcm_token': token})
-          .eq('id', user.id);
+      await saveDeviceToken(
+        SupabaseService.client,
+        userId: user.id,
+        token: token,
+        platform: switch (defaultTargetPlatform) {
+          TargetPlatform.iOS => 'ios',
+          TargetPlatform.android => 'android',
+          _ => null,
+        },
+      );
     } catch (e) {
       developer.log(
         'Could not save FCM token: $e',
@@ -171,20 +226,73 @@ class PushNotificationService {
     }
   }
 
-  /// Clears this device's FCM token from the current user's `profiles` row
-  /// so a shared/handed-down device stops receiving pushes meant for the
-  /// account that just signed out (or just opted out of notifications).
-  /// Must be called with the user still authenticated (RLS scopes the
-  /// update to `auth.uid()`), so callers should invoke this *before*
-  /// `auth.signOut()`.
+  /// The token this device last registered, so sign-out can remove it.
+  static String? _deviceToken;
+
+  /// Registers [token] as this account's device (migration 0073), which
+  /// also takes it away from any account that used the phone before. Until
+  /// that migration is applied the RPC is missing (PGRST202) and the token
+  /// goes on the profile as before.
+  @visibleForTesting
+  static Future<void> saveDeviceToken(
+    SupabaseClient client, {
+    required String userId,
+    required String token,
+    String? platform,
+  }) async {
+    try {
+      await client.rpc(
+        'register_device_token',
+        params: {'p_token': token, 'p_platform': platform},
+      );
+    } on PostgrestException catch (e) {
+      if (e.code != 'PGRST202') rethrow;
+      await client
+          .from('profiles')
+          .update({'fcm_token': token})
+          .eq('id', userId);
+    }
+  }
+
+  /// Removes [token] from this account's devices; see [saveDeviceToken].
+  @visibleForTesting
+  static Future<void> removeDeviceToken(
+    SupabaseClient client, {
+    required String userId,
+    required String? token,
+  }) async {
+    if (token != null) {
+      try {
+        await client.rpc('unregister_device_token', params: {'p_token': token});
+        return;
+      } on PostgrestException catch (e) {
+        if (e.code != 'PGRST202') rethrow;
+      }
+    }
+    await client.from('profiles').update({'fcm_token': null}).eq('id', userId);
+  }
+
+  /// Removes this device's FCM token from the signed-in account so a
+  /// shared/handed-down device stops receiving pushes meant for the account
+  /// that just signed out. Must be called with the user still authenticated
+  /// (the functions and RLS act on `auth.uid()`), so callers should invoke
+  /// this *before* `auth.signOut()`.
   static Future<void> clearTokenForCurrentUser() async {
     final user = SupabaseService.currentUser;
     if (user == null) return;
     try {
-      await SupabaseService.client
-          .from('profiles')
-          .update({'fcm_token': null})
-          .eq('id', user.id);
+      var token = _deviceToken;
+      if (token == null && _initialized) {
+        token = await FirebaseMessaging.instance.getToken().timeout(
+          const Duration(seconds: 5),
+        );
+      }
+      await removeDeviceToken(
+        SupabaseService.client,
+        userId: user.id,
+        token: token,
+      );
+      _deviceToken = null;
     } catch (e) {
       developer.log(
         'Could not clear FCM token: $e',

@@ -1,3 +1,6 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show uploadImageMaxSide;
+
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -110,6 +113,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
+      maxWidth: uploadImageMaxSide,
+      maxHeight: uploadImageMaxSide,
     );
     if (picked != null) setState(() => _pickedBannerImage = picked);
   }

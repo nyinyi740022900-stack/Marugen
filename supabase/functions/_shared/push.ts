@@ -13,6 +13,31 @@ import { GoogleAuth } from "https://esm.sh/google-auth-library@9?target=deno";
 export const ANDROID_CHANNEL_ID = "order_updates";
 
 export type PushRecipient = { userId: string; title: string; body: string };
+type PushTarget = { userId: string; token: string; copy: PushRecipient };
+
+/// Every device of the recipients who allow push: device_tokens rows (0073)
+/// plus the legacy profiles.fcm_token older app builds still write. A token
+/// reaches one account only, and a device_tokens owner beats a stale legacy
+/// copy, so a phone that changed hands stops getting the old account's
+/// order updates.
+export function pushTargets(
+  copyByUserId: Map<string, PushRecipient>,
+  enabledUserIds: Set<string>,
+  deviceRows: { user_id: string; token: string }[],
+  legacyRows: { id: string; fcm_token: string | null }[],
+): PushTarget[] {
+  const owners = new Map<string, string>();
+  for (const row of deviceRows) owners.set(row.token, row.user_id);
+  for (const row of legacyRows) {
+    if (row.fcm_token && !owners.has(row.fcm_token)) {
+      owners.set(row.fcm_token, row.id);
+    }
+  }
+  return [...owners].flatMap(([token, userId]) => {
+    const copy = copyByUserId.get(userId);
+    return copy && enabledUserIds.has(userId) ? [{ userId, token, copy }] : [];
+  });
+}
 
 export function buildFcmMessage(
   token: string,
@@ -77,15 +102,24 @@ export async function pushToRecipients(
     .from("profiles")
     .select("id, fcm_token")
     .in("id", [...copyByUserId.keys()])
-    .not("fcm_token", "is", null)
     .eq("notifications_enabled", true);
-  const tokenOwners = (profiles ?? [])
-    .filter((p) => p.fcm_token)
-    .map((p) => ({
-      userId: p.id as string,
-      token: p.fcm_token as string,
-      copy: copyByUserId.get(p.id as string)!,
-    }));
+  const enabled = (profiles ?? []) as {
+    id: string;
+    fcm_token: string | null;
+  }[];
+  const legacyTokens = enabled.flatMap((p) => p.fcm_token ? [p.fcm_token] : []);
+  const [byUser, byToken] = await Promise.all([
+    admin.from("device_tokens").select("user_id, token")
+      .in("user_id", enabled.map((p) => p.id)),
+    legacyTokens.length === 0 ? { data: [] } : admin.from("device_tokens")
+      .select("user_id, token").in("token", legacyTokens),
+  ]);
+  const tokenOwners = pushTargets(
+    copyByUserId,
+    new Set(enabled.map((p) => p.id)),
+    [...(byUser.data ?? []), ...(byToken.data ?? [])],
+    enabled,
+  );
   if (tokenOwners.length === 0) {
     return {
       pushSent: false,
@@ -106,14 +140,14 @@ export async function pushToRecipients(
 
   const badges = new Map(
     await Promise.all(
-      tokenOwners.map(async (t) => {
+      [...new Set(tokenOwners.map((t) => t.userId))].map(async (userId) => {
         const { count } = await admin
           .from("notifications")
           .select("id", { count: "exact", head: true })
-          .eq("user_id", t.userId)
+          .eq("user_id", userId)
           .eq("read", false)
           .is("dismissed_at", null);
-        return [t.userId, count ?? 0] as const;
+        return [userId, count ?? 0] as const;
       }),
     ),
   );
@@ -139,12 +173,12 @@ export async function pushToRecipients(
           ),
         },
       );
-      if (res.ok) return { userId: t.userId, ok: true, unregistered: false };
+      if (res.ok) return { token: t.token, ok: true, unregistered: false };
       const text = await res.text();
       console.error("[push] FCM send failed", res.status, text);
       // A dead token (uninstall/rotation) would otherwise be retried forever.
       return {
-        userId: t.userId,
+        token: t.token,
         ok: false,
         unregistered: text.includes("UNREGISTERED") ||
           text.includes("NOT_FOUND"),
@@ -152,14 +186,14 @@ export async function pushToRecipients(
     }),
   );
 
-  const deadOwnerIds = results.filter((r) => r.unregistered).map((r) =>
-    r.userId
-  );
-  if (deadOwnerIds.length > 0) {
-    const { error } = await admin
-      .from("profiles")
-      .update({ fcm_token: null })
-      .in("id", deadOwnerIds);
+  const deadTokens = results.filter((r) => r.unregistered).map((r) => r.token);
+  if (deadTokens.length > 0) {
+    const [devices, legacy] = await Promise.all([
+      admin.from("device_tokens").delete().in("token", deadTokens),
+      admin.from("profiles").update({ fcm_token: null })
+        .in("fcm_token", deadTokens),
+    ]);
+    const error = devices.error ?? legacy.error;
     if (error) console.error("[push] failed to clear dead tokens", error);
   }
   const sentCount = results.filter((r) => r.ok).length;
@@ -167,6 +201,6 @@ export async function pushToRecipients(
     pushSent: sentCount > 0,
     sentCount,
     total: tokenOwners.length,
-    clearedDeadTokens: deadOwnerIds.length,
+    clearedDeadTokens: deadTokens.length,
   };
 }

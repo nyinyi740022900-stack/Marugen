@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../shared/widgets/back_to_first_tab.dart';
 
 import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/theme/app_theme.dart';
@@ -50,10 +53,16 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
   @override
   Widget build(BuildContext context) {
     final index = ref.watch(customerTabIndexProvider);
-    return AdaptiveCustomerNavigation(
+    return BackToFirstTab(
       index: index,
-      onSelected: (i) => ref.read(customerTabIndexProvider.notifier).state = i,
-      body: IndexedStack(key: _contentKey, index: index, children: _tabs),
+      onBackToFirst: () =>
+          ref.read(customerTabIndexProvider.notifier).state = 0,
+      child: AdaptiveCustomerNavigation(
+        index: index,
+        onSelected: (i) =>
+            ref.read(customerTabIndexProvider.notifier).state = i,
+        body: IndexedStack(key: _contentKey, index: index, children: _tabs),
+      ),
     );
   }
 }
@@ -137,31 +146,64 @@ class AdaptiveCustomerNavigation extends StatelessWidget {
           ),
         );
       }
+      // iOS: a translucent, blurred tab bar that content scrolls under
+      // (scroll views add the bar's height via plusBottomInset). Increase
+      // Contrast, and every other platform, keep the solid bar.
+      final platform = Theme.of(context).platform;
+      final translucent =
+          (platform == TargetPlatform.iOS ||
+              platform == TargetPlatform.macOS) &&
+          !MediaQuery.highContrastOf(context);
+      final palette = AppPalette.of(context);
+      final bar = BottomNavigationBar(
+        backgroundColor: translucent
+            ? palette.surface.withValues(alpha: 0.78)
+            : null,
+        elevation: 0,
+        currentIndex: index,
+        onTap: onSelected,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.storefront_outlined),
+            label: 'Shop',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.menu_book_outlined),
+            label: 'Guide',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.receipt_long_outlined),
+            label: 'Orders',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            label: 'Profile',
+          ),
+        ],
+        selectedItemColor: AppPalette.of(context).accent,
+      );
       return Scaffold(
+        extendBody: translucent,
         body: body,
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: index,
-          onTap: onSelected,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.storefront_outlined),
-              label: 'Shop',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.menu_book_outlined),
-              label: 'Guide',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.receipt_long_outlined),
-              label: 'Orders',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              label: 'Profile',
-            ),
-          ],
-          selectedItemColor: AppPalette.of(context).accent,
-        ),
+        bottomNavigationBar: translucent
+            ? ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                  child: DecoratedBox(
+                    // Hairline where the bar meets content, like UITabBar.
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(
+                          color: palette.border.withValues(alpha: 0.7),
+                          width: 0.5,
+                        ),
+                      ),
+                    ),
+                    child: bar,
+                  ),
+                ),
+              )
+            : bar,
       );
     },
   );

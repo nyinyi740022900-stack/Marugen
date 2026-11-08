@@ -21,6 +21,7 @@ class AdminDashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final productsAsync = ref.watch(productListProvider);
     final ordersAsync = ref.watch(adminOrdersProvider);
+    final summaryAsync = ref.watch(adminOrderSummaryProvider);
     final lowStockAsync = ref.watch(lowStockProductsProvider);
 
     return Scaffold(
@@ -57,9 +58,8 @@ class AdminDashboardScreen extends ConsumerWidget {
                 Expanded(
                   child: _StatCard(
                     label: 'Pending Orders',
-                    value: ordersAsync.maybeWhen(
-                      data: (orders) =>
-                          '${orders.where((o) => o.status.name == 'pending' || o.status.name == 'paid').length}',
+                    value: summaryAsync.maybeWhen(
+                      data: (summary) => '${summary.openOrders}',
                       orElse: () => '—',
                     ),
                     icon: Icons.pending_actions_outlined,
@@ -77,9 +77,9 @@ class AdminDashboardScreen extends ConsumerWidget {
                 Expanded(
                   child: _StatCard(
                     label: 'Total Revenue',
-                    value: ordersAsync.maybeWhen(
-                      data: (orders) =>
-                          'S\$${_totalRevenue(orders).toStringAsFixed(0)}',
+                    value: summaryAsync.maybeWhen(
+                      data: (summary) =>
+                          'S\$${summary.totalRevenue.toStringAsFixed(0)}',
                       orElse: () => '—',
                     ),
                     icon: Icons.account_balance_wallet_outlined,
@@ -92,9 +92,9 @@ class AdminDashboardScreen extends ConsumerWidget {
                 Expanded(
                   child: _StatCard(
                     label: 'Revenue This Week',
-                    value: ordersAsync.maybeWhen(
-                      data: (orders) =>
-                          'S\$${_revenueThisWeek(orders).toStringAsFixed(0)}',
+                    value: summaryAsync.maybeWhen(
+                      data: (summary) =>
+                          'S\$${summary.weekRevenue.toStringAsFixed(0)}',
                       orElse: () => '—',
                     ),
                     icon: Icons.trending_up,
@@ -244,29 +244,6 @@ class AdminDashboardScreen extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  /// Sum of non-cancelled/refunded order totals.
-  double _totalRevenue(List<Order> orders) {
-    return orders
-        .where(
-          (o) =>
-              o.status != OrderStatus.cancelled &&
-              o.status != OrderStatus.refunded,
-        )
-        .fold(0.0, (sum, o) => sum + o.total);
-  }
-
-  double _revenueThisWeek(List<Order> orders) {
-    final weekAgo = DateTime.now().subtract(const Duration(days: 7));
-    return orders
-        .where(
-          (o) =>
-              o.status != OrderStatus.cancelled &&
-              o.status != OrderStatus.refunded &&
-              o.createdAt.isAfter(weekAgo),
-        )
-        .fold(0.0, (sum, o) => sum + o.total);
   }
 }
 

@@ -1,4 +1,10 @@
+import '../../../shared/widgets/sized_network_image.dart'
+    show avatarImageMaxSide;
+
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/bottom_inset.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +17,7 @@ import '../../../shared/widgets/guest_account_state.dart';
 import '../../../shared/widgets/content_width.dart';
 import '../../profile/presentation/address_book_screen.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
+import 'account_details_tiles.dart';
 import 'auth_providers.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -44,6 +51,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       imageQuality: 85,
+      maxWidth: avatarImageMaxSide,
+      maxHeight: avatarImageMaxSide,
     );
     if (picked == null || !mounted) return;
     setState(() => _uploadingAvatar = true);
@@ -153,7 +162,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ? const _GuestProfile()
             : userAsync.when(
                 data: (user) => ListView(
-                  padding: const EdgeInsets.all(20),
+                  padding: EdgeInsets.all(20).plusBottomInset(context),
                   children: [
                     Center(
                       child: Semantics(
@@ -249,6 +258,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       ),
                     const SizedBox(height: 24),
                     const Divider(),
+                    AccountDetailsTiles(
+                      fullName: user?.fullName,
+                      usesPassword: user?.usesPassword ?? false,
+                    ),
                     ListTile(
                       leading: const Icon(Icons.location_on_outlined),
                       title: const Text('Delivery Addresses'),

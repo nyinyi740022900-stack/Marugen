@@ -11,6 +11,7 @@ export type PaymentIntentSnapshot = {
   amount: number;
   currency: string;
   metadata: Record<string, string>;
+  client_secret?: string | null;
 };
 export interface PaymentPort {
   getOrder(
@@ -167,6 +168,75 @@ export async function cleanupUnlinkedPayment(
       latest.stripe_payment_intent_id !== intentId)
   ) throw new Error("Cleanup order changed; reconcile");
   await update(latest, latest.stripe_payment_intent_id, "cancelled", port);
+}
+/** A resume request the customer can act on; `status` is the HTTP status. */
+export class PaymentResumeError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+const RESUMABLE_STATES = new Set([
+  "requires_payment_method",
+  "requires_confirmation",
+  "requires_action",
+]);
+export type ResumedPayment = {
+  orderId: string;
+  paymentIntentId: string | null;
+  clientSecret: string | null;
+  amount: number;
+  currency: string;
+  amountCents?: number;
+  paymentStatus?: string;
+};
+/**
+ * Reopens the PaymentIntent of a customer's own pending order, so the order
+ * page can offer "Complete payment" while its stock is still reserved.
+ */
+export async function resumePendingPayment(
+  orderId: string,
+  userId: string,
+  port: PaymentPort,
+): Promise<ResumedPayment> {
+  const order = await port.getOrder(orderId);
+  if (!order || order.user_id !== userId) {
+    throw new PaymentResumeError("Order not found", 404);
+  }
+  const completed = completedCheckoutResponse(order);
+  if (completed) return completed;
+  const id = order.stripe_payment_intent_id;
+  if (order.status !== "pending" || !id) {
+    throw new PaymentResumeError(
+      "This order can no longer be paid. Check out again from your cart.",
+      409,
+    );
+  }
+  const intent = await port.getIntent(id);
+  verify(order, intent, id);
+  if (intent.status === "succeeded") {
+    await applyPaymentEvent("payment_intent.succeeded", id, port);
+    return completedCheckoutResponse({ ...order, status: "paid" })!;
+  }
+  if (intent.status === "processing") {
+    throw new PaymentResumeError(
+      "Your payment is still processing. Check this order again shortly.",
+      409,
+    );
+  }
+  if (!RESUMABLE_STATES.has(intent.status) || !intent.client_secret) {
+    throw new PaymentResumeError(
+      "This order can no longer be paid. Check out again from your cart.",
+      409,
+    );
+  }
+  return {
+    orderId: order.id,
+    paymentIntentId: id,
+    clientSecret: intent.client_secret,
+    amount: order.total,
+    amountCents: intent.amount,
+    currency: intent.currency,
+  };
 }
 export function completedCheckoutResponse(order: PaymentOrder) {
   if (!PAID_STATES.has(order.status)) return null;

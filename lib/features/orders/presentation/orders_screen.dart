@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/bottom_inset.dart';
+
 import '../../../shared/widgets/content_width.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,6 +36,16 @@ class OrdersScreen extends ConsumerWidget {
     final rawOrdersAsync = ref.watch(myOrdersProvider);
     final visibleOrdersAsync = ref.watch(visibleMyOrdersProvider);
     final hasQuery = ref.watch(myOrdersSearchQueryProvider).trim().isNotEmpty;
+    final showUnpaid = ref.watch(showCancelledUnpaidOrdersProvider);
+    final tab = ref.watch(myOrdersTabProvider);
+    final unpaidCount = hasQuery || tab != OrderListTab.all
+        ? 0
+        : (rawOrdersAsync.valueOrNull ?? const [])
+              .where((order) => order.isCancelledUnpaid)
+              .length;
+    void toggleUnpaid() =>
+        ref.read(showCancelledUnpaidOrdersProvider.notifier).state =
+            !showUnpaid;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Orders')),
@@ -41,14 +53,38 @@ class OrdersScreen extends ConsumerWidget {
         maxWidth: 760,
         child: Column(
           children: [
-            if (rawOrdersAsync.valueOrNull?.isNotEmpty ?? false)
+            if (rawOrdersAsync.valueOrNull?.isNotEmpty ?? false) ...[
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
                 child: _OrderSearchField(),
               ),
+              if (!hasQuery) const _OrderTabs(),
+            ],
             Expanded(
               child: visibleOrdersAsync.when(
                 data: (orders) {
+                  if (orders.isEmpty && unpaidCount > 0) {
+                    return EmptyState(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'No orders yet',
+                      subtitle:
+                          'Checkouts you cancelled before paying are hidden.',
+                      actionLabel: 'Show cancelled checkouts',
+                      onAction: toggleUnpaid,
+                    );
+                  }
+                  if (orders.isEmpty && !hasQuery && tab != OrderListTab.all) {
+                    return EmptyState(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'Nothing ${tab.label.toLowerCase()}',
+                      subtitle:
+                          'Orders that are ${tab.label.toLowerCase()} will show up here.',
+                      actionLabel: 'Show all orders',
+                      onAction: () =>
+                          ref.read(myOrdersTabProvider.notifier).state =
+                              OrderListTab.all,
+                    );
+                  }
                   if (orders.isEmpty) {
                     return hasQuery
                         ? const EmptyState(
@@ -80,10 +116,21 @@ class OrdersScreen extends ConsumerWidget {
                     ),
                     child: ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(16),
-                      itemCount: orders.length,
+                      padding: EdgeInsets.all(16).plusBottomInset(context),
+                      itemCount: orders.length + (unpaidCount > 0 ? 1 : 0),
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, i) {
+                        if (i == orders.length) {
+                          return TextButton(
+                            onPressed: toggleUnpaid,
+                            child: Text(
+                              showUnpaid
+                                  ? 'Hide cancelled checkouts'
+                                  : 'Show $unpaidCount cancelled '
+                                        '${unpaidCount == 1 ? 'checkout' : 'checkouts'}',
+                            ),
+                          );
+                        }
                         final order = orders[i];
                         return Card(
                           child: InkWell(
@@ -147,7 +194,7 @@ class OrdersScreen extends ConsumerWidget {
                   );
                 },
                 loading: () => ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.all(16).plusBottomInset(context),
                   itemCount: 4,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) => const ListRowSkeleton(),
@@ -158,6 +205,35 @@ class OrdersScreen extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// To pay / To ship / To receive / Completed filter chips.
+class _OrderTabs extends ConsumerWidget {
+  const _OrderTabs();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selected = ref.watch(myOrdersTabProvider);
+    return SizedBox(
+      height: 32 + MediaQuery.textScalerOf(context).scale(24),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        children: [
+          for (final tab in OrderListTab.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(tab.label),
+                selected: tab == selected,
+                onSelected: (_) =>
+                    ref.read(myOrdersTabProvider.notifier).state = tab,
+              ),
+            ),
+        ],
       ),
     );
   }

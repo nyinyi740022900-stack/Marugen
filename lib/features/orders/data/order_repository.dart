@@ -14,6 +14,18 @@ class OrderRepository {
   OrderRepository({SupabaseClient? client})
     : _client = client ?? SupabaseService.client;
 
+  /// Dashboard totals counted on the server (`admin_order_summary`,
+  /// migration 0074): every order, whatever the Orders tab filter shows.
+  Future<AdminOrderSummary> fetchAdminOrderSummary() async {
+    final rows = await _client.rpc('admin_order_summary') as List;
+    final row = rows.single as Map<String, dynamic>;
+    return AdminOrderSummary(
+      openOrders: (row['open_orders'] as num).toInt(),
+      totalRevenue: (row['total_revenue'] as num).toDouble(),
+      weekRevenue: (row['week_revenue'] as num).toDouble(),
+    );
+  }
+
   Future<List<Order>> fetchMyOrders() async {
     final user = SupabaseService.currentUser;
     if (user == null) return [];
@@ -251,4 +263,18 @@ class OrderRepository {
     if (data == null) return null;
     return Order.fromMap(data);
   }
+}
+
+/// Orders waiting to be paid or packed, and revenue: paid orders and later
+/// stages, less verified refunds. "Week" is the last 7 days.
+class AdminOrderSummary {
+  final int openOrders;
+  final double totalRevenue;
+  final double weekRevenue;
+
+  const AdminOrderSummary({
+    required this.openOrders,
+    required this.totalRevenue,
+    required this.weekRevenue,
+  });
 }

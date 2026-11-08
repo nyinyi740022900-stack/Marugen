@@ -80,11 +80,11 @@ class ReviewRepository {
     return ProductReview.fromMap(data);
   }
 
-  /// Statuses that count as "this customer really bought it". Pending
-  /// (unpaid) and cancelled/refunded orders don't qualify. Mirrors the RLS
-  /// policy in `0009_verified_reviews.sql` — the database is the real
-  /// gate; this only decides what the UI shows.
-  static const purchasedStatuses = ['paid', 'packing', 'shipped', 'delivered'];
+  /// Statuses that let a customer review a product: only delivered, so
+  /// nobody reviews a fish that hasn't arrived or was refunded. Mirrors the
+  /// RLS policy in `0075_reviews_after_delivery.sql` — the database is the
+  /// real gate; this only decides what the UI shows.
+  static const purchasedStatuses = ['delivered'];
 
   Future<bool> hasPurchasedProduct(String productId) async {
     final user = SupabaseService.currentUser;

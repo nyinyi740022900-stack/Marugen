@@ -1,5 +1,9 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'heart_icon.dart';
+import 'press_scale.dart';
+import 'sized_network_image.dart';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -38,198 +42,201 @@ class ProductCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppPalette.of(context).surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: AppShadows.card,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              AspectRatio(
-                aspectRatio: 1,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    product.imageUrls.isNotEmpty
-                        ? CachedNetworkImage(
-                            imageUrl: product.imageUrls.first,
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) => Container(
-                              color: AppPalette.of(context).surfaceMuted,
-                            ),
-                            errorWidget: (_, _, _) => Container(
+    return PressScale(
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppPalette.of(context).surface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          boxShadow: AppShadows.card,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AspectRatio(
+                  aspectRatio: 1,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      product.imageUrls.isNotEmpty
+                          ? SizedNetworkImage(
+                              imageUrl: product.imageUrls.first,
+                              fit: BoxFit.cover,
+                              placeholder: (_, _) => Container(
+                                color: AppPalette.of(context).surfaceMuted,
+                              ),
+                              errorWidget: (_, _, _) => Container(
+                                color: AppPalette.of(context).surfaceMuted,
+                                child: Icon(
+                                  Icons.image_not_supported_outlined,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
+                              ),
+                            )
+                          : Container(
                               color: AppPalette.of(context).surfaceMuted,
                               child: Icon(
-                                Icons.image_not_supported_outlined,
+                                Icons.water,
                                 color: AppPalette.of(context).textMuted,
+                                size: 40,
                               ),
                             ),
-                          )
-                        : Container(
-                            color: AppPalette.of(context).surfaceMuted,
-                            child: Icon(
-                              Icons.water,
-                              color: AppPalette.of(context).textMuted,
-                              size: 40,
-                            ),
+                      if (product.fishDetails?.variety != null)
+                        Positioned(
+                          left: 8,
+                          top: 8,
+                          right: 60,
+                          child: _Tag(label: product.fishDetails!.variety!),
+                        )
+                      else if (product.hasActiveSale)
+                        Positioned(
+                          left: 8,
+                          top: 8,
+                          child: _Tag(
+                            label: '-${product.discountPercent}%',
+                            color: AppColors.red,
                           ),
-                    if (product.fishDetails?.variety != null)
-                      Positioned(
-                        left: 8,
-                        top: 8,
-                        right: 60,
-                        child: _Tag(label: product.fishDetails!.variety!),
-                      )
-                    else if (product.hasActiveSale)
-                      Positioned(
-                        left: 8,
-                        top: 8,
-                        child: _Tag(
-                          label: '-${product.discountPercent}%',
-                          color: AppColors.red,
                         ),
-                      ),
-                    if (showFavoriteToggle)
-                      Positioned(
-                        right: 6,
-                        top: 6,
-                        child: _FavoriteButton(
-                          productId: product.id,
-                          name: product.name,
+                      if (showFavoriteToggle)
+                        Positioned(
+                          right: 6,
+                          top: 6,
+                          child: _FavoriteButton(
+                            productId: product.id,
+                            name: product.name,
+                          ),
                         ),
-                      ),
-                    // Stock signal: a sold fish gets the stamped SOLD
-                    // overlay; a restockable item at 0 gets a clear
-                    // "Out of Stock" overlay so nobody taps into a dead end.
-                    if (product.isPurchasable && product.isOutOfStock)
-                      IgnorePointer(
-                        child: Container(
-                          color: AppColors.black.withValues(alpha: 0.55),
-                          alignment: Alignment.center,
-                          child: Transform.rotate(
-                            angle: product.isLiveFish ? -0.12 : 0,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                  color: AppColors.white,
-                                  width: 1.5,
+                      // Stock signal: a sold fish gets the stamped SOLD
+                      // overlay; a restockable item at 0 gets a clear
+                      // "Out of Stock" overlay so nobody taps into a dead end.
+                      if (product.isPurchasable && product.isOutOfStock)
+                        IgnorePointer(
+                          child: Container(
+                            color: AppColors.black.withValues(alpha: 0.55),
+                            alignment: Alignment.center,
+                            child: Transform.rotate(
+                              angle: product.isLiveFish ? -0.12 : 0,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 6,
                                 ),
-                              ),
-                              child: Text(
-                                product.unavailableLabel.toUpperCase(),
-                                style: TextStyle(
-                                  color: AppColors.white,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: product.isLiveFish ? 13 : 11,
-                                  letterSpacing: product.isLiveFish ? 3 : 1.2,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: AppColors.white,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: Text(
+                                  product.unavailableLabel.toUpperCase(),
+                                  style: TextStyle(
+                                    color: AppColors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: product.isLiveFish ? 13 : 11,
+                                    letterSpacing: product.isLiveFish ? 3 : 1.2,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
+                        )
+                      else if (!product.isLiveFish &&
+                          product.isPurchasable &&
+                          product.availableStock <= lowStockCardThreshold)
+                        Positioned(
+                          left: 8,
+                          bottom: 8,
+                          child: _Tag(
+                            label: 'Only ${product.availableStock} left',
+                            color: AppColors.red,
+                          ),
                         ),
-                      )
-                    else if (!product.isLiveFish &&
-                        product.isPurchasable &&
-                        product.availableStock <= lowStockCardThreshold)
-                      Positioned(
-                        left: 8,
-                        bottom: 8,
-                        child: _Tag(
-                          label: 'Only ${product.availableStock} left',
-                          color: AppColors.red,
-                        ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  AppSpacing.sm,
-                  AppSpacing.md,
-                  AppSpacing.md,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight:
-                            (MediaQuery.textScalerOf(context).scale(14) *
-                                    1.2 *
-                                    2)
-                                .ceilToDouble(),
-                      ),
-                      child: Text(
-                        product.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          height: 1.2,
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight:
+                              (MediaQuery.textScalerOf(context).scale(14) *
+                                      1.2 *
+                                      2)
+                                  .ceilToDouble(),
+                        ),
+                        child: Text(
+                          product.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            height: 1.2,
+                          ),
                         ),
                       ),
-                    ),
-                    // Always reserve this line's height (even with nothing
-                    // to show) so the price/cart-button row lands at the
-                    // same Y across every card in a grid row, whether or
-                    // not that particular card has options/reviews/sold count.
-                    const SizedBox(height: 3),
-                    _StatsRow(product: product),
-                    const SizedBox(height: 4),
-                    // Price gets the full content width. A touch target must
-                    // never take space away from the amount being purchased.
-                    if (product.hasActiveSale)
+                      // Always reserve this line's height (even with nothing
+                      // to show) so the price/cart-button row lands at the
+                      // same Y across every card in a grid row, whether or
+                      // not that particular card has options/reviews/sold count.
+                      const SizedBox(height: 3),
+                      _StatsRow(product: product),
+                      const SizedBox(height: 4),
+                      // Price gets the full content width. A touch target must
+                      // never take space away from the amount being purchased.
+                      if (product.hasActiveSale)
+                        Text(
+                          formatPrice(product.price!),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppPalette.of(context).textMuted,
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
                       Text(
-                        formatPrice(product.price!),
+                        product.hasActiveSale
+                            ? formatPrice(product.salePrice!)
+                            : _priceLabel(product),
                         style: TextStyle(
-                          fontSize: 11.5,
-                          color: AppPalette.of(context).textMuted,
-                          decoration: TextDecoration.lineThrough,
+                          fontWeight: FontWeight.w700,
+                          color: product.isPurchasable
+                              ? AppPalette.of(context).accent
+                              : AppPalette.of(context).textMuted,
+                          fontSize: 14,
                         ),
                       ),
-                    Text(
-                      product.hasActiveSale
-                          ? formatPrice(product.salePrice!)
-                          : _priceLabel(product),
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: product.isPurchasable
-                            ? AppPalette.of(context).accent
-                            : AppPalette.of(context).textMuted,
-                        fontSize: 14,
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            child:
+                                product.isPurchasable && !product.isOutOfStock
+                                ? const _DeliveryEstimateLabel()
+                                : const SizedBox.shrink(),
+                          ),
+                          _CardActionButtons(
+                            product: product,
+                            onOpenDetail: onTap,
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: product.isPurchasable && !product.isOutOfStock
-                              ? const _DeliveryEstimateLabel()
-                              : const SizedBox.shrink(),
-                        ),
-                        _CardActionButtons(
-                          product: product,
-                          onOpenDetail: onTap,
-                        ),
-                      ],
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -272,8 +279,10 @@ class _CardActionButtons extends ConsumerWidget {
     }
 
     if (product.isLiveFish && !product.hasVariants) {
+      // One fish, straight to checkout: a cart icon here suggested it would
+      // only be added to the cart.
       return _RoundIconButton(
-        icon: Icons.add_shopping_cart,
+        icon: Icons.bolt,
         tooltip: 'Buy ${product.name} now',
         onTap: () => beginCheckout(
           context,
@@ -391,9 +400,9 @@ class _FavoriteButton extends ConsumerWidget {
     final isLoggedIn = ref.watch(isLoggedInProvider);
     final idsAsync = ref.watch(wishlistProductIdsProvider);
     final isFavorited = idsAsync.valueOrNull?.contains(productId) ?? false;
-    final busy =
-        idsAsync.isLoading ||
-        ref.read(wishlistProductIdsProvider.notifier).isUpdating(productId);
+    // Still tappable while a save is in flight, so a mis-tap can be
+    // reversed at once (the notifier sends only the final choice).
+    final busy = idsAsync.isLoading;
 
     return Semantics(
       button: true,
@@ -412,7 +421,9 @@ class _FavoriteButton extends ConsumerWidget {
                 ? null
                 : () async {
                     if (!isLoggedIn) {
-                      context.push('/login');
+                      context.push(
+                        authRouteWithRedirect('/login', '/product/$productId'),
+                      );
                       return;
                     }
                     if (idsAsync.hasError) {
@@ -426,6 +437,7 @@ class _FavoriteButton extends ConsumerWidget {
                       );
                       return;
                     }
+                    HapticFeedback.lightImpact();
                     try {
                       await ref
                           .read(wishlistControllerProvider)
@@ -452,8 +464,8 @@ class _FavoriteButton extends ConsumerWidget {
                     color: AppColors.black.withValues(alpha: 0.45),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(
-                    isFavorited ? Icons.favorite : Icons.favorite_border,
+                  child: HeartIcon(
+                    filled: isFavorited,
                     size: 20,
                     color: isFavorited
                         ? AppPalette.of(context).accent

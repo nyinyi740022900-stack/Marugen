@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:marugen_app/shared/models/order.dart';
 import 'package:marugen_app/features/orders/utils/packing_slip_pdf.dart';
 
+import 'pdf_tools.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
@@ -36,7 +38,9 @@ void main() {
           ),
         ),
       );
-      final file = File('/private/tmp/marugen-label-pagination.pdf');
+      final dir = await Directory.systemTemp.createTemp('marugen-label-');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/label-pagination.pdf');
       await file.writeAsBytes(await buildPackingSlipPdf(order));
       final result = await Process.run('pdfinfo', [file.path]);
       expect(result.exitCode, 0);
@@ -55,8 +59,10 @@ void main() {
         shippingAddress: order.shippingAddress,
         items: order.items.take(1).toList(),
       );
+      await Directory('output/pdf').create(recursive: true);
       await File('output/pdf/marugen-packing-label-sample.pdf')
           .writeAsBytes(await buildPackingSlipPdf(sample));
     },
+    skip: popplerMissing,
   );
 }

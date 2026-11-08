@@ -1,6 +1,41 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+
+/// A dialog button that matches the platform: a native-looking
+/// [CupertinoDialogAction] inside iOS alerts (red for [destructive], bold
+/// for [primary]), and the existing Material buttons elsewhere. Use with
+/// [AlertDialog.adaptive] + [showAdaptiveDialog].
+Widget adaptiveDialogAction(
+  BuildContext context, {
+  required String label,
+  required VoidCallback? onPressed,
+  bool destructive = false,
+  bool primary = false,
+}) {
+  final platform = Theme.of(context).platform;
+  if (platform == TargetPlatform.iOS || platform == TargetPlatform.macOS) {
+    return CupertinoDialogAction(
+      onPressed: onPressed,
+      isDestructiveAction: destructive,
+      isDefaultAction: primary || destructive,
+      child: Text(label),
+    );
+  }
+  if (primary) {
+    return FilledButton(onPressed: onPressed, child: Text(label));
+  }
+  return TextButton(
+    onPressed: onPressed,
+    child: Text(
+      label,
+      style: destructive
+          ? TextStyle(color: AppPalette.of(context).error)
+          : null,
+    ),
+  );
+}
 
 /// Standard destructive-action confirmation — matches the dialog already
 /// used for product delete (admin_product_edit_screen.dart). Returns true
@@ -13,22 +48,22 @@ Future<bool> confirmDestructiveAction(
   required String message,
   String confirmLabel = 'Delete',
 }) async {
-  final confirmed = await showDialog<bool>(
+  final confirmed = await showAdaptiveDialog<bool>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
+    builder: (dialogContext) => AlertDialog.adaptive(
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(
+        adaptiveDialogAction(
+          dialogContext,
+          label: 'Cancel',
           onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text('Cancel'),
         ),
-        TextButton(
+        adaptiveDialogAction(
+          dialogContext,
+          label: confirmLabel,
+          destructive: true,
           onPressed: () => Navigator.pop(dialogContext, true),
-          child: Text(
-            confirmLabel,
-            style: TextStyle(color: AppPalette.of(context).error),
-          ),
         ),
       ],
     ),
@@ -52,19 +87,22 @@ Future<bool> confirmAction(
   required String message,
   String confirmLabel = 'Confirm',
 }) async {
-  final confirmed = await showDialog<bool>(
+  final confirmed = await showAdaptiveDialog<bool>(
     context: context,
-    builder: (dialogContext) => AlertDialog(
+    builder: (dialogContext) => AlertDialog.adaptive(
       title: Text(title),
       content: Text(message),
       actions: [
-        TextButton(
+        adaptiveDialogAction(
+          dialogContext,
+          label: 'Cancel',
           onPressed: () => Navigator.pop(dialogContext, false),
-          child: const Text('Cancel'),
         ),
-        FilledButton(
+        adaptiveDialogAction(
+          dialogContext,
+          label: confirmLabel,
+          primary: true,
           onPressed: () => Navigator.pop(dialogContext, true),
-          child: Text(confirmLabel),
         ),
       ],
     ),

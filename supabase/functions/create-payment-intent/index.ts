@@ -320,7 +320,10 @@ Deno.serve(async (req) => {
         .maybeSingle();
 
       if (productError || !product) {
-        return jsonResponse({ error: `Product not found: ${productId}` }, 400);
+        return jsonResponse({
+          error:
+            "An item in your cart is no longer available. Remove it and try again.",
+        }, 400);
       }
 
       const isLiveFish = product.category === "koi" ||
@@ -372,7 +375,8 @@ Deno.serve(async (req) => {
 
         if (variantError || !variant) {
           return jsonResponse({
-            error: `Variant not found: ${line.variant_id}`,
+            error:
+              "An option you chose is no longer available. Choose it again and retry.",
           }, 400);
         }
         if (!product.show_price) {
@@ -626,8 +630,10 @@ Deno.serve(async (req) => {
         const raced = await findExistingCheckout();
         if (raced) return raced;
       }
+      // The database message is for us, not the customer.
+      console.error("Order insert failed", orderError);
       return jsonResponse({
-        error: `Could not create order: ${orderError?.message}`,
+        error: "We couldn't create your order. Please try again.",
       }, 500);
     }
 
@@ -653,8 +659,13 @@ Deno.serve(async (req) => {
         "id",
         orderId,
       );
+      // Stock triggers name product ids; customers get plain copy.
+      console.error("Stock reservation failed", itemsError);
       return jsonResponse(
-        { error: itemsError.message || "Stock unavailable" },
+        {
+          error:
+            "Some items just sold out or ran low. Review your cart and try again.",
+        },
         409,
       );
     }

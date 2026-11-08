@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:marugen_app/features/auth/presentation/login_screen.dart';
 import 'package:marugen_app/shared/widgets/brand_logo.dart';
@@ -124,7 +125,7 @@ void main() {
           find.byType(ElevatedButton),
           find.widgetWithText(OutlinedButton, 'Continue with Google'),
           if (platform != TargetPlatform.android)
-            find.widgetWithText(OutlinedButton, 'Continue with Apple'),
+            find.byType(SignInWithAppleButton),
         ]) {
           expect(tester.getSize(button).height, greaterThanOrEqualTo(48));
         }

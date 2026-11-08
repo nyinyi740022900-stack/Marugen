@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/bottom_inset.dart';
+
 import '../../../shared/widgets/content_width.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,7 +36,7 @@ class ServicesTab extends ConsumerWidget {
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.lg),
+            padding: EdgeInsets.all(AppSpacing.lg).plusBottomInset(context),
             itemCount: active.length,
             separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
             itemBuilder: (context, i) => _ServiceCard(service: active[i]),

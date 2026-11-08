@@ -12,6 +12,8 @@ import 'package:printing/printing.dart';
 import 'package:marugen_app/features/orders/utils/packing_slip_pdf.dart';
 import 'package:marugen_app/shared/models/order.dart';
 
+import 'pdf_tools.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   for (final compact in [false, true]) {
@@ -290,6 +292,7 @@ void main() {
         await dir.delete(recursive: true);
       }
     },
+    skip: popplerMissing,
   );
   test(
     'official carrier source remains complete on A4 placements and 4x6',
@@ -379,7 +382,9 @@ void main() {
         await dir.delete(recursive: true);
       }
     },
-    skip: !File('output/split-parcels/QSP223261096.pdf').existsSync(),
+    skip:
+        popplerMissing ||
+        !File('output/split-parcels/QSP223261096.pdf').existsSync(),
   );
   test('custom label dimensions and position stay inside A4', () {
     const layout = LabelPrintLayout(

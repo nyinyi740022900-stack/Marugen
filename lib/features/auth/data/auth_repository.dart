@@ -58,12 +58,17 @@ class AuthRepository {
         .select()
         .eq('id', user.id)
         .maybeSingle();
+    final usesPassword = user.appMetadata['provider'] == 'email';
     if (data == null) {
       // Profile row is created by a DB trigger on signup; fall back to a
       // bare customer profile if it hasn't landed yet.
-      return AppUser(id: user.id, email: user.email);
+      return AppUser(
+        id: user.id,
+        email: user.email,
+        usesPassword: usesPassword,
+      );
     }
-    return AppUser.fromMap(data);
+    return AppUser.fromMap(data, usesPassword: usesPassword);
   }
 
   /// Looks up another user's profile by id — for the admin "view customer"
@@ -332,6 +337,16 @@ class AuthRepository {
       email,
       redirectTo: oauthRedirectTo,
     );
+  }
+
+  /// Profile → "Edit name". RLS limits the update to the caller's own row.
+  Future<void> updateFullName(String fullName) async {
+    final user = currentUser;
+    if (user == null) return;
+    await _client
+        .from('profiles')
+        .update({'full_name': fullName})
+        .eq('id', user.id);
   }
 
   /// Sets a new password for the currently-authenticated session — used

@@ -26,6 +26,7 @@ final myWishlistProvider = FutureProvider<List<WishlistItem>>((ref) {
 class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
   int _generation = 0;
   final _pendingIds = <String>{};
+  final _desired = <String, bool>{};
   bool isUpdating(String productId) => _pendingIds.contains(productId);
 
   @override
@@ -33,9 +34,11 @@ class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
     ref.watch(currentUserIdProvider);
     _generation++;
     _pendingIds.clear();
+    _desired.clear();
     ref.onDispose(() {
       _generation++;
       _pendingIds.clear();
+      _desired.clear();
     });
     _load();
     return const AsyncLoading();
@@ -53,37 +56,48 @@ class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
     }
   }
 
+  /// Flips the heart immediately and syncs in the background.
+  ///
+  /// Interruptible: tapping again while a request is still in flight is
+  /// not ignored — the icon flips back at once, and only the customer's
+  /// final choice is sent once the current request finishes.
   Future<void> toggle(String productId, bool currentlyFavorited) async {
-    if (_pendingIds.contains(productId)) return;
     final current = state.valueOrNull;
     if (current == null) throw StateError('Wishlist is not loaded yet');
+    final wanted = !currentlyFavorited;
+    state = AsyncData(_with(current, productId, wanted));
+    if (_pendingIds.contains(productId)) {
+      _desired[productId] = wanted;
+      return;
+    }
+
     final generation = _generation;
     _pendingIds.add(productId);
-    final optimistic = {...current};
-    if (currentlyFavorited) {
-      optimistic.remove(productId);
-    } else {
-      optimistic.add(productId);
-    }
-    state = AsyncData(optimistic);
-
+    // What the server holds; starts as what the customer saw before tapping.
+    var saved = currentlyFavorited;
+    var target = wanted;
     try {
       final repo = ref.read(wishlistRepositoryProvider);
-      if (currentlyFavorited) {
-        await repo.remove(productId);
-      } else {
-        await repo.add(productId);
+      while (true) {
+        if (target != saved) {
+          if (target) {
+            await repo.add(productId);
+          } else {
+            await repo.remove(productId);
+          }
+          saved = target;
+        }
+        if (generation != _generation) return;
+        final next = _desired.remove(productId);
+        if (next == null || next == saved) break;
+        target = next;
       }
     } catch (_) {
-      // Revert only this product; unrelated successful updates stay intact.
+      // Revert only this product to what the server holds; unrelated
+      // successful updates stay intact.
       if (generation == _generation) {
-        final restored = {...?state.valueOrNull};
-        if (currentlyFavorited) {
-          restored.add(productId);
-        } else {
-          restored.remove(productId);
-        }
-        state = AsyncData(restored);
+        _desired.remove(productId);
+        state = AsyncData(_with({...?state.valueOrNull}, productId, saved));
       }
       rethrow;
     } finally {
@@ -93,6 +107,16 @@ class WishlistIdsNotifier extends Notifier<AsyncValue<Set<String>>> {
         if (latest != null) state = AsyncData(Set.of(latest));
       }
     }
+  }
+
+  static Set<String> _with(Set<String> ids, String productId, bool present) {
+    final next = {...ids};
+    if (present) {
+      next.add(productId);
+    } else {
+      next.remove(productId);
+    }
+    return next;
   }
 }
 

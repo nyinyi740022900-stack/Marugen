@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'bottom_inset.dart';
+
 /// Includes the square image and enough space for scaled card content.
 double productCardExtent(BuildContext context, double cardWidth) {
   final scale = MediaQuery.textScalerOf(context).scale(14) / 14;
@@ -48,7 +50,9 @@ class ProductGrid extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       return GridView.builder(
-        padding: const EdgeInsets.all(16),
+        // Pull-to-refresh must work even when a few products fit on screen.
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16).plusBottomInset(context),
         gridDelegate: productGridDelegate(context, constraints.maxWidth - 32),
         itemCount: itemCount,
         itemBuilder: itemBuilder,

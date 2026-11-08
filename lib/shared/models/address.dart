@@ -1,3 +1,5 @@
+import '../utils/sg_address.dart';
+
 /// A saved delivery address in the customer's address book.
 /// See `supabase/migrations/0002_addresses.sql`.
 class Address {
@@ -52,6 +54,14 @@ class Address {
       'is_default': isDefault,
     };
   }
+
+  /// Whether the server will accept this address for delivery. Addresses
+  /// saved before the form checked the phone and postal code may not be.
+  bool get isDeliverable =>
+      recipientName.trim().isNotEmpty &&
+      line1.trim().isNotEmpty &&
+      validateSgPhone(phone) == null &&
+      validateSgPostalCode(postalCode) == null;
 
   /// A short single-line summary used in checkout/order-detail displays.
   String get oneLine {

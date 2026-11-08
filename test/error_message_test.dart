@@ -2,10 +2,48 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:marugen_app/core/crash/crash_reporting.dart';
 import 'package:marugen_app/shared/utils/error_message.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
+  test('unexpected errors reach Crashlytics, expected ones do not', () {
+    final reported = <String>[];
+    CrashReporting.debugReporter = (error, reason) =>
+        reported.add('$reason: ${error.runtimeType}');
+    addTearDown(() => CrashReporting.debugReporter = null);
+    friendlyErrorMessage(const SocketException('offline'), context: 'a');
+    friendlyErrorMessage(Exception('Order is already refunded'), context: 'b');
+    friendlyErrorMessage(
+      const PostgrestException(message: 'duplicate', code: '23505'),
+      context: 'c',
+    );
+    friendlyErrorMessage(
+      const FunctionException(
+        status: 400,
+        details: {'error': 'Tracking number is required'},
+      ),
+      context: 'd',
+    );
+    friendlyErrorMessage(
+      const PostgrestException(message: 'no relation', code: '42P01'),
+      context: 'e',
+    );
+    friendlyErrorMessage(
+      const FunctionException(
+        status: 502,
+        details: {'error': 'Booking failed'},
+      ),
+      context: 'f',
+    );
+    friendlyErrorMessage(StateError('boom'), context: 'g');
+    expect(reported, [
+      'e: PostgrestException',
+      'f: FunctionException',
+      'g: StateError',
+    ]);
+  });
+
   test('raw database errors never reach the UI', () {
     final message = friendlyErrorMessage(
       const PostgrestException(

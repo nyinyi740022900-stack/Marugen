@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/bottom_inset.dart';
+
 import '../../../shared/widgets/content_width.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -114,7 +116,7 @@ class OrdersScreen extends ConsumerWidget {
                     ),
                     child: ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(16),
+                      padding: EdgeInsets.all(16).plusBottomInset(context),
                       itemCount: orders.length + (unpaidCount > 0 ? 1 : 0),
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, i) {
@@ -192,7 +194,7 @@ class OrdersScreen extends ConsumerWidget {
                   );
                 },
                 loading: () => ListView.separated(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.all(16).plusBottomInset(context),
                   itemCount: 4,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, i) => const ListRowSkeleton(),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/bottom_inset.dart';
+
 import '../../../shared/widgets/content_width.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -416,7 +418,12 @@ class _VarietiesTabState extends ConsumerState<_VarietiesTab> {
                   }
                   if (wide) {
                     return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        4,
+                        16,
+                        24,
+                      ).plusBottomInset(context),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
                         crossAxisSpacing: 12,
@@ -429,7 +436,12 @@ class _VarietiesTabState extends ConsumerState<_VarietiesTab> {
                     );
                   }
                   return ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                    padding: EdgeInsets.fromLTRB(
+                      16,
+                      4,
+                      16,
+                      24,
+                    ).plusBottomInset(context),
                     itemCount: visible.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 12),
                     itemBuilder: (context, i) => buildCard(context, i),
@@ -441,7 +453,7 @@ class _VarietiesTabState extends ConsumerState<_VarietiesTab> {
         );
       },
       loading: () => ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(16).plusBottomInset(context),
         children: const [
           ListRowSkeleton(),
           SizedBox(height: 10),
@@ -477,7 +489,7 @@ class _ArticlesTab extends ConsumerWidget {
             );
           }
           return ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.lg),
+            padding: EdgeInsets.all(AppSpacing.lg).plusBottomInset(context),
             itemCount: articles.length,
             separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
             itemBuilder: (context, i) {
@@ -615,7 +627,7 @@ class _ArticlesTab extends ConsumerWidget {
           );
         },
         loading: () => ListView(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16).plusBottomInset(context),
           children: const [
             ListRowSkeleton(),
             SizedBox(height: 10),

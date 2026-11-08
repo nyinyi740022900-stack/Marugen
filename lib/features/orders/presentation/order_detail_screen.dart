@@ -14,6 +14,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/models/product.dart';
@@ -1066,7 +1067,7 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
   }
 
   Future<void> _cancel() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAdaptiveDialog<bool>(
       context: context,
       builder: (ctx) => Consumer(
         builder: (ctx, dialogRef, _) {
@@ -1083,20 +1084,20 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
               }
             });
           }
-          return AlertDialog(
+          return AlertDialog.adaptive(
             title: const Text('Cancel this order?'),
             content: const Text('This cannot be undone.'),
             actions: [
-              TextButton(
+              adaptiveDialogAction(
+                ctx,
+                label: 'Keep Order',
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Keep Order'),
               ),
-              TextButton(
+              adaptiveDialogAction(
+                ctx,
+                label: 'Cancel Order',
+                destructive: true,
                 onPressed: canCancel ? () => Navigator.pop(ctx, true) : null,
-                child: Text(
-                  'Cancel Order',
-                  style: TextStyle(color: AppPalette.of(ctx).error),
-                ),
               ),
             ],
           );

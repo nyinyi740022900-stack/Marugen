@@ -1,6 +1,7 @@
 import '../../../shared/widgets/sized_network_image.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -11,6 +12,7 @@ import '../../../shared/utils/price_format.dart';
 import '../../../shared/utils/view_tracker.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/fullscreen_image_gallery.dart';
+import '../../../shared/widgets/heart_icon.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/product_grid.dart';
 import '../../../shared/widgets/product_video_player.dart';
@@ -41,6 +43,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   String? _selectedVariantForProductId;
   int _quantity = 1;
   int _imagePage = 0;
+  final _imageController = PageController();
   bool _isSharing = false;
   final _shareButtonKey = GlobalKey();
 
@@ -80,10 +83,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
     _scrollController.addListener(_onScroll);
   }
 
+  static String _heroPrefix(Product product) => 'product-image-${product.id}';
+
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _imageController.dispose();
     _tabController.dispose();
     _optionsFocus.dispose();
     _sizeFocus.dispose();
@@ -316,7 +322,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
           final fish = product.fishDetails;
           final hasFishDetails = fish != null && fish.hasAnyDetail;
           final hasImages = product.imageUrls.isNotEmpty;
-          return RefreshIndicator(
+          return RefreshIndicator.adaptive(
             onRefresh: () =>
                 ref.refresh(productDetailProvider(widget.productId).future),
             child: CustomScrollView(
@@ -374,15 +380,25 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                             fit: StackFit.expand,
                             children: [
                               PageView(
+                                controller: _imageController,
                                 onPageChanged: (i) =>
                                     setState(() => _imagePage = i),
                                 children: [
-                                  for (final url in product.imageUrls)
+                                  for (final (i, url)
+                                      in product.imageUrls.indexed)
                                     GestureDetector(
                                       onTap: () => FullscreenImageGallery.open(
                                         context,
                                         imageUrls: product.imageUrls,
                                         initialIndex: _imagePage,
+                                        heroTagPrefix: _heroPrefix(product),
+                                        // Follow the gallery so the photo
+                                        // flies back to the matching page.
+                                        onIndexChanged: (page) {
+                                          if (_imageController.hasClients) {
+                                            _imageController.jumpToPage(page);
+                                          }
+                                        },
                                       ),
                                       // BoxFit.contain (not .cover) so the
                                       // whole uploaded photo is visible
@@ -392,21 +408,27 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                       // the fullscreen gallery.
                                       child: Container(
                                         color: AppColors.black,
-                                        child: SizedNetworkImage(
-                                          imageUrl: url,
-                                          fit: BoxFit.contain,
-                                          placeholder: (_, _) => Container(
-                                            color: AppPalette.of(context)
-                                                .background,
+                                        child: Hero(
+                                          tag: FullscreenImageGallery.heroTag(
+                                            _heroPrefix(product),
+                                            i,
                                           ),
-                                          errorWidget: (_, _, _) => Container(
-                                            color: AppPalette.of(context)
-                                                .background,
-                                            child: Icon(
-                                              Icons
-                                                  .image_not_supported_outlined,
+                                          child: SizedNetworkImage(
+                                            imageUrl: url,
+                                            fit: BoxFit.contain,
+                                            placeholder: (_, _) => Container(
                                               color: AppPalette.of(context)
-                                                  .textMuted,
+                                                  .background,
+                                            ),
+                                            errorWidget: (_, _, _) => Container(
+                                              color: AppPalette.of(context)
+                                                  .background,
+                                              child: Icon(
+                                                Icons
+                                                    .image_not_supported_outlined,
+                                                color: AppPalette.of(context)
+                                                    .textMuted,
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -572,6 +594,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                         showCheckmark: false,
                                         onSelected: inStock
                                             ? (_) => setState(() {
+                                                HapticFeedback.selectionClick();
                                                 _selectedVariant = v;
                                                 _quantity = 1;
                                               })
@@ -622,6 +645,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                         onSelected: soldOut
                                             ? null
                                             : (_) => setState(() {
+                                                HapticFeedback.selectionClick();
                                                 _selectedSize = size;
                                                 _quantity = 1;
                                               }),
@@ -903,8 +927,6 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       final cartButton = OutlinedButton(
                         onPressed: canBuy
                             ? () => _showCartMessage(_addToCart(product))
-                            : needsOptionSelection
-                            ? _selectOptions
                             : null,
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
@@ -912,14 +934,29 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                             horizontal: 8,
                           ),
                         ),
+                        child: const Text(
+                          'Add to Cart',
+                          textAlign: TextAlign.center,
+                        ),
+                      );
+                      // Until options are chosen, the one thing the customer
+                      // can do is choose them — so that action takes the
+                      // primary (filled) slot instead of a disabled,
+                      // washed-out Buy Now sitting beside it.
+                      final selectButton = ElevatedButton(
+                        onPressed: _selectOptions,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 8,
+                          ),
+                        ),
                         child: Text(
-                          needsOptionSelection
-                              ? (needsVariantSelection && needsSizeSelection
-                                    ? 'Select Options'
-                                    : needsSizeSelection
-                                    ? 'Select a Size'
-                                    : 'Select an Option')
-                              : 'Add to Cart',
+                          needsVariantSelection && needsSizeSelection
+                              ? 'Select Options'
+                              : needsSizeSelection
+                              ? 'Select a Size'
+                              : 'Select an Option',
                           textAlign: TextAlign.center,
                         ),
                       );
@@ -942,6 +979,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       final stackActions =
                           constraints.maxWidth < 500 &&
                           MediaQuery.textScalerOf(context).scale(14) > 20;
+                      if (needsOptionSelection && !contactForPrice) {
+                        return Row(
+                          children: [
+                            chatButton,
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(child: selectButton),
+                          ],
+                        );
+                      }
                       if (stackActions && !contactForPrice && !soldOut) {
                         return Column(
                           mainAxisSize: MainAxisSize.min,
@@ -1311,14 +1357,14 @@ class _FavoriteAppBarButton extends ConsumerWidget {
     final isLoggedIn = ref.watch(isLoggedInProvider);
     final idsAsync = ref.watch(wishlistProductIdsProvider);
     final isFavorited = idsAsync.valueOrNull?.contains(productId) ?? false;
-    final busy =
-        idsAsync.isLoading ||
-        ref.read(wishlistProductIdsProvider.notifier).isUpdating(productId);
+    final busy = idsAsync.isLoading;
 
     return IconButton(
       tooltip: isFavorited ? 'Remove from wishlist' : 'Add to wishlist',
-      icon: Icon(isFavorited ? Icons.favorite : Icons.favorite_border),
-      color: isFavorited ? AppPalette.of(context).accent : AppColors.white,
+      icon: HeartIcon(
+        filled: isFavorited,
+        color: isFavorited ? AppPalette.of(context).accent : AppColors.white,
+      ),
       onPressed: isLoggedIn && busy
           ? null
           : () async {
@@ -1337,6 +1383,7 @@ class _FavoriteAppBarButton extends ConsumerWidget {
                 );
                 return;
               }
+              HapticFeedback.lightImpact();
               try {
                 await ref
                     .read(wishlistControllerProvider)

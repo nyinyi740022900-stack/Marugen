@@ -2,6 +2,9 @@ import '../../../shared/widgets/sized_network_image.dart'
     show avatarImageMaxSide;
 
 import 'package:flutter/material.dart';
+
+import '../../../shared/widgets/bottom_inset.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -159,7 +162,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ? const _GuestProfile()
             : userAsync.when(
                 data: (user) => ListView(
-                  padding: const EdgeInsets.all(20),
+                  padding: EdgeInsets.all(20).plusBottomInset(context),
                   children: [
                     Center(
                       child: Semantics(

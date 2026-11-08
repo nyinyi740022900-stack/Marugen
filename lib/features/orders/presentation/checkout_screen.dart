@@ -440,7 +440,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // dumping the customer back to the shop grid with only a toast —
       // the order confirmation *is* the order detail screen, not a
       // separate page, so there's nothing else to keep in sync.
-      if (mounted) context.go('/orders/$pendingOrderId?justPlaced=true');
+      if (mounted) {
+        // The one moment in the purchase flow that earns a firm haptic.
+        HapticFeedback.mediumImpact();
+        context.go('/orders/$pendingOrderId?justPlaced=true');
+      }
     } on StripeException catch (e) {
       if (pendingOrderId != null &&
           e.error.code == FailureCode.Canceled &&

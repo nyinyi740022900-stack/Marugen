@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -332,83 +333,100 @@ class AppTheme {
   // tracking instead of default Material sizing — a tight, editorial scale
   // that matches the hanko-seal / brush-stroke mark rather than a generic
   // rounded UI font.
-  static const String _fontFamily = '.SF Pro Text';
+  //
+  // On Apple platforms each size picks its optical cut — SF Text below
+  // 20pt, SF Display from 20pt (Flutter's names for the two system cuts) —
+  // and Apple's published SF Pro tracking for that size, since tracking
+  // that suits one size is wrong at another. Elsewhere the family stays
+  // the platform default (Roboto) with the design's own tracking.
+  static bool get _apple =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.macOS;
 
-  static TextTheme get _textTheme => const TextTheme(
-    displayLarge: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 32,
-      fontWeight: FontWeight.w700,
-      letterSpacing: -0.5,
+  static String? _family(double size) => !_apple
+      ? null
+      : size >= 20
+      ? 'CupertinoSystemDisplay'
+      : 'CupertinoSystemText';
+
+  /// Apple's SF Pro tracking (points) by size, from the HIG type tables.
+  static const _appleTracking = <int, double>{
+    11: 0.06,
+    12: 0,
+    13: -0.08,
+    14: -0.15,
+    15: -0.23,
+    16: -0.31,
+    17: -0.43,
+    19: -0.45,
+    24: 0.07,
+    32: 0.39,
+  };
+
+  static double? _track(double size, [double? fallback]) =>
+      _apple ? (_appleTracking[size.round()] ?? fallback) : fallback;
+
+  static TextStyle _style(
+    double size,
+    FontWeight weight, {
+    double? tracking,
+    double? height,
+    Color? color,
+    bool fixedTracking = false,
+  }) => TextStyle(
+    fontFamily: _family(size),
+    fontSize: size,
+    fontWeight: weight,
+    // Uppercase section labels keep their wide tracking everywhere.
+    letterSpacing: fixedTracking ? tracking : _track(size, tracking),
+    height: height,
+    color: color,
+  );
+
+  static TextTheme get _textTheme => TextTheme(
+    displayLarge: _style(
+      32,
+      FontWeight.w700,
+      tracking: -0.5,
       height: 1.15,
       color: AppColors.black,
     ),
-    headlineMedium: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 24,
-      fontWeight: FontWeight.w700,
-      letterSpacing: -0.3,
+    headlineMedium: _style(
+      24,
+      FontWeight.w700,
+      tracking: -0.3,
       height: 1.2,
       color: AppColors.black,
     ),
-    titleLarge: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 19,
-      fontWeight: FontWeight.w700,
-      letterSpacing: -0.2,
+    titleLarge: _style(
+      19,
+      FontWeight.w700,
+      tracking: -0.2,
       color: AppColors.black,
     ),
-    titleMedium: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 16,
-      fontWeight: FontWeight.w600,
-      color: AppColors.black,
-    ),
-    titleSmall: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 14,
-      fontWeight: FontWeight.w600,
-      color: AppColors.black,
-    ),
-    bodyLarge: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 15,
-      fontWeight: FontWeight.w400,
+    titleMedium: _style(16, FontWeight.w600, color: AppColors.black),
+    titleSmall: _style(14, FontWeight.w600, color: AppColors.black),
+    bodyLarge: _style(15, FontWeight.w400, height: 1.4, color: AppColors.black),
+    bodyMedium: _style(
+      14,
+      FontWeight.w400,
       height: 1.4,
       color: AppColors.black,
     ),
-    bodyMedium: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 14,
-      fontWeight: FontWeight.w400,
-      height: 1.4,
-      color: AppColors.black,
+    bodySmall: _style(12, FontWeight.w400, height: 1.35, color: AppColors.grey),
+    labelLarge: _style(15, FontWeight.w600, tracking: 0.2),
+    labelMedium: _style(
+      12,
+      FontWeight.w600,
+      tracking: 0.6,
+      fixedTracking: true,
     ),
-    bodySmall: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 12,
-      fontWeight: FontWeight.w400,
-      height: 1.35,
+    labelSmall: _style(
+      11,
+      FontWeight.w600,
+      tracking: 0.8,
       color: AppColors.grey,
-    ),
-    labelLarge: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 15,
-      fontWeight: FontWeight.w600,
-      letterSpacing: 0.2,
-    ),
-    labelMedium: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 12,
-      fontWeight: FontWeight.w600,
-      letterSpacing: 0.6,
-    ),
-    labelSmall: TextStyle(
-      fontFamily: _fontFamily,
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      letterSpacing: 0.8,
-      color: AppColors.grey,
+      fixedTracking: true,
     ),
   );
 
@@ -418,7 +436,13 @@ class AppTheme {
     return base.copyWith(
       scaffoldBackgroundColor: AppColors.offWhite,
       textTheme: textTheme,
-      splashFactory: InkSparkle.splashFactory,
+      // iOS gives feedback as an instant pressed highlight on touch-down,
+      // not a ripple that spreads after the tap; Android keeps its ripple.
+      splashFactory:
+          base.platform == TargetPlatform.iOS ||
+              base.platform == TargetPlatform.macOS
+          ? NoSplash.splashFactory
+          : InkSparkle.splashFactory,
       colorScheme: const ColorScheme.light(
         primary: AppColors.black,
         secondary: AppColors.red,

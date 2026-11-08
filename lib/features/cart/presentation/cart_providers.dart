@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -53,6 +54,13 @@ String cartAddMessage(CartAddResult result) {
 /// was ever eating the automatic timer.
 void showCartSnackBar(BuildContext context, CartAddResult result) {
   const duration = Duration(seconds: 2);
+  // Physical confirmation on the same frame as the snackbar: a light tap
+  // when the item lands in the cart, a firmer one when it was refused.
+  if (result == CartAddResult.added) {
+    HapticFeedback.lightImpact();
+  } else {
+    HapticFeedback.mediumImpact();
+  }
   final messenger = ScaffoldMessenger.of(context)..clearSnackBars();
   final controller = messenger.showSnackBar(
     SnackBar(

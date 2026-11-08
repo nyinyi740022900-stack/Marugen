@@ -120,7 +120,7 @@ class ShopScreen extends ConsumerWidget {
                 }
                 // Pull down for stock and prices changed since opening the
                 // app (e.g. a koi sold to someone else).
-                return RefreshIndicator(
+                return RefreshIndicator.adaptive(
                   onRefresh: () => ref.refresh(productListProvider.future),
                   child: ProductGrid(
                     itemCount: products.length,

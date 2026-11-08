@@ -12,7 +12,7 @@ class OrderPullToRefresh extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => RefreshIndicator(
+  Widget build(BuildContext context) => RefreshIndicator.adaptive(
     notificationPredicate: (notification) =>
         notification.depth == 0 && notification.metrics.axis == Axis.vertical,
     onRefresh: () async {

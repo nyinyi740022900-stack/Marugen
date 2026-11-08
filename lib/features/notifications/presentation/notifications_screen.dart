@@ -235,7 +235,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                 ),
               ),
             Expanded(
-              child: RefreshIndicator(
+              child: RefreshIndicator.adaptive(
                 color: AppPalette.of(context).accent,
                 onRefresh: () async {
                   try {

@@ -1015,14 +1015,20 @@ class _AdminProductEditScreenState
                       spacing: AppSpacing.sm,
                       runSpacing: AppSpacing.xs,
                       children: [
+                        // Only the sizes not listed yet.
                         for (final kg in const [0.5, 1.0, 2.0, 5.0, 10.0, 15.0])
-                          ActionChip(
-                            avatar: const Icon(Icons.add, size: 16),
-                            label: Text(
-                              _optionLabelFromKg(kg.toString()) ?? '',
+                          if (!_variants.any(
+                            (v) =>
+                                v.labelCtrl.text.trim() ==
+                                _optionLabelFromKg(kg.toString()),
+                          ))
+                            ActionChip(
+                              avatar: const Icon(Icons.add, size: 16),
+                              label: Text(
+                                _optionLabelFromKg(kg.toString()) ?? '',
+                              ),
+                              onPressed: () => _addWeightChip(kg),
                             ),
-                            onPressed: () => _addWeightChip(kg),
-                          ),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.sm),

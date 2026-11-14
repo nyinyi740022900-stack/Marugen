@@ -324,7 +324,12 @@ class _BarChart extends StatelessWidget {
     final bucketWidth = countWidth > labelWidth ? countWidth : labelWidth;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final minimumWidth = bucketWidth * buckets.length;
+        // Prefer narrower bars with every other label over a horizontal
+        // scroll nobody discovers: a 14-day chart should fit a phone.
+        final thinLabels = constraints.maxWidth / buckets.length < labelWidth;
+        final minimumWidth = thinLabels
+            ? 22.0 * buckets.length
+            : bucketWidth * buckets.length;
         final width = minimumWidth > constraints.maxWidth
             ? minimumWidth
             : constraints.maxWidth;
@@ -349,7 +354,7 @@ class _BarChart extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    for (final b in buckets)
+                    for (final (i, b) in buckets.indexed)
                       Expanded(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -358,10 +363,12 @@ class _BarChart extends StatelessWidget {
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
                               Text(
+                                // Every bucket keeps its number, including
+                                // 0: a bare empty slot reads as "no data".
                                 '${b.count}',
                                 maxLines: 1,
                                 style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: thinLabels ? 10 : 11,
                                   fontWeight: FontWeight.w600,
                                   color: AppPalette.of(context).text,
                                 ),
@@ -378,10 +385,16 @@ class _BarChart extends StatelessWidget {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                b.label,
+                                // Every other label when bars are tight;
+                                // the last one always, so the range reads.
+                                thinLabels && i.isOdd && i != buckets.length - 1
+                                    ? ''
+                                    : b.label,
                                 maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.visible,
                                 style: TextStyle(
-                                  fontSize: 11,
+                                  fontSize: thinLabels ? 10 : 11,
                                   color: AppPalette.of(context).textMuted,
                                 ),
                               ),

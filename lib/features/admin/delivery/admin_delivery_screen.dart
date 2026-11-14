@@ -112,6 +112,9 @@ class AdminDeliveryPane extends ConsumerWidget {
             child: outstanding.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg,
+                    ),
                     children: [
                       header,
                       const SizedBox(height: 56),

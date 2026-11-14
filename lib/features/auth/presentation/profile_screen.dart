@@ -15,7 +15,6 @@ import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/guest_account_state.dart';
 import '../../../shared/widgets/content_width.dart';
-import '../../profile/presentation/address_book_screen.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 import 'account_details_tiles.dart';
 import 'auth_providers.dart';
@@ -266,11 +265,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       leading: const Icon(Icons.location_on_outlined),
                       title: const Text('Delivery Addresses'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const AddressBookScreen(),
-                        ),
-                      ),
+                      onTap: () => context.push('/addresses'),
                     ),
                     ListTile(
                       leading: const Icon(Icons.favorite_border),
@@ -399,6 +394,7 @@ class _GuestProfile extends StatelessWidget {
     return const GuestAccountState(
       icon: Icons.person_outline,
       subtitle: 'View your profile and saved addresses.',
+      returnTo: '/?tab=profile',
     );
   }
 }

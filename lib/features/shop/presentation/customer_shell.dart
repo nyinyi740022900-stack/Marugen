@@ -18,7 +18,9 @@ import 'shop_screen.dart';
 
 /// Bottom-nav shell for the customer-facing side of the app.
 class CustomerShell extends ConsumerStatefulWidget {
-  const CustomerShell({super.key});
+  /// Tab to open on arrival (0 Shop … 3 Profile); null keeps the current one.
+  final int? initialTab;
+  const CustomerShell({super.key, this.initialTab});
 
   @override
   ConsumerState<CustomerShell> createState() => _CustomerShellState();
@@ -33,9 +35,24 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     ProfileScreen(),
   ];
 
+  void _applyInitialTab() {
+    final tab = widget.initialTab;
+    if (tab == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.read(customerTabIndexProvider.notifier).state = tab;
+    });
+  }
+
+  @override
+  void didUpdateWidget(CustomerShell old) {
+    super.didUpdateWidget(old);
+    if (old.initialTab != widget.initialTab) _applyInitialTab();
+  }
+
   @override
   void initState() {
     super.initState();
+    _applyInitialTab();
     // Once per app session — this shell is only built once (kept alive by
     // its IndexedStack tabs) after auth/role resolves to "customer".
     ViewTracker.logAppVisit();

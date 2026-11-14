@@ -266,7 +266,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       tester.getTopLeft(find.text('Order #${order.displayNumber}')).dy,
-      lessThan(tester.getTopLeft(find.text('Print Packing Slip')).dy),
+      lessThan(tester.getTopLeft(find.text('Packing slip')).dy),
     );
     expect(find.text('Add tracking number'), findsOneWidget);
     expect(find.text('Mark as delivered'), findsNothing);

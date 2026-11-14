@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/models/app_user.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/error_message.dart';
@@ -12,6 +13,7 @@ import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/content_width.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/shipping_cost_summary.dart';
+import '../../auth/presentation/auth_providers.dart';
 import '../../orders/presentation/orders_providers.dart';
 import '../../orders/presentation/order_pull_to_refresh.dart';
 import '../../orders/utils/print_document.dart';
@@ -24,6 +26,28 @@ import 'parcel_fulfillment_panel.dart';
 
 /// Every outstanding shipment remains here until delivered, regardless of the
 /// All-tab filter or courier provider.
+/// Which slice of the outstanding work the Fulfillment tab shows.
+enum FulfillmentSegment { all, toPack, toShip, inTransit, attention }
+
+final fulfillmentSegmentProvider = StateProvider<FulfillmentSegment>(
+  (ref) => FulfillmentSegment.all,
+);
+
+bool _needsAttention(Order o) =>
+    o.needsBookingAttention || o.needsDeliveryReview || o.hasCancellationHold;
+
+/// Shared with the Home queue so both count the same orders.
+bool fulfillmentSegmentContains(Order o, FulfillmentSegment segment) =>
+    _inSegment(o, segment);
+
+bool _inSegment(Order o, FulfillmentSegment segment) => switch (segment) {
+  FulfillmentSegment.all => true,
+  FulfillmentSegment.toPack => o.status == OrderStatus.paid,
+  FulfillmentSegment.toShip => o.status == OrderStatus.packing,
+  FulfillmentSegment.inTransit => o.status == OrderStatus.shipped,
+  FulfillmentSegment.attention => _needsAttention(o),
+};
+
 class AdminDeliveryPane extends ConsumerWidget {
   const AdminDeliveryPane({super.key});
   @override
@@ -31,11 +55,13 @@ class AdminDeliveryPane extends ConsumerWidget {
     final ordersAsync = ref.watch(fulfillmentOrdersProvider);
     final connected =
         ref.watch(easyParcelConnectedProvider).valueOrNull ?? false;
+    final segment = ref.watch(fulfillmentSegmentProvider);
+    final focusId = ref.watch(focusFulfillmentOrderProvider);
     return ContentWidth(
       maxWidth: 800,
       child: ordersAsync.when(
         data: (orders) {
-          final outstanding = orders
+          final all = orders
               .where(
                 (o) => const {
                   OrderStatus.paid,
@@ -44,16 +70,36 @@ class AdminDeliveryPane extends ConsumerWidget {
                 }.contains(o.status),
               )
               .toList();
-          outstanding.sort((a, b) {
-            final attention =
-                (b.needsBookingAttention || b.needsDeliveryReview ? 1 : 0)
-                    .compareTo(
-                      a.needsBookingAttention || a.needsDeliveryReview ? 1 : 0,
-                    );
+          all.sort((a, b) {
+            final attention = (_needsAttention(b) ? 1 : 0).compareTo(
+              _needsAttention(a) ? 1 : 0,
+            );
             return attention != 0
                 ? attention
                 : a.createdAt.compareTo(b.createdAt);
           });
+          final focused = focusId == null
+              ? null
+              : all.where((o) => o.id == focusId).firstOrNull;
+          final outstanding = all.where((o) => _inSegment(o, segment)).toList();
+          // The order staff came from ("Manage delivery") goes first,
+          // highlighted, whatever the segment says.
+          if (focused != null) {
+            outstanding
+              ..removeWhere((o) => o.id == focused.id)
+              ..insert(0, focused);
+          }
+          int count(FulfillmentSegment s) =>
+              all.where((o) => _inSegment(o, s)).length;
+          final header = _SegmentBar(
+            segment: segment,
+            counts: {for (final s in FulfillmentSegment.values) s: count(s)},
+            onChanged: (s) =>
+                ref.read(fulfillmentSegmentProvider.notifier).state = s,
+            focused: focused,
+            onClearFocus: () =>
+                ref.read(focusFulfillmentOrderProvider.notifier).state = null,
+          );
           return OrderPullToRefresh(
             onRefresh: () async {
               final container = ProviderScope.containerOf(
@@ -66,26 +112,40 @@ class AdminDeliveryPane extends ConsumerWidget {
             child: outstanding.isEmpty
                 ? ListView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    children: const [
-                      SizedBox(height: 80),
+                    children: [
+                      header,
+                      const SizedBox(height: 56),
                       EmptyState(
                         icon: Icons.local_shipping_outlined,
-                        title: 'Nothing to fulfil',
-                        subtitle: 'No outstanding deliveries right now.',
+                        title: segment == FulfillmentSegment.all
+                            ? 'Nothing to fulfil'
+                            : 'Nothing here',
+                        subtitle: segment == FulfillmentSegment.all
+                            ? 'No outstanding deliveries right now.'
+                            : 'No orders in this stage right now.',
                       ),
                     ],
                   )
                 : ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    itemCount: outstanding.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.md),
-                    itemBuilder: (_, i) => _FulfillmentCard(
-                      key: ValueKey(outstanding[i].id),
-                      order: outstanding[i],
-                      easyParcelConnected: connected,
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      0,
+                      AppSpacing.lg,
+                      AppSpacing.lg,
                     ),
+                    itemCount: outstanding.length + 1,
+                    separatorBuilder: (_, i) => SizedBox(
+                      height: i == 0 ? AppSpacing.sm : AppSpacing.md,
+                    ),
+                    itemBuilder: (_, i) => i == 0
+                        ? header
+                        : _FulfillmentCard(
+                            key: ValueKey(outstanding[i - 1].id),
+                            order: outstanding[i - 1],
+                            easyParcelConnected: connected,
+                            highlighted: outstanding[i - 1].id == focusId,
+                          ),
                   ),
           );
         },
@@ -98,13 +158,102 @@ class AdminDeliveryPane extends ConsumerWidget {
   }
 }
 
+/// Segment chips with live counts, plus the "jumped to order" strip when
+/// staff arrived from Orders › All.
+class _SegmentBar extends StatelessWidget {
+  final FulfillmentSegment segment;
+  final Map<FulfillmentSegment, int> counts;
+  final ValueChanged<FulfillmentSegment> onChanged;
+  final Order? focused;
+  final VoidCallback onClearFocus;
+  const _SegmentBar({
+    required this.segment,
+    required this.counts,
+    required this.onChanged,
+    required this.focused,
+    required this.onClearFocus,
+  });
+
+  static const _labels = {
+    FulfillmentSegment.all: 'All',
+    FulfillmentSegment.toPack: 'To pack',
+    FulfillmentSegment.toShip: 'To ship',
+    FulfillmentSegment.inTransit: 'In transit',
+    FulfillmentSegment.attention: 'Needs attention',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: 32 + MediaQuery.textScalerOf(context).scale(20),
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+            children: [
+              for (final s in FulfillmentSegment.values) ...[
+                ChoiceChip(
+                  label: Text(
+                    counts[s] == 0 || s == FulfillmentSegment.all
+                        ? _labels[s]!
+                        : '${_labels[s]!} · ${counts[s]}',
+                  ),
+                  selected: segment == s,
+                  showCheckmark: false,
+                  // Attention is the one chip that should look urgent.
+                  selectedColor:
+                      s == FulfillmentSegment.attention && (counts[s] ?? 0) > 0
+                      ? AppColors.red
+                      : null,
+                  onSelected: (_) => onChanged(s),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
+            ],
+          ),
+        ),
+        if (focused != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.subdirectory_arrow_right,
+                  size: 18,
+                  color: palette.textMuted,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Showing order #${focused!.displayNumber} first',
+                    style: TextStyle(color: palette.textMuted, fontSize: 13),
+                  ),
+                ),
+                TextButton(
+                  onPressed: onClearFocus,
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 40)),
+                  child: const Text('Clear'),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _FulfillmentCard extends ConsumerStatefulWidget {
   final Order order;
   final bool easyParcelConnected;
+  final bool highlighted;
   const _FulfillmentCard({
     super.key,
     required this.order,
     required this.easyParcelConnected,
+    this.highlighted = false,
   });
   @override
   ConsumerState<_FulfillmentCard> createState() => _FulfillmentCardState();
@@ -114,11 +263,16 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
   bool _working = false;
   bool _sheetOpen = false;
   bool get _busy => _working || _sheetOpen;
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(Future<void> Function() action, {String? success}) async {
     if (_busy) return;
     setState(() => _working = true);
     try {
       await action();
+      if (success != null && mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text(success)));
+      }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -163,7 +317,24 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
     if (!mounted) return;
     setState(() => _sheetOpen = false);
     if (selection == null) return;
+    // Same money check the multi-parcel path has: a real courier charge
+    // against what the customer already paid, before anything is booked.
+    final paid = (widget.order.buyerShippingCents ?? 0) / 100;
+    final shopCovers = (selection.rate.price - paid).clamp(0, double.infinity);
+    final approved = await confirmAction(
+      context,
+      title: 'Book this shipment?',
+      message:
+          '${selection.rate.courierName}\n'
+          'Courier total: ${formatPrice(selection.rate.price)}\n'
+          'Customer already paid: ${formatPrice(paid)}\n'
+          'Shop covers: ${formatPrice(shopCovers.toDouble())}\n\n'
+          'This creates a real courier booking. The customer is not charged again.',
+      confirmLabel: 'Book shipment',
+    );
+    if (!approved || !mounted) return;
     await _run(
+      success: 'Shipment booked for #${widget.order.displayNumber}',
       () => ref
           .read(easyParcelRepositoryProvider)
           .bookShipment(
@@ -299,6 +470,87 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
     ),
   );
 
+  /// The one thing staff should do with this order right now.
+  List<Widget> _primaryAction(
+    BuildContext context,
+    Order order,
+    String lines,
+    bool hasBooking,
+    bool hasTracking,
+  ) => [
+    if (order.hasCancellationHold)
+      const Text(
+        'Delivery paused for cancellation. Open the order to review the request and refund status.',
+      )
+    else if (order.needsDeliveryReview && !hasBooking) ...[
+      OutlinedButton(
+        onPressed: _busy
+            ? null
+            : () async {
+                final confirmed = await confirmAction(
+                  context,
+                  title: 'Use shop delivery?',
+                  message:
+                      'The original product category is unavailable. Confirm the shop will hand-deliver '
+                      'this entire order. This does not book a courier.',
+                  confirmLabel: 'Use shop delivery',
+                );
+                if (confirmed && mounted) {
+                  await _run(
+                    () => ref
+                        .read(orderRepositoryProvider)
+                        .confirmShopDelivery(order.id),
+                  );
+                }
+              },
+        child: const Text('Use shop delivery'),
+      ),
+    ] else if (order.needsBookingAttention && !order.hasSampleTracking) ...[
+      if (!order.hasSampleTracking)
+        OutlinedButton(
+          onPressed: _busy ? null : () => _enterTracking(recovery: true),
+          child: const Text('Recover existing shipment'),
+        ),
+    ] else if (order.status == OrderStatus.paid && !hasBooking)
+      ElevatedButton(
+        onPressed: _busy ? null : () => _moveTo(OrderStatus.packing),
+        child: const Text('Start packing'),
+      )
+    else if (order.status == OrderStatus.packing && !hasBooking) ...[
+      if (order.canUseCourier) ...[
+        if (widget.easyParcelConnected)
+          ElevatedButton.icon(
+            onPressed: _busy || lines.isEmpty ? null : _shipWithEasyParcel,
+            icon: const Icon(Icons.local_shipping_outlined),
+            label: const Text('Ship with EasyParcel'),
+          ),
+        OutlinedButton(
+          onPressed: _busy || lines.isEmpty ? null : () => _enterTracking(),
+          child: const Text('Add tracking number'),
+        ),
+      ] else
+        ElevatedButton(
+          onPressed: _busy || lines.isEmpty
+              ? null
+              : () => _moveTo(OrderStatus.shipped),
+          child: const Text('Start delivery'),
+        ),
+    ] else if (order.status == OrderStatus.shipped && order.isShopDelivery)
+      ElevatedButton(
+        onPressed: _busy ? null : () => _moveTo(OrderStatus.delivered),
+        child: const Text('Mark as delivered'),
+      )
+    else if (order.status == OrderStatus.shipped &&
+        order.trackingProvider != 'easyparcel' &&
+        !hasTracking)
+      OutlinedButton(
+        onPressed: _busy || !order.canUseCourier
+            ? null
+            : () => _enterTracking(),
+        child: const Text('Add tracking number'),
+      ),
+  ];
+
   @override
   Widget build(BuildContext context) {
     final order = widget.order;
@@ -322,19 +574,35 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
         color: palette.surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         boxShadow: AppShadows.card,
+        border: widget.highlighted
+            ? Border.all(color: palette.accent, width: 1.5)
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Order #${order.displayNumber}',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Order #${order.displayNumber}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              _StagePill(order: order),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
             '${DateFormat.yMMMd().format(order.createdAt)} · ${order.fulfillmentStatusLabel}',
             style: TextStyle(color: palette.textMuted),
           ),
+          const SizedBox(height: 12),
+          // What needs doing comes first; everything below is reference.
+          ..._primaryAction(context, order, lines, hasBooking, hasTracking),
           const SizedBox(height: 12),
           Text(
             order.deliveryMethodLabel,
@@ -371,13 +639,6 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
             Text(order.customerRemarks!),
           ],
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _busy
-                ? null
-                : () => context.push('/orders/${order.id}', extra: order),
-            icon: const Icon(Icons.open_in_new, size: 18),
-            label: const Text('Open order'),
-          ),
           if (!order.hasCancellationHold &&
               (order.hasParcelPlan || order.canSplitIntoParcels))
             ParcelFulfillmentPanel(
@@ -390,7 +651,12 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                 ref.invalidate(myOrdersProvider);
               },
             ),
-          if (!order.hasParcelPlan && order.trackingProvider == 'easyparcel')
+          // EasyParcel wallet/pickup diagnostics are the owner's debugging
+          // view, not something every packer needs on every card.
+          if (!order.hasParcelPlan &&
+              order.trackingProvider == 'easyparcel' &&
+              ref.watch(currentAppUserProvider).valueOrNull?.role ==
+                  UserRole.owner)
             PickupDiagnosticsPanel(
               key: ValueKey(
                 '${order.id}-${order.qxpressTrackingNo}-${order.trackingUpdatedAt}',
@@ -430,112 +696,46 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
               ),
           ],
           const SizedBox(height: 12),
-          if (!order.hasParcelPlan &&
-              !order.hasSampleTracking &&
-              order.easyparcelAwbUrl?.isNotEmpty == true) ...[
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _openLabel,
-              icon: const Icon(Icons.description_outlined, size: 18),
-              label: const Text('Print shipping label'),
-            ),
-            const SizedBox(height: 8),
-          ],
-          OutlinedButton.icon(
-            onPressed: _busy
-                ? null
-                : () => _run(() async {
-                    final settings = await ref.read(
-                      shopSettingsProvider.future,
-                    );
-                    if (context.mounted) {
-                      await printPackingSlip(
-                        order,
-                        context: context,
-                        settings: settings,
-                      );
-                    }
-                  }),
-            icon: const Icon(Icons.print_outlined, size: 18),
-            label: const Text('Print Packing Slip'),
-          ),
-          const SizedBox(height: 12),
-          if (order.hasCancellationHold)
-            const Text(
-              'Delivery paused for cancellation. Open the order to review the request and refund status.',
-            )
-          else if (order.needsDeliveryReview && !hasBooking) ...[
-            OutlinedButton(
-              onPressed: _busy
-                  ? null
-                  : () async {
-                      final confirmed = await confirmAction(
-                        context,
-                        title: 'Use shop delivery?',
-                        message:
-                            'The original product category is unavailable. Confirm the shop will hand-deliver '
-                            'this entire order. This does not book a courier.',
-                        confirmLabel: 'Use shop delivery',
-                      );
-                      if (confirmed && mounted) {
-                        await _run(
-                          () => ref
-                              .read(orderRepositoryProvider)
-                              .confirmShopDelivery(order.id),
-                        );
-                      }
-                    },
-              child: const Text('Use shop delivery'),
-            ),
-          ] else if (order.needsBookingAttention &&
-              !order.hasSampleTracking) ...[
-            if (!order.hasSampleTracking)
-              OutlinedButton(
-                onPressed: _busy ? null : () => _enterTracking(recovery: true),
-                child: const Text('Recover existing shipment'),
+          // Secondary: open, label, packing slip — one compact row.
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () => context.push('/orders/${order.id}', extra: order),
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Open order'),
               ),
-          ] else if (order.status == OrderStatus.paid && !hasBooking)
-            ElevatedButton(
-              onPressed: _busy ? null : () => _moveTo(OrderStatus.packing),
-              child: const Text('Start packing'),
-            )
-          else if (order.status == OrderStatus.packing && !hasBooking) ...[
-            if (order.canUseCourier) ...[
-              if (widget.easyParcelConnected)
-                ElevatedButton.icon(
-                  onPressed: _busy || lines.isEmpty
-                      ? null
-                      : _shipWithEasyParcel,
-                  icon: const Icon(Icons.local_shipping_outlined),
-                  label: const Text('Ship with EasyParcel'),
+              if (!order.hasParcelPlan &&
+                  !order.hasSampleTracking &&
+                  order.easyparcelAwbUrl?.isNotEmpty == true)
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _openLabel,
+                  icon: const Icon(Icons.description_outlined, size: 18),
+                  label: const Text('Shipping label'),
                 ),
-              OutlinedButton(
-                onPressed: _busy || lines.isEmpty
+              OutlinedButton.icon(
+                onPressed: _busy
                     ? null
-                    : () => _enterTracking(),
-                child: const Text('Add tracking number'),
+                    : () => _run(() async {
+                        final settings = await ref.read(
+                          shopSettingsProvider.future,
+                        );
+                        if (context.mounted) {
+                          await printPackingSlip(
+                            order,
+                            context: context,
+                            settings: settings,
+                          );
+                        }
+                      }),
+                icon: const Icon(Icons.print_outlined, size: 18),
+                label: const Text('Packing slip'),
               ),
-            ] else
-              ElevatedButton(
-                onPressed: _busy || lines.isEmpty
-                    ? null
-                    : () => _moveTo(OrderStatus.shipped),
-                child: const Text('Start delivery'),
-              ),
-          ] else if (order.status == OrderStatus.shipped &&
-              order.isShopDelivery)
-            ElevatedButton(
-              onPressed: _busy ? null : () => _moveTo(OrderStatus.delivered),
-              child: const Text('Mark as delivered'),
-            )
-          else if (order.status == OrderStatus.shipped &&
-              order.trackingProvider != 'easyparcel' &&
-              !hasTracking)
-            OutlinedButton(
-              onPressed: _busy || !order.canUseCourier
-                  ? null
-                  : () => _enterTracking(),
-              child: const Text('Add tracking number'),
-            ),
+            ],
+          ),
           if (_working)
             const Padding(
               padding: EdgeInsets.only(top: 12),
@@ -794,4 +994,38 @@ class _EasyParcelRateSheetState extends ConsumerState<_EasyParcelRateSheet> {
       ),
     ),
   );
+}
+
+/// Stage badge on the fulfillment card: To pack / To ship / In transit, or
+/// Attention when something blocks the normal path.
+class _StagePill extends StatelessWidget {
+  final Order order;
+  const _StagePill({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final (label, color) = _needsAttention(order)
+        ? ('Attention', palette.error)
+        : switch (order.status) {
+            OrderStatus.paid => ('To pack', palette.warning),
+            OrderStatus.packing => ('To ship', palette.accent),
+            _ => ('In transit', palette.success),
+          };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
 }

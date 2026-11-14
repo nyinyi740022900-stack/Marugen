@@ -26,6 +26,7 @@ class AddressBookScreen extends ConsumerWidget {
         body: const GuestAccountState(
           icon: Icons.location_on_outlined,
           subtitle: 'Save delivery addresses for faster checkout.',
+          returnTo: '/addresses',
         ),
       );
     }
@@ -324,14 +325,17 @@ class _AddressFormState extends ConsumerState<AddressForm> {
         postalCode: _postalCtrl.text.trim(),
         isDefault: _isDefault,
       );
+      String savedId;
       if (widget.existing != null) {
         await repo.updateAddress(address);
+        savedId = widget.existing!.id;
       } else {
-        await repo.createAddress(address);
+        savedId = (await repo.createAddress(address)).id;
       }
       if (!mounted || !_canSave) return;
       ref.invalidate(myAddressesProvider);
-      Navigator.pop(context);
+      // Checkout selects the address that was just saved.
+      Navigator.pop(context, savedId);
     } catch (_) {
       // Raw Postgres/network errors aren't meaningful to a customer here —
       // same reasoning as auth's friendlyAuthError.

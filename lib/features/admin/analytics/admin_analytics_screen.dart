@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -117,7 +118,7 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
-      appBar: AppBar(title: const Text('ANALYTICS')),
+      appBar: AppBar(title: const Text('Analytics')),
       body: RefreshIndicator(
         color: AppPalette.of(context).accent,
         onRefresh: () async {
@@ -310,11 +311,16 @@ class _BarChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxCount = buckets.fold<int>(1, (m, b) => b.count > m ? b.count : m);
     final scaler = MediaQuery.textScalerOf(context);
-    final countWidth = maxCount.toString().length * scaler.scale(9) * 0.7 + 12;
+    // 11 pt is the floor for text that has to be read, not just noticed.
+    final fontSize = scaler.scale(11);
+    final countWidth = maxCount.toString().length * fontSize * 0.7 + 12;
     final labelWidth = buckets.fold<double>(0, (width, b) {
-      final next = b.label.length * scaler.scale(9) * 0.7 + 12;
+      final next = b.label.length * fontSize * 0.7 + 12;
       return next > width ? next : width;
     });
+    final range = buckets.isEmpty
+        ? null
+        : '${DateFormat.MMMd().format(buckets.first.start)} – ${DateFormat.MMMd().format(DateTime.now())}';
     final bucketWidth = countWidth > labelWidth ? countWidth : labelWidth;
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -322,53 +328,72 @@ class _BarChart extends StatelessWidget {
         final width = minimumWidth > constraints.maxWidth
             ? minimumWidth
             : constraints.maxWidth;
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: width,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (final b in buckets)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text(
-                            '${b.count}',
-                            maxLines: 1,
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: AppPalette.of(context).textMuted,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Container(
-                            height: 60 * (b.count / maxCount).clamp(0.03, 1.0),
-                            decoration: BoxDecoration(
-                              color: AppPalette.of(context).accent,
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            b.label,
-                            maxLines: 1,
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: AppPalette.of(context).textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (range != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  range,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppPalette.of(context).textMuted,
                   ),
-              ],
+                ),
+              ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: width,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    for (final b in buckets)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Text(
+                                '${b.count}',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppPalette.of(context).text,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Container(
+                                // Tall enough that a 10% difference is visible.
+                                height:
+                                    140 * (b.count / maxCount).clamp(0.02, 1.0),
+                                decoration: BoxDecoration(
+                                  color: AppPalette.of(context).accent,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                b.label,
+                                maxLines: 1,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-          ),
+          ],
         );
       },
     );

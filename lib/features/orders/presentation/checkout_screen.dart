@@ -457,7 +457,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       if (mounted) {
         setState(
           () => _error = e.error.code == FailureCode.Canceled
-              ? 'Payment was dismissed. Your items are saved. Check Orders before trying again.'
+              ? 'No payment was taken. Your cart is unchanged — tap Pay when you are ready.'
               : 'Payment could not be completed. Check your payment details and try again.',
         );
       }
@@ -574,12 +574,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
   Future<void> _addAddress() async {
     if (_processing) return;
-    await showModalBottomSheet(
+    final createdId = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       builder: (_) => const AddressForm(),
     );
-    if (mounted) ref.invalidate(myAddressesProvider);
+    if (!mounted) return;
+    ref.invalidate(myAddressesProvider);
+    // The address they just typed is the one they meant to ship to.
+    if (createdId != null) setState(() => _selectedAddressId = createdId);
   }
 
   /// Opens a saved address the server would reject (see
@@ -656,7 +659,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
-      appBar: AppBar(title: const Text('CHECKOUT')),
+      appBar: AppBar(title: const Text('Checkout')),
       body: ContentWidth(
         maxWidth: 760,
         child: SafeArea(
@@ -720,62 +723,70 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                   )
                                 else ...[
                                   for (final address in addresses)
-                                    Material(
-                                      color: AppPalette.of(context).surface,
-                                      child: ListTile(
-                                        onTap: _processing
-                                            ? null
-                                            : () => setState(
-                                                () => _selectedAddressId =
-                                                    address.id,
-                                              ),
-                                        leading: Icon(
-                                          address.id == selectedId
-                                              ? Icons.radio_button_checked
-                                              : Icons.radio_button_unchecked,
-                                          color: address.id == selectedId
-                                              ? AppPalette.of(context).accent
-                                              : AppPalette.of(context)
-                                                    .textMuted,
-                                        ),
-                                        title: Text(
-                                          '${address.label} — ${address.recipientName}',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            fontSize: 13.5,
-                                          ),
-                                        ),
-                                        subtitle: Text.rich(
-                                          TextSpan(
-                                            text: address.oneLine,
-                                            children: [
-                                              if (!address.isDeliverable)
-                                                TextSpan(
-                                                  text: '\nUpdate the phone or postal code to deliver here',
-                                                  style: TextStyle(
-                                                    color: AppPalette.of(
-                                                      context,
-                                                    ).accent,
-                                                    fontWeight: FontWeight.w600,
-                                                  ),
+                                    Semantics(
+                                      inMutuallyExclusiveGroup: true,
+                                      selected: address.id == selectedId,
+                                      button: true,
+                                      label: 'Deliver to ${address.label}',
+                                      child: Material(
+                                        color: AppPalette.of(context).surface,
+                                        child: ListTile(
+                                          onTap: _processing
+                                              ? null
+                                              : () => setState(
+                                                  () => _selectedAddressId =
+                                                      address.id,
                                                 ),
-                                            ],
+                                          leading: Icon(
+                                            address.id == selectedId
+                                                ? Icons.radio_button_checked
+                                                : Icons.radio_button_unchecked,
+                                            color: address.id == selectedId
+                                                ? AppPalette.of(context).accent
+                                                : AppPalette.of(context)
+                                                      .textMuted,
                                           ),
-                                          style: const TextStyle(
-                                            fontSize: 12.5,
+                                          title: Text(
+                                            '${address.label} — ${address.recipientName}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 13.5,
+                                            ),
                                           ),
+                                          subtitle: Text.rich(
+                                            TextSpan(
+                                              text: address.oneLine,
+                                              children: [
+                                                if (!address.isDeliverable)
+                                                  TextSpan(
+                                                    text: '\nUpdate the phone or postal code to deliver here',
+                                                    style: TextStyle(
+                                                      color: AppPalette.of(
+                                                        context,
+                                                      ).accent,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            style: const TextStyle(
+                                              fontSize: 12.5,
+                                            ),
+                                          ),
+                                          trailing: address.isDeliverable
+                                              ? null
+                                              : TextButton(
+                                                  onPressed: _processing
+                                                      ? null
+                                                      : () => _editAddress(
+                                                          address,
+                                                        ),
+                                                  child: const Text('Edit'),
+                                                ),
                                         ),
-                                        trailing: address.isDeliverable
-                                            ? null
-                                            : TextButton(
-                                                onPressed: _processing
-                                                    ? null
-                                                    : () =>
-                                                          _editAddress(address),
-                                                child: const Text('Edit'),
-                                              ),
                                       ),
                                     ),
                                   const Divider(
@@ -1094,17 +1105,22 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: AppSpacing.md),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).accentSoft,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                    ),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: AppPalette.of(context).accent,
-                        fontSize: 13,
+                  // Announced the moment it appears: a cart or price change
+                  // at the pay step must not go unnoticed by a screen reader.
+                  Semantics(
+                    liveRegion: true,
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).accentSoft,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: AppPalette.of(context).accent,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ),
@@ -1323,11 +1339,14 @@ class _TotalsCard extends StatelessWidget {
               amountColor: AppPalette.of(context).accent,
             ),
           ],
-          const SizedBox(height: 6),
-          _SummaryLine(
-            label: 'GST (${gstPercent.toStringAsFixed(0)}%)',
-            amount: formatPrice(gstAmount),
-          ),
+          // A zero-GST shop should not show a S$0.00 tax line.
+          if (gstAmount > 0) ...[
+            const SizedBox(height: 6),
+            _SummaryLine(
+              label: 'GST (${gstPercent.toStringAsFixed(0)}%)',
+              amount: formatPrice(gstAmount),
+            ),
+          ],
           const Divider(height: AppSpacing.lg),
           _SummaryLine(
             label: gstIncluded ? 'Total (incl. GST)' : 'Total',

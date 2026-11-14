@@ -11,6 +11,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/knowledge.dart';
 import '../../knowledge/presentation/knowledge_providers.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/sheet_header.dart';
+import '../../../shared/widgets/discard_changes_guard.dart';
 
 /// One editable stage row (existing photo URL and/or a newly picked image
 /// not yet uploaded).
@@ -38,7 +40,10 @@ Future<void> showVarietyForm(
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    showDragHandle: true,
+    // Closing is explicit (header ×) so edits are never lost to a stray
+    // swipe or outside tap; the guard inside asks before discarding.
+    isDismissible: false,
+    enableDrag: false,
     builder: (_) => _VarietyFormSheet(existing: existing),
   );
 }
@@ -68,6 +73,22 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   bool _submitted = false;
   String? _saveError;
   late String? _savedId = widget.existing?.id;
+  String? _baseline;
+
+  String _fingerprint() => [
+    _nameCtrl.text,
+    _descCtrl.text,
+    _traitsCtrl.text,
+    _category,
+    _existingCoverUrl,
+    _newCoverImage?.path,
+    for (final st in _stages) ...[
+      st.labelCtrl.text,
+      st.descCtrl.text,
+      st.existingImageUrl,
+      st.newImage?.path,
+    ],
+  ].join('\u0001');
 
   @override
   void initState() {
@@ -199,231 +220,235 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: AppSpacing.xl,
-        right: AppSpacing.xl,
-        top: AppSpacing.xl,
-        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.xl,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.existing == null ? 'Add Variety' : 'Edit Variety',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            Center(
-              child: GestureDetector(
-                onTap: _pickCoverImage,
-                child: Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    color: AppPalette.of(context).surfaceMuted,
-                    borderRadius: BorderRadius.circular(AppRadius.md),
-                    image: _newCoverImage != null
-                        ? null // shown via FutureBuilder below for web/io compat
-                        : (_existingCoverUrl != null
-                              ? DecorationImage(
-                                  image: NetworkImage(_existingCoverUrl!),
-                                  fit: BoxFit.cover,
+    _baseline ??= _fingerprint();
+    return DiscardChangesGuard(
+      dirty: _fingerprint() != _baseline,
+      busy: _saving,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: AppSpacing.xl,
+          right: AppSpacing.xl,
+          top: AppSpacing.xl,
+          bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.xl,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SheetHeader(
+                widget.existing == null ? 'Add Variety' : 'Edit Variety',
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Center(
+                child: GestureDetector(
+                  onTap: _pickCoverImage,
+                  child: Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      color: AppPalette.of(context).surfaceMuted,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      image: _newCoverImage != null
+                          ? null // shown via FutureBuilder below for web/io compat
+                          : (_existingCoverUrl != null
+                                ? DecorationImage(
+                                    image: NetworkImage(_existingCoverUrl!),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null),
+                    ),
+                    child: _newCoverImage != null
+                        ? _PickedImageThumb(file: _newCoverImage!)
+                        : (_existingCoverUrl == null
+                              ? Icon(
+                                  Icons.add_a_photo_outlined,
+                                  color: AppPalette.of(context).textMuted,
                                 )
                               : null),
                   ),
-                  child: _newCoverImage != null
-                      ? _PickedImageThumb(file: _newCoverImage!)
-                      : (_existingCoverUrl == null
-                            ? Icon(
-                                Icons.add_a_photo_outlined,
-                                color: AppPalette.of(context).textMuted,
-                              )
-                            : null),
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            TextField(
-              controller: _nameCtrl,
-              decoration: InputDecoration(
-                labelText: 'Name',
-                errorText: _submitted && _nameCtrl.text.trim().isEmpty
-                    ? 'Enter a name.'
-                    : null,
-                errorMaxLines: 3,
+              const SizedBox(height: AppSpacing.lg),
+              TextField(
+                controller: _nameCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Name',
+                  errorText: _submitted && _nameCtrl.text.trim().isEmpty
+                      ? 'Enter a name.'
+                      : null,
+                  errorMaxLines: 3,
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            DropdownButtonFormField<String>(
-              isExpanded: true,
-              initialValue: _category,
-              items: const [
-                DropdownMenuItem(value: 'koi', child: Text('Koi')),
-                DropdownMenuItem(value: 'arowana', child: Text('Arowana')),
-              ],
-              onChanged: (v) => setState(() => _category = v ?? 'koi'),
-              decoration: const InputDecoration(labelText: 'Category'),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _descCtrl,
-              decoration: const InputDecoration(labelText: 'Description'),
-              maxLines: 3,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _traitsCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Traits (comma-separated)',
-                hintText: 'e.g. Red & white, Metallic scales',
+              const SizedBox(height: AppSpacing.md),
+              DropdownButtonFormField<String>(
+                isExpanded: true,
+                initialValue: _category,
+                items: const [
+                  DropdownMenuItem(value: 'koi', child: Text('Koi')),
+                  DropdownMenuItem(value: 'arowana', child: Text('Arowana')),
+                ],
+                onChanged: (v) => setState(() => _category = v ?? 'koi'),
+                decoration: const InputDecoration(labelText: 'Category'),
               ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 8,
-              children: [
-                Text(
-                  'GROWTH STAGES',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                    letterSpacing: 0.8,
-                    color: AppPalette.of(context).textMuted,
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _descCtrl,
+                decoration: const InputDecoration(labelText: 'Description'),
+                maxLines: 3,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _traitsCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Traits (comma-separated)',
+                  hintText: 'e.g. Red & white, Metallic scales',
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  Text(
+                    'GROWTH STAGES',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      letterSpacing: 0.8,
+                      color: AppPalette.of(context).textMuted,
+                    ),
                   ),
-                ),
-                TextButton.icon(
-                  onPressed: _addStage,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add stage'),
-                ),
-              ],
-            ),
-            Text(
-              'e.g. Tosai (under 1yr) → Nisai (2yr) → Sansai (3yr), one photo each',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppPalette.of(context).textMuted,
+                  TextButton.icon(
+                    onPressed: _addStage,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add stage'),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            for (var i = 0; i < _stages.length; i++)
-              Container(
-                margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppPalette.of(context).border),
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final photo = GestureDetector(
-                      onTap: () => _pickStageImage(_stages[i]),
-                      child: Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).surfaceMuted,
-                          borderRadius: BorderRadius.circular(AppRadius.sm),
-                          image:
-                              _stages[i].newImage == null &&
-                                  _stages[i].existingImageUrl != null
-                              ? DecorationImage(
-                                  image: NetworkImage(
-                                    _stages[i].existingImageUrl!,
-                                  ),
-                                  fit: BoxFit.cover,
-                                )
-                              : null,
-                        ),
-                        child: _stages[i].newImage != null
-                            ? _PickedImageThumb(file: _stages[i].newImage!)
-                            : (_stages[i].existingImageUrl == null
-                                  ? Icon(
-                                      Icons.add_a_photo_outlined,
-                                      size: 18,
-                                      color: AppPalette.of(context).textMuted,
-                                    )
-                                  : null),
-                      ),
-                    );
-                    final fields = Column(
-                      children: [
-                        TextField(
-                          controller: _stages[i].labelCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Stage label',
-                            isDense: true,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        TextField(
-                          controller: _stages[i].descCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Note (optional)',
-                            isDense: true,
-                          ),
-                        ),
-                      ],
-                    );
-                    final remove = IconButton(
-                      tooltip: 'Remove stage',
-                      icon: Icon(
-                        Icons.close,
-                        size: 18,
-                        color: AppPalette.of(context).textMuted,
-                      ),
-                      onPressed: () => _removeStage(i),
-                    );
-                    if (constraints.maxWidth < 360 &&
-                        MediaQuery.textScalerOf(context).scale(14) > 21) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Row(children: [photo, const Spacer(), remove]),
-                          const SizedBox(height: AppSpacing.sm),
-                          fields,
-                        ],
-                      );
-                    }
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        photo,
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(child: fields),
-                        remove,
-                      ],
-                    );
-                  },
-                ),
-              ),
-            const SizedBox(height: AppSpacing.lg),
-            if (_saveError != null) ...[
               Text(
-                _saveError!,
-                style: TextStyle(color: AppPalette.of(context).error),
+                'e.g. Tosai (under 1yr) → Nisai (2yr) → Sansai (3yr), one photo each',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppPalette.of(context).textMuted,
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
+              for (var i = 0; i < _stages.length; i++)
+                Container(
+                  margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppPalette.of(context).border),
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final photo = GestureDetector(
+                        onTap: () => _pickStageImage(_stages[i]),
+                        child: Container(
+                          width: 56,
+                          height: 56,
+                          decoration: BoxDecoration(
+                            color: AppPalette.of(context).surfaceMuted,
+                            borderRadius: BorderRadius.circular(AppRadius.sm),
+                            image:
+                                _stages[i].newImage == null &&
+                                    _stages[i].existingImageUrl != null
+                                ? DecorationImage(
+                                    image: NetworkImage(
+                                      _stages[i].existingImageUrl!,
+                                    ),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
+                          ),
+                          child: _stages[i].newImage != null
+                              ? _PickedImageThumb(file: _stages[i].newImage!)
+                              : (_stages[i].existingImageUrl == null
+                                    ? Icon(
+                                        Icons.add_a_photo_outlined,
+                                        size: 18,
+                                        color: AppPalette.of(context).textMuted,
+                                      )
+                                    : null),
+                        ),
+                      );
+                      final fields = Column(
+                        children: [
+                          TextField(
+                            controller: _stages[i].labelCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Stage label',
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          TextField(
+                            controller: _stages[i].descCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Note (optional)',
+                              isDense: true,
+                            ),
+                          ),
+                        ],
+                      );
+                      final remove = IconButton(
+                        tooltip: 'Remove stage',
+                        icon: Icon(
+                          Icons.close,
+                          size: 18,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                        onPressed: () => _removeStage(i),
+                      );
+                      if (constraints.maxWidth < 360 &&
+                          MediaQuery.textScalerOf(context).scale(14) > 21) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(children: [photo, const Spacer(), remove]),
+                            const SizedBox(height: AppSpacing.sm),
+                            fields,
+                          ],
+                        );
+                      }
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          photo,
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(child: fields),
+                          remove,
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: AppSpacing.lg),
+              if (_saveError != null) ...[
+                Text(
+                  _saveError!,
+                  style: TextStyle(color: AppPalette.of(context).error),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+              ElevatedButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
+                      )
+                    : const Text('Save'),
+              ),
             ],
-            ElevatedButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.white,
-                      ),
-                    )
-                  : const Text('Save'),
-            ),
-          ],
+          ),
         ),
       ),
     );

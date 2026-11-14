@@ -7,6 +7,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:marugen_app/shared/models/app_user.dart';
+import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:marugen_app/features/admin/delivery/admin_delivery_screen.dart';
 import 'package:marugen_app/features/admin/delivery/easyparcel_providers.dart';
@@ -167,6 +169,9 @@ Future<void> showDelivery(
       overrides: [
         orderRepositoryProvider.overrideWithValue(
           repository ?? DeliveryOrders([order]),
+        ),
+        currentAppUserProvider.overrideWith(
+          (ref) async => const AppUser(id: 'owner', role: UserRole.owner),
         ),
         adminOrdersProvider.overrideWith(
           (ref) async => filteredEmpty ? [] : [order],
@@ -350,6 +355,9 @@ void main() {
             orderRepositoryProvider.overrideWithValue(DeliveryOrders([order])),
             adminOrdersProvider.overrideWith((ref) async => [order]),
             easyParcelConnectedProvider.overrideWith((ref) async => false),
+            currentAppUserProvider.overrideWith(
+              (ref) async => const AppUser(id: 'owner', role: UserRole.owner),
+            ),
           ],
           child: MaterialApp(
             theme: AppTheme.light,
@@ -424,6 +432,12 @@ void main() {
       await tester.tap(find.text('J&T Express'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Book Shipment'));
+      await tester.pumpAndSettle();
+      // Real money: the cost breakdown must be confirmed before booking.
+      expect(find.text('Book this shipment?'), findsOneWidget);
+      expect(find.textContaining('Courier total: S\$4.00'), findsOneWidget);
+      expect(courier.booked, isNull);
+      await tester.tap(find.text('Book shipment'));
       await tester.pumpAndSettle();
       expect(courier.booked, same(courier.quoted));
       expect(courier.booked!.weightKg, 2.5);

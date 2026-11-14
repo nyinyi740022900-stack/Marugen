@@ -11,6 +11,11 @@ import '../../../shared/widgets/notification_bell_button.dart';
 import '../../orders/presentation/orders_providers.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../admin_shell.dart';
+import '../delivery/admin_delivery_screen.dart'
+    show
+        FulfillmentSegment,
+        fulfillmentSegmentContains,
+        fulfillmentSegmentProvider;
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/empty_state.dart';
 
@@ -20,14 +25,15 @@ class AdminDashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final productsAsync = ref.watch(productListProvider);
-    final ordersAsync = ref.watch(adminOrdersProvider);
+    final ordersAsync = ref.watch(adminAllOrdersProvider);
     final summaryAsync = ref.watch(adminOrderSummaryProvider);
     final lowStockAsync = ref.watch(lowStockProductsProvider);
+    final queueAsync = ref.watch(fulfillmentOrdersProvider);
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
-        title: const Text('DASHBOARD'),
+        title: const Text('Home'),
         actions: const [NotificationBellButton(), SizedBox(width: 4)],
       ),
       body: RefreshIndicator(
@@ -39,6 +45,9 @@ class AdminDashboardScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.all(AppSpacing.lg),
           children: [
+            // What needs a person today, before any revenue number.
+            _TodayQueue(ordersAsync: queueAsync),
+            const SizedBox(height: AppSpacing.xl),
             Row(
               children: [
                 Expanded(
@@ -57,7 +66,8 @@ class AdminDashboardScreen extends ConsumerWidget {
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: _StatCard(
-                    label: 'Pending Orders',
+                    // Unpaid checkouts plus paid orders not yet packed.
+                    label: 'Open Orders',
                     value: summaryAsync.maybeWhen(
                       data: (summary) => '${summary.openOrders}',
                       orElse: () => '—',
@@ -149,14 +159,17 @@ class AdminDashboardScreen extends ConsumerWidget {
                 ordersAsync.maybeWhen(
                   data: (orders) =>
                       rankTopProducts(orders).length > _TopProductsCard.maxRows
-                      ? GestureDetector(
-                          onTap: () => context.push('/admin/top-products'),
-                          child: Text(
+                      ? TextButton(
+                          onPressed: () => context.push('/admin/top-products'),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(48, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                          child: const Text(
                             'See all',
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 12.5,
-                              color: AppPalette.of(context).accent,
                             ),
                           ),
                         )
@@ -178,7 +191,7 @@ class AdminDashboardScreen extends ConsumerWidget {
                   fallback: 'Could not load orders.',
                   context: 'admin.dashboard',
                 ),
-                onRetry: () => ref.invalidate(adminOrdersProvider),
+                onRetry: () => ref.invalidate(adminAllOrdersProvider),
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -237,7 +250,7 @@ class AdminDashboardScreen extends ConsumerWidget {
                   fallback: 'Could not load orders.',
                   context: 'admin.dashboard',
                 ),
-                onRetry: () => ref.invalidate(adminOrdersProvider),
+                onRetry: () => ref.invalidate(adminAllOrdersProvider),
               ),
             ),
           ],
@@ -295,15 +308,15 @@ class _LowStockSection extends StatelessWidget {
             ),
             const Spacer(),
             if (hasMore)
-              GestureDetector(
-                onTap: () => context.push('/admin/low-stock'),
-                child: Text(
+              TextButton(
+                onPressed: () => context.push('/admin/low-stock'),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(48, 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+                child: const Text(
                   'See all',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12.5,
-                    color: AppPalette.of(context).accent,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
                 ),
               ),
           ],
@@ -785,6 +798,155 @@ class _OrderRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Today's work as tappable counters, each opening Fulfillment on that
+/// segment. Cancellation requests count as attention: they pause delivery
+/// and were otherwise visible only inside individual orders.
+class _TodayQueue extends ConsumerWidget {
+  final AsyncValue<List<Order>> ordersAsync;
+  const _TodayQueue({required this.ordersAsync});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final palette = AppPalette.of(context);
+    final orders = ordersAsync.valueOrNull ?? const <Order>[];
+    int count(FulfillmentSegment s) =>
+        orders.where((o) => fulfillmentSegmentContains(o, s)).length;
+    final tiles = [
+      (FulfillmentSegment.toPack, 'To pack', Icons.inventory_outlined),
+      (FulfillmentSegment.toShip, 'To ship', Icons.local_shipping_outlined),
+      (FulfillmentSegment.inTransit, 'In transit', Icons.route_outlined),
+      (
+        FulfillmentSegment.attention,
+        'Needs attention',
+        Icons.report_problem_outlined,
+      ),
+    ];
+    void open(FulfillmentSegment s) {
+      ref.read(fulfillmentSegmentProvider.notifier).state = s;
+      ref.read(requestedOrdersTabProvider.notifier).state = 1;
+      ref.read(adminTabIndexProvider.notifier).state = 2;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'TODAY',
+          style: Theme.of(context).textTheme.labelSmall
+              ?.copyWith(color: palette.textMuted),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 640 ? 4 : 2;
+            final width =
+                (constraints.maxWidth - AppSpacing.md * (columns - 1)) /
+                columns;
+            return Wrap(
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.md,
+              children: [
+                for (final (segment, label, icon) in tiles)
+                  SizedBox(
+                    width: width,
+                    child: _QueueTile(
+                      label: label,
+                      icon: icon,
+                      count: ordersAsync.hasValue ? count(segment) : null,
+                      urgent:
+                          segment == FulfillmentSegment.attention &&
+                          count(segment) > 0,
+                      onTap: () => open(segment),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _QueueTile extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final int? count;
+  final bool urgent;
+  final VoidCallback onTap;
+  const _QueueTile({
+    required this.label,
+    required this.icon,
+    required this.count,
+    required this.urgent,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final color = urgent ? palette.error : palette.text;
+    return Semantics(
+      button: true,
+      label: '$label, ${count ?? 'loading'}',
+      child: Material(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 72),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.md,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(
+                color: urgent ? palette.error : palette.border,
+                width: urgent ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, size: 22, color: urgent ? color : palette.textMuted),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        count == null ? '—' : '$count',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: color,
+                          height: 1.1,
+                        ),
+                      ),
+                      Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: palette.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

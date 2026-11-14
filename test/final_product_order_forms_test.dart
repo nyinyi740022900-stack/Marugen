@@ -280,6 +280,7 @@ void main() {
         overrides: [
           orderRepositoryProvider.overrideWithValue(repository),
           adminOrdersProvider.overrideWith((ref) async => [order]),
+          adminAllOrdersProvider.overrideWith((ref) async => [order]),
           easyParcelConnectedProvider.overrideWith((ref) async => false),
         ],
       );
@@ -342,13 +343,20 @@ void main() {
           brightness,
           keyboard: 250,
         );
+        // Name sits above Category; fill it while it is still on screen,
+        // then scroll on — the photo strip pushes the category field out
+        // of the lazily built viewport on a short keyboard-covered screen.
+        await tester.enterText(field('Name'), 'Premium koi food');
+        await reveal(
+          tester,
+          find.byType(DropdownButtonFormField<ProductCategory>),
+        );
         final category = tester
             .widget<DropdownButtonFormField<ProductCategory>>(
               find.byType(DropdownButtonFormField<ProductCategory>),
             );
         category.onChanged!(ProductCategory.fishFood);
         await tester.pumpAndSettle();
-        await tester.enterText(field('Name'), 'Premium koi food');
         await reveal(
           tester,
           find.text('Weight of one item. Example: 500g = 0.5 kg.'),
@@ -362,8 +370,8 @@ void main() {
           isFalse,
         );
 
-        await reveal(tester, find.text('Add Weight'));
-        await tester.tap(find.text('Add Weight'));
+        await reveal(tester, find.text('Add custom option'));
+        await tester.tap(find.text('Add custom option'));
         await tester.pumpAndSettle();
         await reveal(tester, field('Label'));
         await tester.enterText(
@@ -373,6 +381,10 @@ void main() {
         await tester.enterText(field('kg').last, '-1');
         await shot(tester, 'product-variant-fields-$brightness');
 
+        // Per-row packed size now sits behind an "Advanced" expander.
+        await reveal(tester, find.text('Advanced: packed size').last);
+        await tester.tap(find.text('Advanced: packed size').last);
+        await tester.pumpAndSettle();
         await reveal(tester, field('Length (cm)').last);
         await tester.enterText(field('Length (cm)').last, '20');
         final form = tester.state<FormState>(find.byType(Form));
@@ -556,6 +568,7 @@ void main() {
         overrides: [
           orderRepositoryProvider.overrideWithValue(DeliveryOrders([])),
           adminOrdersProvider.overrideWith((ref) async => []),
+          adminAllOrdersProvider.overrideWith((ref) async => []),
           easyParcelConnectedProvider.overrideWith((ref) async => false),
         ],
       );
@@ -603,6 +616,7 @@ void main() {
           overrides: [
             orderRepositoryProvider.overrideWithValue(repository),
             adminOrdersProvider.overrideWith((ref) async => [order]),
+            adminAllOrdersProvider.overrideWith((ref) async => [order]),
             easyParcelConnectedProvider.overrideWith((ref) async => false),
           ],
         );

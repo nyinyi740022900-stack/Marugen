@@ -1,5 +1,5 @@
 import '../../../shared/widgets/sized_network_image.dart'
-    show uploadImageMaxSide;
+    show SizedNetworkImage, uploadImageMaxSide;
 
 import 'dart:io';
 import 'dart:math' as math;
@@ -16,6 +16,8 @@ import '../../../shared/models/product.dart';
 import '../../shop/data/product_repository.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../shared/widgets/discard_changes_guard.dart';
 
 /// Create/edit form for a product. Pass `productId == null` to create new.
 class AdminProductEditScreen extends ConsumerStatefulWidget {
@@ -45,8 +47,12 @@ class _AdminProductEditScreenState
   ProductCategory _category = ProductCategory.koi;
   bool _showPrice = true;
   bool _hasCertificate = false;
-  final List<XFile> _newImages = [];
-  final List<String> _existingImageUrls = [];
+
+  /// Photos in display order (first = cover). Each is either already
+  /// uploaded (`url`) or still a local file; uploads happen on Save, one
+  /// by one, and a failure marks just that photo so it can be retried.
+  final List<_Photo> _photos = [];
+  String? _uploadNote;
   bool _loading = false;
   bool _initialLoad = true;
   bool _productMissing = false;
@@ -67,6 +73,46 @@ class _AdminProductEditScreenState
   /// Matrix cells keyed by "$variantIndex::$sizeLabel".
   final Map<String, TextEditingController> _sizeStockCtrls = {};
   final _fillAllStockCtrl = TextEditingController();
+
+  /// What the form held when it finished loading (or opened blank), for
+  /// the unsaved-changes guard; refreshed after a successful save.
+  String? _baseline;
+
+  String _fingerprint() => [
+    _nameCtrl.text,
+    _descCtrl.text,
+    _priceCtrl.text,
+    _shippingWeightCtrl.text,
+    _packedSize.length.text,
+    _packedSize.width.text,
+    _packedSize.height.text,
+    _salePriceCtrl.text,
+    _videoUrlCtrl.text,
+    _stockCtrl.text,
+    _varietyCtrl.text,
+    _sizeCtrl.text,
+    _breederCtrl.text,
+    _category.name,
+    _showPrice,
+    _hasCertificate,
+    _photos.map((ph) => ph.url ?? ph.file!.path).join(','),
+    for (final v in _variants) ...[
+      v.id,
+      v.labelCtrl.text,
+      v.priceCtrl.text,
+      v.stockCtrl.text,
+      v.weightCtrl.text,
+      v.packedSize.length.text,
+      v.packedSize.width.text,
+      v.packedSize.height.text,
+    ],
+    _sizeOptionCtrls.map((c) => c.text).join(','),
+    (_sizeStockCtrls.entries.map((e) => '${e.key}=${e.value.text}').toList()
+          ..sort())
+        .join(','),
+  ].join('\u0001');
+
+  bool get _dirty => _baseline != null && _fingerprint() != _baseline;
 
   bool get isLiveFish =>
       _category == ProductCategory.koi || _category == ProductCategory.arowana;
@@ -107,7 +153,12 @@ class _AdminProductEditScreenState
         context: 'admin.product_edit.load',
       );
     } finally {
-      if (mounted) setState(() => _initialLoad = false);
+      if (mounted) {
+        setState(() {
+          _initialLoad = false;
+          _baseline = _fingerprint();
+        });
+      }
     }
   }
 
@@ -129,7 +180,7 @@ class _AdminProductEditScreenState
       _stockCtrl.text = '${product.stockQuantity}';
       _category = product.category;
       _showPrice = product.showPrice;
-      _existingImageUrls.addAll(product.imageUrls);
+      _photos.addAll(product.imageUrls.map(_Photo.uploaded));
       if (product.fishDetails != null) {
         _varietyCtrl.text = product.fishDetails!.variety ?? '';
         _sizeCtrl.text = product.fishDetails!.sizeCm?.toString() ?? '';
@@ -151,8 +202,102 @@ class _AdminProductEditScreenState
     }
   }
 
+  /// Brings the first field with an error into view; on a long form the
+  /// red text is otherwise somewhere above or below the Save button.
+  void _scrollToFirstError() {
+    FormFieldState<dynamic>? first;
+    void visit(Element element) {
+      if (first != null) return;
+      if (element is StatefulElement &&
+          element.state is FormFieldState<dynamic> &&
+          (element.state as FormFieldState<dynamic>).hasError) {
+        first = element.state as FormFieldState<dynamic>;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    _formKey.currentContext?.visitChildElements(visit);
+    final target = first;
+    if (target != null) {
+      Scrollable.ensureVisible(
+        target.context,
+        alignment: 0.2,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    }
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        const SnackBar(content: Text('Check the highlighted fields.')),
+      );
+  }
+
+  static bool _isFish(ProductCategory c) =>
+      c == ProductCategory.koi || c == ProductCategory.arowana;
+
+  /// Switching between live fish and goods throws away the other kind's
+  /// details on save (fish fields vs weight options), so say so first
+  /// when there is anything to lose.
+  Future<void> _changeCategory(ProductCategory next) async {
+    if (next == _category) return;
+    final crossing = _isFish(next) != _isFish(_category);
+    final hasFishData =
+        _varietyCtrl.text.trim().isNotEmpty ||
+        _sizeCtrl.text.trim().isNotEmpty ||
+        _breederCtrl.text.trim().isNotEmpty;
+    final hasGoodsData =
+        _variants.any((v) => v.labelCtrl.text.trim().isNotEmpty) ||
+        _sizeOptionCtrls.any((c) => c.text.trim().isNotEmpty);
+    if (crossing && (hasFishData || hasGoodsData)) {
+      final ok = await confirmAction(
+        context,
+        title: 'Change product type?',
+        message: _isFish(next)
+            ? 'Weight options and size stock are not used for live fish and will be removed when you save.'
+            : 'Variety, size and breeder details are not used for goods and will be removed when you save.',
+        confirmLabel: 'Change',
+      );
+      if (!ok || !mounted) {
+        // Put the dropdown back to the current value.
+        setState(() {});
+        return;
+      }
+    }
+    setState(() => _category = next);
+  }
+
   void _addVariantRow() {
     setState(() => _variants.add(_VariantRow.blank()));
+  }
+
+  /// One tap per common bag size instead of Add → type kg → fix label.
+  void _addWeightChip(double kg) {
+    final label = _optionLabelFromKg(kg.toString());
+    if (_variants.any((v) => v.labelCtrl.text.trim() == label)) return;
+    final row = _VariantRow.blank();
+    row.weightCtrl.text = kg % 1 == 0 ? kg.toInt().toString() : kg.toString();
+    row.updateWeightLabel(row.weightCtrl.text);
+    // Carry the last row's price as a starting point; it is usually close.
+    if (_variants.isNotEmpty) {
+      row.priceCtrl.text = _variants.last.priceCtrl.text;
+    }
+    setState(() => _variants.add(row));
+  }
+
+  /// Copies a weight row (price, kg, packed size) as a new unsaved row,
+  /// so a second similar size is one tap plus a label edit.
+  void _duplicateVariantRow(int index) {
+    final src = _variants[index];
+    final row = _VariantRow.blank();
+    row.priceCtrl.text = src.priceCtrl.text;
+    row.weightCtrl.text = src.weightCtrl.text;
+    row.stockCtrl.text = src.stockCtrl.text;
+    row.packedSize.length.text = src.packedSize.length.text;
+    row.packedSize.width.text = src.packedSize.width.text;
+    row.packedSize.height.text = src.packedSize.height.text;
+    setState(() => _variants.insert(index + 1, row));
   }
 
   void _removeVariantRow(int index) {
@@ -289,16 +434,20 @@ class _AdminProductEditScreenState
       maxWidth: uploadImageMaxSide,
       maxHeight: uploadImageMaxSide,
     );
-    if (mounted && !_loading) setState(() => _newImages.addAll(picked));
+    if (mounted && !_loading) {
+      setState(() => _photos.addAll(picked.map(_Photo.local)));
+    }
   }
 
   Future<void> _save() async {
     if (_loading) return;
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      _scrollToFirstError();
+      return;
+    }
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _loading = true);
-    final newImages = List<XFile>.of(_newImages);
-    final existingUrls = List<String>.of(_existingImageUrls);
+    final pending = _photos.where((ph) => ph.url == null).toList();
     try {
       final repo = ProductRepository();
       final categoryValue = _category == ProductCategory.fishFood
@@ -358,23 +507,42 @@ class _AdminProductEditScreenState
       }
 
       if (!mounted) return;
-      // Upload any newly picked images, then merge with existing URLs.
-      if (newImages.isNotEmpty) {
-        final urls = <String>[...existingUrls];
-        for (final img in newImages) {
-          if (!mounted) return;
-          final bytes = await img.readAsBytes();
-          if (!mounted) return;
-          final ext = img.name.split('.').last;
-          final url = await repo.uploadProductImage(productId, bytes, ext);
-          urls.add(url);
-        }
+      // Upload new photos one at a time with visible progress. A failed
+      // photo is marked for retry instead of aborting the whole save, so
+      // the ones that worked are never thrown away.
+      var failedPhotos = 0;
+      for (var i = 0; i < pending.length; i++) {
         if (!mounted) return;
-        payload['image_urls'] = urls;
+        setState(
+          () => _uploadNote = 'Uploading photo ${i + 1} of ${pending.length}…',
+        );
+        if (!await _uploadPhoto(repo, productId, pending[i])) failedPhotos++;
+      }
+      if (!mounted) return;
+      setState(() => _uploadNote = null);
+      payload['image_urls'] = _photos
+          .map((ph) => ph.url)
+          .whereType<String>()
+          .toList();
+      if (pending.isNotEmpty || !creating) {
         await repo.updateProduct(productId, payload);
-      } else if (!creating) {
-        payload['image_urls'] = existingUrls;
-        await repo.updateProduct(productId, payload);
+      }
+      if (failedPhotos > 0) {
+        if (!mounted) return;
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                failedPhotos == 1
+                    ? "1 photo didn't upload. Tap it to retry, then Save."
+                    : "$failedPhotos photos didn't upload. Tap each to retry, then Save.",
+              ),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        return;
       }
 
       if (!mounted) return;
@@ -490,12 +658,65 @@ class _AdminProductEditScreenState
     if (mounted) context.pop();
   }
 
-  void _removeExistingImage(int index) {
-    setState(() => _existingImageUrls.removeAt(index));
+  void _removePhoto(_Photo photo) => setState(() => _photos.remove(photo));
+
+  void _makeCover(_Photo photo) => setState(() {
+    _photos.remove(photo);
+    _photos.insert(0, photo);
+  });
+
+  void _reorderPhotos(int from, int to) => setState(() {
+    final photo = _photos.removeAt(from);
+    _photos.insert(to, photo);
+  });
+
+  /// Uploads one local photo; returns false (and marks it) on failure.
+  Future<bool> _uploadPhoto(
+    ProductRepository repo,
+    String productId,
+    _Photo photo,
+  ) async {
+    setState(() => photo.status = _PhotoStatus.uploading);
+    try {
+      final bytes = await photo.file!.readAsBytes();
+      final url = await repo.uploadProductImage(
+        productId,
+        bytes,
+        photo.file!.name.split('.').last,
+      );
+      if (!mounted) return false;
+      setState(() {
+        photo.url = url;
+        photo.status = _PhotoStatus.ready;
+      });
+      return true;
+    } catch (_) {
+      if (mounted) setState(() => photo.status = _PhotoStatus.failed);
+      return false;
+    }
   }
 
-  void _removeNewImage(int index) {
-    setState(() => _newImages.removeAt(index));
+  /// Retry a single failed photo right away when the product already
+  /// exists; otherwise it simply joins the next Save.
+  Future<void> _retryPhoto(_Photo photo) async {
+    final productId = widget.productId ?? _createdProductId;
+    if (productId == null || _loading) {
+      setState(() => photo.status = _PhotoStatus.ready);
+      return;
+    }
+    final ok = await _uploadPhoto(ProductRepository(), productId, photo);
+    if (ok && mounted) {
+      try {
+        await ProductRepository().updateProduct(productId, {
+          'image_urls': _photos
+              .map((ph) => ph.url)
+              .whereType<String>()
+              .toList(),
+        });
+      } catch (_) {
+        // The next Save writes the list again.
+      }
+    }
   }
 
   @override
@@ -527,8 +748,11 @@ class _AdminProductEditScreenState
         ),
       );
     }
-    return PopScope(
-      canPop: !_loading,
+    // A blank form has no load step; take its baseline on first build.
+    _baseline ??= _fingerprint();
+    return DiscardChangesGuard(
+      dirty: _dirty,
+      busy: _loading,
       child: Scaffold(
         appBar: AppBar(
           title: Text(
@@ -552,59 +776,18 @@ class _AdminProductEditScreenState
               children: [
                 const _SectionLabel('PHOTOS'),
                 const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    for (var i = 0; i < _existingImageUrls.length; i++)
-                      _EditableThumbnail(
-                        onRemove: () => _removeExistingImage(i),
-                        child: Image.network(
-                          _existingImageUrls[i],
-                          width: 80,
-                          height: 80,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const SizedBox(
-                            width: 80,
-                            height: 80,
-                            child: Icon(Icons.broken_image_outlined),
-                          ),
-                        ),
-                      ),
-                    for (var i = 0; i < _newImages.length; i++)
-                      _EditableThumbnail(
-                        onRemove: () => _removeNewImage(i),
-                        child: Image.file(
-                          File(_newImages[i].path),
-                          width: 80,
-                          height: 80,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    InkWell(
-                      onTap: _pickImages,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                      child: Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).surfaceMuted,
-                          borderRadius: BorderRadius.circular(AppRadius.sm),
-                          border: Border.all(
-                            color: AppPalette.of(context).border,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.add_a_photo_outlined,
-                          color: AppPalette.of(context).textMuted,
-                        ),
-                      ),
-                    ),
-                  ],
+                _PhotoStrip(
+                  photos: _photos,
+                  enabled: !_loading,
+                  onAdd: _pickImages,
+                  onRemove: _removePhoto,
+                  onMakeCover: _makeCover,
+                  onRetry: _retryPhoto,
+                  onReorder: _reorderPhotos,
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Tap a photo\'s × to remove it. First photo is the cover image.',
+                  'First photo is the cover. Hold and drag to reorder, or tap a photo for Make cover / Remove.',
                   style: TextStyle(
                     fontSize: 11.5,
                     color: AppPalette.of(context).textMuted,
@@ -615,12 +798,16 @@ class _AdminProductEditScreenState
                 const SizedBox(height: AppSpacing.sm),
                 TextFormField(
                   controller: _nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Name'),
+                  decoration: const InputDecoration(
+                    labelText: 'Name',
+                    helperText: 'Required',
+                  ),
                   validator: (v) =>
                       (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 DropdownButtonFormField<ProductCategory>(
+                  key: ValueKey('category-${_category.name}'),
                   isExpanded: true,
                   itemHeight: math.max(
                     kMinInteractiveDimension,
@@ -632,8 +819,7 @@ class _AdminProductEditScreenState
                     for (final c in ProductCategory.values)
                       DropdownMenuItem(value: c, child: Text(categoryLabel(c))),
                   ],
-                  onChanged: (v) =>
-                      setState(() => _category = v ?? ProductCategory.koi),
+                  onChanged: (v) => _changeCategory(v ?? ProductCategory.koi),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
@@ -818,12 +1004,35 @@ class _AdminProductEditScreenState
                         labelHint: isLiveFish ? 'e.g. Kohaku' : 'e.g. 1kg',
                         onLabelChanged: (_) => setState(() {}),
                         onRemove: () => _removeVariantRow(i),
+                        onDuplicate: isLiveFish
+                            ? null
+                            : () => _duplicateVariantRow(i),
                       ),
                     ),
+                  if (!isLiveFish) ...[
+                    // The bag sizes this shop actually stocks.
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.xs,
+                      children: [
+                        for (final kg in const [0.5, 1.0, 2.0, 5.0, 10.0, 15.0])
+                          ActionChip(
+                            avatar: const Icon(Icons.add, size: 16),
+                            label: Text(
+                              _optionLabelFromKg(kg.toString()) ?? '',
+                            ),
+                            onPressed: () => _addWeightChip(kg),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
                   OutlinedButton.icon(
                     onPressed: _addVariantRow,
                     icon: const Icon(Icons.add, size: 18),
-                    label: Text(isLiveFish ? 'Add Fish Option' : 'Add Weight'),
+                    label: Text(
+                      isLiveFish ? 'Add Fish Option' : 'Add custom option',
+                    ),
                   ),
                 ],
                 if (supportsSizeMatrix) ...[
@@ -944,13 +1153,22 @@ class _AdminProductEditScreenState
                 ElevatedButton(
                   onPressed: _loading ? null : _save,
                   child: _loading
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.white,
-                          ),
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.white,
+                              ),
+                            ),
+                            if (_uploadNote != null) ...[
+                              const SizedBox(width: 10),
+                              Text(_uploadNote!),
+                            ],
+                          ],
                         )
                       : const Text('Save'),
                 ),
@@ -987,37 +1205,284 @@ class _SectionLabel extends StatelessWidget {
 
 /// Image thumbnail with a small remove ("×") badge — the picker previously
 /// had no way to drop a photo short of deleting the whole product.
-class _EditableThumbnail extends StatelessWidget {
-  final Widget child;
-  final VoidCallback onRemove;
-  const _EditableThumbnail({required this.child, required this.onRemove});
+enum _PhotoStatus { ready, uploading, failed }
+
+class _Photo {
+  String? url;
+  final XFile? file;
+  _PhotoStatus status = _PhotoStatus.ready;
+  _Photo.uploaded(String this.url) : file = null;
+  _Photo.local(XFile this.file) : url = null;
+}
+
+/// Horizontal, reorderable photo strip: cover badge on the first tile,
+/// upload state per tile, long-press to drag, tap for actions.
+class _PhotoStrip extends StatelessWidget {
+  final List<_Photo> photos;
+  final bool enabled;
+  final VoidCallback onAdd;
+  final ValueChanged<_Photo> onRemove;
+  final ValueChanged<_Photo> onMakeCover;
+  final ValueChanged<_Photo> onRetry;
+  final void Function(int from, int to) onReorder;
+  const _PhotoStrip({
+    required this.photos,
+    required this.enabled,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onMakeCover,
+    required this.onRetry,
+    required this.onReorder,
+  });
+
+  static const _tile = 88.0;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          child: child,
-        ),
-        Positioned(
-          right: -6,
-          top: -6,
-          child: Material(
-            color: AppColors.black,
-            shape: const CircleBorder(),
+    final palette = AppPalette.of(context);
+    return SizedBox(
+      height: _tile + 8,
+      child: Row(
+        children: [
+          Expanded(
+            child: ReorderableListView.builder(
+              scrollDirection: Axis.horizontal,
+              buildDefaultDragHandles: false,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              proxyDecorator: (child, _, _) => Material(
+                color: Colors.transparent,
+                elevation: 6,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: child,
+              ),
+              itemCount: photos.length,
+              onReorderItem: enabled ? onReorder : (_, _) {},
+              itemBuilder: (context, i) {
+                final photo = photos[i];
+                return Padding(
+                  key: ValueKey(photo),
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: ReorderableDelayedDragStartListener(
+                    index: i,
+                    enabled: enabled,
+                    child: _PhotoTile(
+                      photo: photo,
+                      isCover: i == 0,
+                      enabled: enabled,
+                      onRemove: () => onRemove(photo),
+                      onMakeCover: i == 0 ? null : () => onMakeCover(photo),
+                      onRetry: () => onRetry(photo),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: 'Add photos',
             child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: onRemove,
-              child: const Padding(
-                padding: EdgeInsets.all(4),
-                child: Icon(Icons.close, size: 14, color: AppColors.white),
+              onTap: enabled ? onAdd : null,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Container(
+                width: _tile,
+                height: _tile,
+                decoration: BoxDecoration(
+                  color: palette.surfaceMuted,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(color: palette.border),
+                ),
+                child: Icon(
+                  Icons.add_a_photo_outlined,
+                  color: palette.textMuted,
+                ),
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PhotoTile extends StatelessWidget {
+  final _Photo photo;
+  final bool isCover;
+  final bool enabled;
+  final VoidCallback onRemove;
+  final VoidCallback? onMakeCover;
+  final VoidCallback onRetry;
+  const _PhotoTile({
+    required this.photo,
+    required this.isCover,
+    required this.enabled,
+    required this.onRemove,
+    required this.onMakeCover,
+    required this.onRetry,
+  });
+
+  Future<void> _showActions(BuildContext context) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (photo.status == _PhotoStatus.failed)
+              ListTile(
+                leading: const Icon(Icons.refresh),
+                title: const Text('Retry upload'),
+                onTap: () => Navigator.pop(ctx, 'retry'),
+              ),
+            if (onMakeCover != null)
+              ListTile(
+                leading: const Icon(Icons.star_outline),
+                title: const Text('Make cover photo'),
+                onTap: () => Navigator.pop(ctx, 'cover'),
+              ),
+            ListTile(
+              leading: Icon(
+                Icons.delete_outline,
+                color: AppPalette.of(ctx).error,
+              ),
+              title: Text(
+                'Remove photo',
+                style: TextStyle(color: AppPalette.of(ctx).error),
+              ),
+              onTap: () => Navigator.pop(ctx, 'remove'),
+            ),
+          ],
         ),
-      ],
+      ),
+    );
+    switch (action) {
+      case 'retry':
+        onRetry();
+      case 'cover':
+        onMakeCover?.call();
+      case 'remove':
+        onRemove();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final Widget image = photo.url != null
+        ? SizedNetworkImage(
+            imageUrl: photo.url!,
+            fit: BoxFit.cover,
+            errorWidget: (_, _, _) => ColoredBox(
+              color: palette.surfaceMuted,
+              child: const Icon(Icons.broken_image_outlined),
+            ),
+          )
+        : Image.file(File(photo.file!.path), fit: BoxFit.cover);
+    final status = photo.status;
+    return Semantics(
+      button: true,
+      label:
+          '${isCover ? 'Cover photo' : 'Photo'}'
+          '${status == _PhotoStatus.failed ? ', upload failed' : ''}'
+          '${status == _PhotoStatus.uploading ? ', uploading' : ''}',
+      child: InkWell(
+        onTap: enabled ? () => _showActions(context) : null,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: SizedBox(
+          width: _PhotoStrip._tile,
+          height: _PhotoStrip._tile,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                image,
+                if (isCover)
+                  Positioned(
+                    left: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.black.withValues(alpha: 0.75),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
+                      child: const Text(
+                        'Cover',
+                        style: TextStyle(
+                          color: AppColors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (status == _PhotoStatus.uploading)
+                  const ColoredBox(
+                    color: Color(0x80000000),
+                    child: Center(
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                if (status == _PhotoStatus.failed)
+                  ColoredBox(
+                    color: AppColors.error.withValues(alpha: 0.78),
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.refresh, color: AppColors.white),
+                          SizedBox(height: 2),
+                          Text(
+                            'Retry',
+                            style: TextStyle(
+                              color: AppColors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (photo.url == null && status == _PhotoStatus.ready)
+                  Positioned(
+                    right: 4,
+                    bottom: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.white.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
+                      child: const Text(
+                        'New',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.black,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1075,6 +1540,7 @@ class _VariantRow {
 class _VariantEditRow extends StatelessWidget {
   final _VariantRow row;
   final VoidCallback onRemove;
+  final VoidCallback? onDuplicate;
   final bool hideStock;
   final bool showShippingWeight;
   final String labelHint;
@@ -1082,6 +1548,7 @@ class _VariantEditRow extends StatelessWidget {
   const _VariantEditRow({
     required this.row,
     required this.onRemove,
+    this.onDuplicate,
     this.hideStock = false,
     this.showShippingWeight = false,
     this.labelHint = 'e.g. 1kg',
@@ -1128,14 +1595,29 @@ class _VariantEditRow extends StatelessWidget {
       keyboardType: TextInputType.number,
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
     );
-    final remove = IconButton(
-      tooltip: 'Remove option',
-      icon: Icon(
-        Icons.close,
-        size: 18,
-        color: AppPalette.of(context).textMuted,
-      ),
-      onPressed: onRemove,
+    final remove = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (onDuplicate != null)
+          IconButton(
+            tooltip: 'Duplicate option',
+            icon: Icon(
+              Icons.copy_outlined,
+              size: 18,
+              color: AppPalette.of(context).textMuted,
+            ),
+            onPressed: onDuplicate,
+          ),
+        IconButton(
+          tooltip: 'Remove option',
+          icon: Icon(
+            Icons.close,
+            size: 18,
+            color: AppPalette.of(context).textMuted,
+          ),
+          onPressed: onRemove,
+        ),
+      ],
     );
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
@@ -1213,10 +1695,32 @@ class _VariantEditRow extends StatelessWidget {
               );
             },
           ),
-          if (showShippingWeight) ...[
-            const SizedBox(height: AppSpacing.sm),
-            _PackedSizeFields(controllers: row.packedSize),
-          ],
+          if (showShippingWeight)
+            // Nobody fills packed dimensions per bag on a normal restock;
+            // the shop-level default in Settings covers it. Keep the
+            // fields one tap away for the odd oversized item.
+            // Its own Material: the row card is a plain decorated box, so
+            // the tile's ink would otherwise be painted underneath it.
+            Material(
+              type: MaterialType.transparency,
+              child: Theme(
+                data: Theme.of(context)
+                    .copyWith(dividerColor: Colors.transparent),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  initiallyExpanded: row.packedSize.value != null,
+                  title: Text(
+                    'Advanced: packed size',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: AppPalette.of(context).textMuted,
+                    ),
+                  ),
+                  children: [_PackedSizeFields(controllers: row.packedSize)],
+                ),
+              ),
+            ),
         ],
       ),
     );

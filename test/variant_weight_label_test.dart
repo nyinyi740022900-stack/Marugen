@@ -94,13 +94,13 @@ void main() {
       category.onChanged!(ProductCategory.fishFood);
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('Add Weight'),
+        find.text('Add custom option'),
         250,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.ensureVisible(find.text('Add Weight'));
+      await tester.ensureVisible(find.text('Add custom option'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Add Weight'));
+      await tester.tap(find.text('Add custom option'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(field('kg').last);
       await tester.enterText(field('kg').last, '0.5');

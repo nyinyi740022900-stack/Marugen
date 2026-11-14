@@ -13,6 +13,8 @@ import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../services/presentation/service_providers.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/sheet_header.dart';
+import '../../../shared/widgets/discard_changes_guard.dart';
 
 /// "Services" tab inside admin Knowledge — farm services like fish
 /// recovery/quarantine or pond-renovation boarding, shown to customers
@@ -116,7 +118,8 @@ class AdminServicesTab extends ConsumerWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      showDragHandle: true,
+      isDismissible: false,
+      enableDrag: false,
       builder: (_) => _ServiceFormSheet(existing: existing),
     );
   }
@@ -150,6 +153,18 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
   bool _submitted = false;
   String? _saveError;
   late String? _savedId = widget.existing?.id;
+  String? _baseline;
+
+  String _fingerprint() => [
+    _nameCtrl.text,
+    _descCtrl.text,
+    _priceCtrl.text,
+    _categoryCtrl.text,
+    _showPrice,
+    _active,
+    _existingImageUrls.join(','),
+    _newImages.map((f) => f.path).join(','),
+  ].join('\u0001');
 
   @override
   void initState() {
@@ -251,177 +266,181 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: AppSpacing.xl,
-        right: AppSpacing.xl,
-        top: AppSpacing.xl,
-        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.xl,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.existing == null ? 'Add Service' : 'Edit Service',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            TextField(
-              controller: _nameCtrl,
-              decoration: InputDecoration(
-                errorText: _submitted && _nameCtrl.text.trim().isEmpty
-                    ? 'Enter a service name.'
-                    : null,
-                errorMaxLines: 3,
-                labelText: 'Service name',
-                hintText: 'e.g. Fish Recovery & Quarantine',
+    _baseline ??= _fingerprint();
+    return DiscardChangesGuard(
+      dirty: _fingerprint() != _baseline,
+      busy: _saving,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: AppSpacing.xl,
+          right: AppSpacing.xl,
+          top: AppSpacing.xl,
+          bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.xl,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SheetHeader(
+                widget.existing == null ? 'Add Service' : 'Edit Service',
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _categoryCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Category (optional)',
-                hintText: 'e.g. Health Care',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _descCtrl,
-              decoration: const InputDecoration(labelText: 'Description'),
-              maxLines: 4,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _priceCtrl,
-              decoration: InputDecoration(
-                errorText:
-                    _submitted &&
-                        _priceCtrl.text.trim().isNotEmpty &&
-                        (double.tryParse(_priceCtrl.text.trim()) == null ||
-                            !double.parse(_priceCtrl.text.trim()).isFinite ||
-                            double.parse(_priceCtrl.text.trim()) < 0)
-                    ? 'Enter a valid price of 0 or more.'
-                    : null,
-                errorMaxLines: 3,
-                labelText: 'Price (SGD, optional)',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(
-                decimal: true,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Show price to customers'),
-              subtitle: const Text('Off = "Contact for price"'),
-              value: _showPrice,
-              onChanged: (v) => setState(() => _showPrice = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Active'),
-              subtitle: const Text('Off hides this from customers'),
-              value: _active,
-              onChanged: (v) => setState(() => _active = v),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'PHOTOS',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final url in _existingImageUrls)
-                  Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                        child: Image.network(
-                          url,
-                          width: 72,
-                          height: 72,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const SizedBox(
-                            width: 72,
-                            height: 72,
-                            child: Icon(Icons.broken_image_outlined),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        top: -6,
-                        right: -6,
-                        child: IconButton(
-                          icon: Icon(
-                            Icons.cancel,
-                            size: 18,
-                            color: AppPalette.of(context).error,
-                          ),
-                          onPressed: () =>
-                              setState(() => _existingImageUrls.remove(url)),
-                        ),
-                      ),
-                    ],
-                  ),
-                for (final img in _newImages)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                    child: SizedBox(
-                      width: 72,
-                      height: 72,
-                      child: _PickedImageThumb(file: img),
-                    ),
-                  ),
-                GestureDetector(
-                  onTap: _pickImages,
-                  child: Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).surfaceMuted,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                    ),
-                    child: Icon(
-                      Icons.add_a_photo_outlined,
-                      color: AppPalette.of(context).textMuted,
-                    ),
-                  ),
+              const SizedBox(height: AppSpacing.lg),
+              TextField(
+                controller: _nameCtrl,
+                decoration: InputDecoration(
+                  errorText: _submitted && _nameCtrl.text.trim().isEmpty
+                      ? 'Enter a service name.'
+                      : null,
+                  errorMaxLines: 3,
+                  labelText: 'Service name',
+                  hintText: 'e.g. Fish Recovery & Quarantine',
                 ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            if (_saveError != null) ...[
-              Text(
-                _saveError!,
-                style: TextStyle(color: AppPalette.of(context).error),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _categoryCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Category (optional)',
+                  hintText: 'e.g. Health Care',
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _descCtrl,
+                decoration: const InputDecoration(labelText: 'Description'),
+                maxLines: 4,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _priceCtrl,
+                decoration: InputDecoration(
+                  errorText:
+                      _submitted &&
+                          _priceCtrl.text.trim().isNotEmpty &&
+                          (double.tryParse(_priceCtrl.text.trim()) == null ||
+                              !double.parse(_priceCtrl.text.trim()).isFinite ||
+                              double.parse(_priceCtrl.text.trim()) < 0)
+                      ? 'Enter a valid price of 0 or more.'
+                      : null,
+                  errorMaxLines: 3,
+                  labelText: 'Price (SGD, optional)',
+                ),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
               ),
               const SizedBox(height: AppSpacing.sm),
-            ],
-            ElevatedButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.white,
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Show price to customers'),
+                subtitle: const Text('Off = "Contact for price"'),
+                value: _showPrice,
+                onChanged: (v) => setState(() => _showPrice = v),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Active'),
+                subtitle: const Text('Off hides this from customers'),
+                value: _active,
+                onChanged: (v) => setState(() => _active = v),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(
+                'PHOTOS',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  letterSpacing: 0.8,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final url in _existingImageUrls)
+                    Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                          child: Image.network(
+                            url,
+                            width: 72,
+                            height: 72,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => const SizedBox(
+                              width: 72,
+                              height: 72,
+                              child: Icon(Icons.broken_image_outlined),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: -6,
+                          right: -6,
+                          child: IconButton(
+                            icon: Icon(
+                              Icons.cancel,
+                              size: 18,
+                              color: AppPalette.of(context).error,
+                            ),
+                            onPressed: () =>
+                                setState(() => _existingImageUrls.remove(url)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  for (final img in _newImages)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      child: SizedBox(
+                        width: 72,
+                        height: 72,
+                        child: _PickedImageThumb(file: img),
                       ),
-                    )
-                  : const Text('Save'),
-            ),
-          ],
+                    ),
+                  GestureDetector(
+                    onTap: _pickImages,
+                    child: Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).surfaceMuted,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: Icon(
+                        Icons.add_a_photo_outlined,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              if (_saveError != null) ...[
+                Text(
+                  _saveError!,
+                  style: TextStyle(color: AppPalette.of(context).error),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+              ElevatedButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
+                      )
+                    : const Text('Save'),
+              ),
+            ],
+          ),
         ),
       ),
     );

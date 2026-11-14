@@ -20,11 +20,39 @@ import '../payments/admin_payments_screen.dart';
 import '../../../shared/utils/error_message.dart';
 
 /// Orders hub: status list + fulfillment (ex-Delivery) + payments ledger.
-class AdminOrdersScreen extends ConsumerWidget {
+class AdminOrdersScreen extends ConsumerStatefulWidget {
   const AdminOrdersScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AdminOrdersScreen> createState() => _AdminOrdersScreenState();
+}
+
+class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen>
+    with SingleTickerProviderStateMixin {
+  late final _tabs = TabController(length: 3, vsync: this);
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<int?>(requestedOrdersTabProvider, (_, next) {
+      if (next == null) return;
+      _tabs.animateTo(next);
+      ref.read(requestedOrdersTabProvider.notifier).state = null;
+    });
+    // A request made before this screen was built (first Home tap).
+    final pending = ref.read(requestedOrdersTabProvider);
+    if (pending != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _tabs.animateTo(pending);
+        ref.read(requestedOrdersTabProvider.notifier).state = null;
+      });
+    }
     return DefaultTabController(
       length: 3,
       child: Scaffold(
@@ -55,6 +83,7 @@ class AdminOrdersScreen extends ConsumerWidget {
                 final scrollable =
                     (widestLabel + 32) * labels.length > constraints.maxWidth;
                 return TabBar(
+                  controller: _tabs,
                   isScrollable: scrollable,
                   tabAlignment: scrollable
                       ? TabAlignment.start
@@ -66,8 +95,9 @@ class AdminOrdersScreen extends ConsumerWidget {
             ),
           ),
         ),
-        body: const TabBarView(
-          children: [
+        body: TabBarView(
+          controller: _tabs,
+          children: const [
             _OrdersListPane(),
             AdminDeliveryPane(),
             AdminPaymentsPane(),
@@ -131,7 +161,7 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
             child: _AdminOrderSearchField(),
           ),
           SizedBox(
-            height: 52,
+            height: 32 + MediaQuery.textScalerOf(context).scale(20),
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(
@@ -452,16 +482,18 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                               ),
                             ),
                           ),
-                          InkWell(
-                            borderRadius: BorderRadius.circular(AppRadius.sm),
-                            onTap: () => _copyOrderId(context),
-                            child: Padding(
-                              padding: EdgeInsets.all(6),
-                              child: Icon(
-                                Icons.copy_rounded,
-                                size: 15,
-                                color: AppPalette.of(context).textMuted,
-                              ),
+                          IconButton(
+                            tooltip: 'Copy order number',
+                            visualDensity: VisualDensity.compact,
+                            constraints: const BoxConstraints(
+                              minWidth: 40,
+                              minHeight: 40,
+                            ),
+                            onPressed: () => _copyOrderId(context),
+                            icon: Icon(
+                              Icons.copy_rounded,
+                              size: 16,
+                              color: AppPalette.of(context).textMuted,
                             ),
                           ),
                         ],
@@ -567,7 +599,7 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                   runSpacing: AppSpacing.sm,
                   children: [
                     Text(
-                      'Total Purchase',
+                      'Order total',
                       style: TextStyle(
                         fontSize: 12.5,
                         color: AppPalette.of(context).textMuted,
@@ -707,6 +739,19 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
             .updateOrderStatus(widget.order.id, s);
       }
       refreshAdminOrders(ref);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                s == OrderStatus.refunded
+                    ? 'Refund requested for #${widget.order.displayNumber}'
+                    : '#${widget.order.displayNumber} → ${orderStatusLabel(s)}',
+              ),
+            ),
+          );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -860,7 +905,11 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
               OrderStatus.shipped,
             }.contains(status))
           TextButton.icon(
-            onPressed: () => DefaultTabController.of(context).animateTo(1),
+            onPressed: () {
+              ref.read(focusFulfillmentOrderProvider.notifier).state =
+                  widget.order.id;
+              ref.read(requestedOrdersTabProvider.notifier).state = 1;
+            },
             icon: const Icon(Icons.local_shipping_outlined),
             label: const Text('Manage delivery'),
           ),
@@ -872,12 +921,11 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
               for (final s in riskyStatuses)
                 TextButton(
                   onPressed: () => _moveTo(s),
+                  // Muted on purpose, but still a full-size target: these
+                  // are the irreversible ones.
                   style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 2,
-                    ),
+                    minimumSize: const Size(48, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
                     foregroundColor: AppPalette.of(context).textMuted,
                   ),
                   child: Text(

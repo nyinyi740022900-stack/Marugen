@@ -24,6 +24,7 @@ import '../../features/cart/domain/cart_item.dart';
 import '../../features/orders/presentation/checkout_screen.dart';
 import '../../features/orders/presentation/purchase_intent.dart';
 import '../../features/orders/presentation/order_detail_screen.dart';
+import '../../features/profile/presentation/address_book_screen.dart';
 import '../../features/shop/presentation/customer_shell.dart';
 import '../../features/shop/presentation/product_detail_screen.dart';
 import '../../features/support/faq_screen.dart';
@@ -149,7 +150,20 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/reset-password',
         builder: (_, _) => const ResetPasswordScreen(),
       ),
-      GoRoute(path: '/', builder: (_, _) => const CustomerShell()),
+      GoRoute(
+        path: '/',
+        // `/?tab=orders` after a guest signs in from the Orders tab lands
+        // them there instead of back on the shop grid.
+        builder: (_, state) => CustomerShell(
+          initialTab: switch (state.uri.queryParameters['tab']) {
+            'guide' => 1,
+            'orders' => 2,
+            'profile' => 3,
+            _ => null,
+          },
+        ),
+      ),
+      GoRoute(path: '/addresses', builder: (_, _) => const AddressBookScreen()),
       GoRoute(
         path: '/product/:id',
         builder: (_, state) =>

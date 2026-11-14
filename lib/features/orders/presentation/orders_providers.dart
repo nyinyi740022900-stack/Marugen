@@ -156,6 +156,22 @@ final adminOrdersProvider = FutureProvider<List<Order>>((ref) {
   return ref.watch(orderRepositoryProvider).fetchAllOrders(status: status);
 });
 
+/// Every order regardless of the Orders › All status chip — for the
+/// dashboard, the payments ledger and the top-products ranking, which must
+/// never quietly change because staff tapped "Shipped" in another tab.
+final adminAllOrdersProvider = FutureProvider<List<Order>>((ref) {
+  return ref.watch(orderRepositoryProvider).fetchAllOrders();
+});
+
+/// Order the Fulfillment tab should surface first — set by "Manage
+/// delivery" on an Orders › All card so staff land on the order they were
+/// looking at instead of the top of the queue.
+final focusFulfillmentOrderProvider = StateProvider<String?>((ref) => null);
+
+/// Asks the Orders hub to switch to a tab (0 All, 1 Fulfillment,
+/// 2 Payments) the next time it is shown — set by the Home queue counters.
+final requestedOrdersTabProvider = StateProvider<int?>((ref) => null);
+
 /// Never inherits the All-tab status filter: all outstanding deliveries stay visible.
 final fulfillmentOrdersProvider = FutureProvider<List<Order>>((ref) {
   return ref.watch(orderRepositoryProvider).fetchFulfillmentOrders();
@@ -194,6 +210,7 @@ final adminOrderSummaryProvider = FutureProvider<AdminOrderSummary>((ref) {
 
 void refreshAdminOrders(WidgetRef ref) {
   ref.invalidate(adminOrdersProvider);
+  ref.invalidate(adminAllOrdersProvider);
   ref.invalidate(adminOrderSummaryProvider);
   ref.invalidate(fulfillmentOrdersProvider);
   ref.read(adminOrdersPagedProvider.notifier).refresh();

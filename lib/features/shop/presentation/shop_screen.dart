@@ -11,6 +11,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/notification_bell_button.dart';
 import '../../../shared/widgets/skeleton.dart';
+import '../../banners/presentation/hero_banner_carousel.dart';
 import '../../cart/presentation/cart_providers.dart';
 import 'shop_providers.dart';
 
@@ -123,6 +124,7 @@ class ShopScreen extends ConsumerWidget {
                 return RefreshIndicator.adaptive(
                   onRefresh: () => ref.refresh(productListProvider.future),
                   child: ProductGrid(
+                    header: const HeroBannerCarousel(),
                     itemCount: products.length,
                     itemBuilder: (context, i) => ProductCard(
                       product: products[i],
@@ -131,7 +133,8 @@ class ShopScreen extends ConsumerWidget {
                   ),
                 );
               },
-              loading: () => const ProductGridSkeleton(),
+              loading: () =>
+                  const ProductGridSkeleton(header: HeroBannerCarousel()),
               error: (e, _) => ErrorState(
                 onRetry: () => ref.invalidate(productListProvider),
               ),

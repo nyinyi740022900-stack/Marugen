@@ -196,26 +196,46 @@ class ProductCard extends ConsumerWidget {
                       const SizedBox(height: 4),
                       // Price gets the full content width. A touch target must
                       // never take space away from the amount being purchased.
-                      if (product.hasActiveSale)
-                        Text(
-                          formatPrice(product.price!),
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: AppPalette.of(context).textMuted,
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                      Text(
-                        product.hasActiveSale
-                            ? formatPrice(product.salePrice!)
-                            : _priceLabel(product),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: product.isPurchasable
-                              ? AppPalette.of(context).accent
-                              : AppPalette.of(context).textMuted,
-                          fontSize: 14,
-                        ),
+                      // The price may wrap (it must never be cut short); on
+                      // sale the original sits struck through beside it at
+                      // normal text sizes — at large sizes the -N% tag on
+                      // the photo already says it, so the body stays one
+                      // height for every card.
+                      Builder(
+                        builder: (context) {
+                          final priceText = Text(
+                            product.hasActiveSale
+                                ? formatPrice(product.salePrice!)
+                                : _priceLabel(product),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: product.isPurchasable
+                                  ? AppPalette.of(context).accent
+                                  : AppPalette.of(context).textMuted,
+                              fontSize: 14,
+                            ),
+                          );
+                          final showOriginal =
+                              product.hasActiveSale &&
+                              MediaQuery.textScalerOf(context).scale(14) <=
+                                  14 * 1.3;
+                          if (!showOriginal) return priceText;
+                          return Wrap(
+                            spacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.end,
+                            children: [
+                              priceText,
+                              Text(
+                                formatPrice(product.price!),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppPalette.of(context).textMuted,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 4),
                       Row(

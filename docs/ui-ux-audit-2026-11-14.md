@@ -1,0 +1,97 @@
+# UI/UX audit — customer + admin — 14 November 2026
+
+Branch `codex/whole-app-audit-fixes` (= `main` after PR #3). Read-only: no code changed. Method: four parallel reviewers (customer browse, customer purchase/account, admin operations, admin catalog/content) read every screen under `lib/features` (~24k lines) against Nielsen's heuristics, the e-commerce buy-path checklist and the prior audits (`whole-app-audit-2026-10-30.md`, `ui-page-review-2026-10-23.md`, `ui-final-*.md`); the five most consequential findings were re-verified by hand in the source. The Impeccable detector found nothing (it scans markup, not Dart). Screens were not re-driven on a device this round.
+
+## Store classification
+
+Single-brand farm shop (Marugen, Singapore). Unique live fish (koi/arowana, 1-of-1, hand-delivered) plus commodity fish food (weight × size variants) and accessories. Online Stripe payment, EasyParcel courier, verified-purchase reviews (delivered only). Admin = owner + 1–2 staff on phone and iPad.
+
+## Executive verdict
+
+The buy path is shippable and, after the October work, structurally sound: cart persistence, stock caps, idempotent payment, server-confirmed orders, delivered-only reviews and honest refund copy all pass. What remains is **finish, not architecture**. On the customer side the biggest risks are two moments where the app tells the shopper something false (an "Out of Stock" line between picking a weight and a size; a dismissed-payment message that sends them to look for a hidden order). On the admin side the biggest risk is a **data-display bug**: Home, Payments and Top Products silently follow whichever status chip staff last tapped in Orders, so the dashboard can lie. Beyond those, admin forms have no unsaved-changes guard anywhere, and the Fulfillment tab — the screen staff live in — is a flat list with its primary action buried under two print buttons.
+
+Heuristic totals (0–4 each, 10 heuristics): customer browse **31/40**, customer purchase/account **27/40**, admin ops **23/40**, admin catalog/content **21/40**. Customer side is good; admin side is where the hours are.
+
+## Buy-path scorecard
+
+| Step | Status | Evidence |
+|---|---|---|
+| Card CTAs | PASS (weak spot) | image/name/price or Contact; quick-add / bolt Buy Now / chat per type (`product_card.dart:262-296`); live-fish CTA is icon-only |
+| PDP CTAs | PASS (1 bug) | sticky bar, Select Options → Add/Buy; stock line wrong between weight and size (`product_detail_screen.dart:1096-1110`) |
+| Cart | PASS | persisted per user, guest merge, live fish ×1, qty clamped, revalidated on open |
+| Checkout / payment | PASS (copy bug) | server total, idempotency key, cart cleared only after confirmed paid; dismissed-payment copy misleading (`checkout_screen.dart:459`) |
+| Orders | PASS | tabs, timeline that never invents steps, Complete payment, cancellation request |
+| Reviews | PASS | `delivered` only (`review_repository.dart:87`, migration 0075); admin cannot see which product a review is for |
+| Chat | PARTIAL | product-scoped message ✓ but PDP/card go to `shop_phone` while FAQ goes to the support directory — two systems |
+
+## P0 — fix first (wrong information or data loss)
+
+- [ ] **Admin dashboard follows the Orders status chip.** `adminOrdersProvider` watches `adminOrderStatusFilterProvider` (`orders_providers.dart:154-157`); Dashboard (`admin_dashboard_screen.dart:23`), Payments (`admin_payments_screen.dart:17`) and Top Products (`admin_top_products_screen.dart:16`) all read it. Tap "Shipped" in Orders › All and Home's Recent Orders, Top Products, Stuck-Pending and the "Collected after refunds" total all change silently. → Add an unfiltered `adminAllOrdersProvider` for those three. **S**
+- [ ] **PDP says "Out of Stock" after a weight is chosen but before a size.** `_StockLine` uses 0 when `size == null` (`product_detail_screen.dart:1096-1099`), and `Product.stockFor(size: null)` returns 0 (`product.dart:297-299`) while `ProductVariant.stockForSize(null)` returns the row total. Reproduced on the simulator on 8 Nov. → Show the weight's `effectiveStock` with "Select a size"; align the two helpers. **S**
+- [ ] **No unsaved-changes guard on any admin form.** Product editor `PopScope(canPop: !_loading)` only blocks during save (`admin_product_edit_screen.dart:530-531`); Settings, Variety, Guide, Service and Promo sheets dismiss on drag/back and discard everything. → Shared dirty-tracking + "Discard changes?"; sheets `isDismissible: false` when dirty. **M**
+- [ ] **Settings save swallows failures.** `_save` has `finally` but no `catch` (`admin_settings_screen.dart:193-266`): a network/RLS error shows nothing, and GST %, GST-included, delivery min/max and sender postcode are unvalidated free text that feed every checkout total and quote. → catch + `friendlyErrorMessage`; validate GST 0–100, min ≤ max, 6-digit postcode; confirm on GST change. **S**
+- [ ] **Photo upload is opaque and brittle.** Sequential uploads with only a spinner in the Save button (`admin_product_edit_screen.dart:362-378`, `:946-955`); one failure aborts the loop after the product row is already inserted with `image_urls: []`, leaving a visible product with no photos. → per-photo state + "Uploading 3 of 8", retry per file, keep the product hidden until the first save completes. **L**
+- [ ] **Admin review cards don't name the product.** Card shows avatar, masked name, stars, date, comment only (`admin_reviews_screen.dart:163-215`); query joins `profiles` only (`review_repository.dart:41-44`). The owner cannot reply to "Great koi!" without knowing which koi. → join `products(name, image_urls)`, show thumbnail + name, unmask customer for admin. **S–M**
+
+## P1 — should have (conversion, ops time, accessibility)
+
+Customer
+- [ ] Dismissed-payment copy "Your items are saved. Check Orders before trying again." (`checkout_screen.dart:459`) contradicts the code, which cancels the pending order (`:452`) and hides cancelled checkouts by default (`orders_providers.dart:125`). → "No payment was taken. Your cart is unchanged — tap Pay when you're ready." **S**
+- [ ] New address added during checkout is not auto-selected (`checkout_screen.dart:575-583`; `_selectedAddressId` untouched). First-time buyers hit this every time. → return the created id from `AddressForm` and select it. **S**
+- [ ] Order detail money is fragmented: items/promo/total in one card, "Delivery: S$x" as a bare `Text` (`order_detail_screen.dart:378`), GST never shown, Stripe `pi_…` id shown to customers (`:296-306`), refunds formatted with `toStringAsFixed` (`:314,317`). → one totals block mirroring checkout; hide the PI id for non-admin. **M**
+- [ ] Auth forms don't work with password managers: no `AutofillGroup`/`autofillHints`, `autocorrect` on (`login_screen.dart:251-305`, `signup_screen.dart:119-167`, forgot/reset); email check is `contains('@')`. **S**
+- [ ] Checkout a11y: address choice is a `ListTile` + icon with no radio semantics (`checkout_screen.dart:725-740`); `_error` banner has no `liveRegion` (`:1095-1111`). **S**
+- [ ] Variant PDP shows "Select an option" where the price was (`product_detail_screen.dart:708-715`) — the "From S$X" anchor the card showed disappears on the page where the decision is made. → keep "From S$X" until a variant is chosen. **S**
+- [ ] Live-fish card CTA is an icon-only bolt (`product_card.dart:281-293`); sale badge never shows on live fish because of `else if` (`:88-103`); card omits `sizeCm`, the #1 koi attribute, while showing a courier window that is wrong for hand-delivered fish. → "Buy" pill; stack tags; "Kohaku · 45 cm" line for fish. **S**
+- [ ] Guide articles render `bodyMarkdown` with plain `Text` (`knowledge_screen.dart:558, 602`) — `#` and `**` appear raw. No markdown package in `pubspec.yaml`. → add `flutter_markdown` (or strip syntax in previews). **S/M**
+- [ ] Order list cards show number/badge/date/total only (`orders_screen.dart:135-191`) — no item name/thumbnail, no "Pay now" on pending. **M**
+- [ ] Guest → login loses place: `GuestAccountState` without `returnTo` on Orders/Profile/Address book; order detail "Sign In" uses `context.go('/login')`; Delivery Addresses pushed via `MaterialPageRoute` bypassing GoRouter (`profile_screen.dart:265-274`). **S**
+
+Admin
+- [ ] Home is not a work queue: no counts for To pack / To ship / In transit / Needs attention / **Cancellation requests** (requests are visible only per card and actionable only inside `/orders/:id`). "Pending Orders" counts `pending + paid` (migration 0074:23) and collides with the "Pending" chip. → tappable counters that deep-link into a segmented Fulfillment. **M**
+- [ ] Fulfillment card order: header, cost, address, items, remarks, Open order, parcel panel, diagnostics, tracking, Print label, Print slip, *then* the primary action (`admin_delivery_screen.dart:374-538`); one flat list of paid+packing+shipped with no segments or search. → status + primary action first; icon row for Open/Print; `SegmentedButton` To pack / To ship / In transit / Attention. **M**
+- [ ] Single-parcel "Book Shipment" books immediately from the rate sheet with no cost confirmation (`admin_delivery_screen.dart:778-786`) while multi-parcel shows courier / customer paid / shop covers (`parcel_fulfillment_panel.dart:145-167`). → reuse the dialog. **S**
+- [ ] "Manage delivery" is `animateTo(1)` (`admin_orders_screen.dart:862-866`): staff land at the top of Fulfillment and re-find the order. → pass `orderId`, scroll to and highlight. **S**
+- [ ] Payments rows show a truncated `pi_…`, date and amount with no order number, customer or tap target (`admin_payments_screen.dart:165-215`, `:230-267`). → merge into Orders (payment line on the All card, copyable PI + "Open in Stripe" in detail); delete the pane. **M**
+- [ ] Variant entry for 9 weights × 2 sizes is ~50 interactions incl. 27 unused packed-size fields (`admin_product_edit_screen.dart:811-908`, `:1216-1219`). → packed size behind "Advanced", Duplicate row, quick-add weight chips. **M**
+- [ ] Product photos: no reorder, no cover pick, new photos always append (`:555-607`, `:363-370`). Required fields unmarked; validation only on Save with no scroll-to-error; category switch silently drops fish details (`:345`). **M**
+- [ ] Guides "Publish" with no draft state (`admin_article_form.dart:205`); Markdown field unlabeled, no preview; Knowledge toggle/delete have no try/catch or feedback (`admin_knowledge_screen.dart:92-97, 113-116`). **S**
+- [ ] Promo: delete allowed with `timesRedeemed > 0` (`admin_promo_screen.dart:81-91`), no start date / min subtotal, no "Copy code". **M (schema)**
+- [ ] Analytics bars 60 px with 9 px labels, no values, no date-range label (`admin_analytics_screen.dart:344-361`); Monthly total and 180-day top products cover different windows. **S–M**
+- [ ] Success feedback and targets: no snackbar after status change/booking/label; refund/cancel are 11.5 px text buttons (`admin_orders_screen.dart:873-890`); sold-toggle ≈28 pt on a tappable card (`admin_products_screen.dart:366-372`); "See all" is a bare `GestureDetector` (`admin_dashboard_screen.dart:152-162`); 52 pt chip strip clips at large text (`admin_orders_screen.dart:133`). **S**
+
+## P2 — polish (batch into one pass)
+
+Customer: cart "Total" lacks "Delivery & GST at checkout" caption and line subtotals; "GST (0%) S$0.00" row; `OrderSuccessScreen` is unrouted dead code; two invoice actions in order detail; two delivery-estimate utils (device time vs SGT); sort state invisible on the grid, no result count; `ProductCardSkeleton` shorter than the card (layout jump); bare spinners in Services/Notifications/support picker; review form defaults to 5★ with unlabeled stars; support picker renders N×3 channel buttons; push-permission prompt on first launch before any order; wishlist renders blank cells for deleted products; raw URI on unknown-route screen; "CHECKOUT" caps vs Title Case; Apple HIG button on login but not signup; Google icon is `Icons.g_mobiledata`; Guide/Services thumbnails decode full-size images.
+
+Admin: dashboard rows show raw `status.name`; "Total Purchase" → "Order total"; EasyParcel "EPSAMPLE"/wallet diagnostics shown to all staff (`pickup_diagnostics_panel.dart`, "owner-only" per comment, no role check); two date-picker windows (30 vs 90 days); invoice and packing slip on different tabs; Top Products is all-time only; `show_price_default` setting is dead; controllers not disposed in product editor and settings; Settings order (Appearance first, Log Out directly under Save); `'ANALYTICS'` caps; three different photo-remove controls across forms; Services new photos cannot be removed.
+
+## Added the same day: home-screen hero banner carousel
+
+Owner request (14 Nov), built alongside this audit rather than queued behind it:
+
+- **Customer** — `HeroBannerCarousel` at the top of the Shop grid (`lib/features/banners/presentation/hero_banner_carousel.dart`, header slot on `ProductGrid`): auto-slide every 4 s, finger-driven swipe, pagination dots (tap to jump), photo + headline + subtitle + CTA pill, whole slide tappable; in-app paths (`/product/<id>`) push a route, `https://` opens outside. Auto-slide pauses while touching and for 6 s after, and is off under Reduce Motion. Takes no space when there are no live slides or the fetch fails.
+- **Admin** — More › Home Banners (`lib/features/admin/banners/admin_banners_screen.dart`): drag to reorder, show/hide switch, status (Live / Scheduled / Ended / Hidden), full-screen add/edit with live preview, photo, text, link, start/end date-time, unsaved-changes guard, delete with confirm.
+- **Data** — migration `0076_home_banners.sql`: `home_banners` table, RLS so shoppers only ever receive active slides inside their window (schedule enforced server-side), admins manage all; SQL suite `supabase/tests/run_home_banners.sh`; widget tests `test/hero_banner_carousel_test.dart`.
+- **Rollout** — 0076 applied to production (gexgcwdkbeythrnqmihe) on 2026-11-14 via `supabase db query --linked -f` after the owner re-ran `supabase login` (the stored CLI token had drifted to a non-Marugen account again — check `supabase projects list` first next time). Verified: table, 3 policies, `home_banner_is_live`, updated_at trigger, 0 rows. Slides still need adding in admin › More › Home Banners; the live 1.0.27 build predates the carousel, so customers see it from the next release.
+- **Also fixed** — product cards no longer end in a band of empty surface: `productCardExtent` now measures the real body (two-line name, stats, a wrapping price, the 48 px action row) instead of `width + 180`, saving ~27 pt per card at 1×; a sale's original price sits struck through beside the sale price on one line (dropped above 1.3× text, where the −N% tag already says it). Verified on the iPhone 17 simulator and by the card tests at 320–390 pt, 1×–2×, light and dark.
+
+## Recommended sequence (next 2 weeks, in order)
+
+1. P0 admin filter leak + PDP stock line + Settings catch/validation — three small changes, one day, remove every "the app told me something false".
+2. Checkout copy + auto-select new address + auth autofill + checkout a11y semantics — the cheapest conversion wins.
+3. Shared unsaved-changes guard applied to product editor, settings and the four sheets.
+4. Admin review card product join + unmask; Knowledge/Reviews try/catch + snackbars.
+5. Fulfillment: segment the list, move primary action to the top, confirm single-parcel booking, "Manage delivery" lands on the order.
+6. Home → Today queue counters (incl. cancellation requests); merge Payments into Orders.
+7. Product form: photo grid (reorder/cover/progress/retry), Advanced packed size, duplicate variant row.
+8. Customer cards: "Buy" pill, stacked tags, fish size; PDP "From S$X"; markdown guides; order-list item cues.
+9. One P2 polish pass per side.
+
+## Explicit non-goals
+
+Do not add: a separate chat/inbox system (WhatsApp hand-off is right for this shop); multi-vendor or marketplace features; a loyalty programme; in-app video upload before the photo flow is solid; more bottom-nav destinations on either side (Payments should go away, not grow); "Notify me when back in stock" (R2, still deferred); redesigning the visual language — the black/red/ivory system and the November Apple-style motion work are keepers.
+
+## Prior-audit items still open
+
+R5 email validation (`contains('@')`); I2 official Google "G" asset and HIG Apple button on signup; P1-3 image decode in Guide/Services/admin thumbnails; U6 server error strings passed through verbatim (<200 chars); R2 back-in-stock (deferred). Everything else from 30 Oct and 23 Oct in scope is fixed and still present in code.

@@ -21,7 +21,6 @@ import '../../../shared/models/product.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/skeleton.dart';
-import '../../../shared/widgets/shipping_cost_summary.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/review_providers.dart';
@@ -35,6 +34,7 @@ import '../utils/payment_confirmation.dart';
 import '../utils/payment_sheet.dart';
 import 'order_status_timeline.dart';
 import 'orders_providers.dart';
+import 'purchase_intent.dart';
 import 'order_pull_to_refresh.dart';
 import 'order_cancellation_panel.dart';
 
@@ -104,7 +104,9 @@ class OrderDetailScreen extends ConsumerWidget {
               title: 'Sign in to view your order',
               subtitle: 'Your order details are available after signing in.',
               actionLabel: 'Sign In',
-              onAction: () => context.go('/login'),
+              onAction: () => context.push(
+                authRouteWithRedirect('/login', '/orders/$orderId'),
+              ),
             )
           : appUserAsync.hasError
           ? ErrorState(onRetry: () => ref.invalidate(currentAppUserProvider))
@@ -293,8 +295,16 @@ class _OrderDetailBody extends ConsumerWidget {
                   fontSize: 12.5,
                 ),
               ),
+              // The Stripe reference means something to staff reconciling
+              // a payout; to a customer it reads like an error code.
               if (order.stripePaymentIntentId != null &&
-                  order.stripePaymentIntentId!.isNotEmpty) ...[
+                  order.stripePaymentIntentId!.isNotEmpty &&
+                  (ref
+                          .watch(currentAppUserProvider)
+                          .valueOrNull
+                          ?.role
+                          .isAdmin ??
+                      false)) ...[
                 const SizedBox(height: 6),
                 Text(
                   'Payment: ${_shortId(order.stripePaymentIntentId!)}',
@@ -311,10 +321,10 @@ class _OrderDetailBody extends ConsumerWidget {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 if (order.refundAmount > 0)
-                  Text('Returned: S\$${order.refundAmount.toStringAsFixed(2)}'),
+                  Text('Returned: ${formatPrice(order.refundAmount)}'),
                 if (order.refundPendingAmount > 0)
                   Text(
-                    'Awaiting confirmation: S\$${order.refundPendingAmount.toStringAsFixed(2)}',
+                    'Awaiting confirmation: ${formatPrice(order.refundPendingAmount)}',
                   ),
               ],
               if (order.qxpressTrackingNo != null) ...[
@@ -375,8 +385,6 @@ class _OrderDetailBody extends ConsumerWidget {
           _TrackingStatusCard(order: order),
         ],
         const SizedBox(height: AppSpacing.lg),
-        ShippingCostSummary(order: order),
-        const SizedBox(height: AppSpacing.sm),
         if (order.needsRefundReview)
           const Text(
             'The shop is reviewing this refund. Contact us for the current delivery status.',
@@ -551,6 +559,22 @@ class _OrderDetailBody extends ConsumerWidget {
                           ref.watch(currentAppUserProvider).valueOrNull?.id,
                 ),
               const Divider(height: 1, indent: 16, endIndent: 16),
+              // Every line that makes up the total, in one place.
+              _MoneyLine(
+                label: 'Subtotal',
+                amount: formatPrice(
+                  order.items.fold<double>(0, (sum, i) => sum + i.subtotal),
+                ),
+              ),
+              if (order.shippingQuoteId != null)
+                _MoneyLine(
+                  label: 'Delivery',
+                  amount:
+                      order.shippingCostPolicy == 'seller_100' ||
+                          order.buyerShippingCents == null
+                      ? 'Free'
+                      : formatPrice(order.buyerShippingCents! / 100),
+                ),
               if (order.discountAmount != null && order.discountAmount! > 0)
                 Padding(
                   padding: const EdgeInsets.symmetric(
@@ -1367,4 +1391,36 @@ class _StatusBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MoneyLine extends StatelessWidget {
+  final String label;
+  final String amount;
+  const _MoneyLine({required this.label, required this.amount});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(
+      horizontal: AppSpacing.lg,
+      vertical: AppSpacing.xs,
+    ),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: AppPalette.of(context).textMuted,
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Text(
+          amount,
+          style: TextStyle(fontSize: 12.5, color: AppPalette.of(context).text),
+        ),
+      ],
+    ),
+  );
 }

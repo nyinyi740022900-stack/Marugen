@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -14,7 +16,7 @@ class AdminPaymentsPane extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ordersAsync = ref.watch(adminOrdersProvider);
+    final ordersAsync = ref.watch(adminAllOrdersProvider);
 
     return OrderPullToRefresh(
       onRefresh: () => refreshAdminOrdersFromCarrier(
@@ -136,7 +138,7 @@ class AdminPaymentsPane extends ConsumerWidget {
           ),
         ),
         error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
+            ErrorState(onRetry: () => ref.invalidate(adminAllOrdersProvider)),
       ),
     );
   }
@@ -145,6 +147,9 @@ class AdminPaymentsPane extends ConsumerWidget {
 class _TransactionRow extends StatelessWidget {
   final Order order;
   const _TransactionRow({required this.order});
+
+  String get _customer =>
+      (order.shippingAddress?['recipient_name'] as String?)?.trim() ?? '';
 
   Color _statusColor(BuildContext context) {
     switch (order.status) {
@@ -164,17 +169,18 @@ class _TransactionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final rawId = order.stripePaymentIntentId ?? '';
     final shortId = rawId.length > 20 ? '${rawId.substring(0, 20)}…' : rawId;
+    // Order number and customer first — that is how staff match a Stripe
+    // payout line to a real order; the intent id is there to copy.
     final identity = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          shortId,
-          maxLines: 1,
+          _customer.isEmpty
+              ? 'Order #${order.displayNumber}'
+              : 'Order #${order.displayNumber} · $_customer',
+          maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 12.5,
-            color: AppPalette.of(context).textMuted,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5),
         ),
         const SizedBox(height: 2),
         Text(
@@ -183,6 +189,41 @@ class _TransactionRow extends StatelessWidget {
             fontSize: 11.5,
             color: AppPalette.of(context).textMuted,
           ),
+        ),
+        Row(
+          children: [
+            Flexible(
+              child: Text(
+                shortId,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Copy Stripe payment id',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              icon: Icon(
+                Icons.copy_rounded,
+                size: 14,
+                color: AppPalette.of(context).textMuted,
+              ),
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: rawId));
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context)
+                    ..clearSnackBars()
+                    ..showSnackBar(
+                      const SnackBar(content: Text('Payment id copied')),
+                    );
+                }
+              },
+            ),
+          ],
         ),
       ],
     );
@@ -227,42 +268,45 @@ class _TransactionRow extends StatelessWidget {
         color: AppPalette.of(context).textMuted,
       ),
     );
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact =
-              constraints.maxWidth < 300 ||
-              MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3;
-          if (compact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+    return InkWell(
+      onTap: () => context.push('/orders/${order.id}', extra: order),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.md,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact =
+                constraints.maxWidth < 300 ||
+                MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3;
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      icon,
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(child: identity),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Align(alignment: Alignment.centerRight, child: amount),
+                ],
+              );
+            }
+            return Row(
               children: [
-                Row(
-                  children: [
-                    icon,
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(child: identity),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Align(alignment: Alignment.centerRight, child: amount),
+                icon,
+                const SizedBox(width: AppSpacing.md),
+                Expanded(child: identity),
+                const SizedBox(width: AppSpacing.sm),
+                amount,
               ],
             );
-          }
-          return Row(
-            children: [
-              icon,
-              const SizedBox(width: AppSpacing.md),
-              Expanded(child: identity),
-              const SizedBox(width: AppSpacing.sm),
-              amount,
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }

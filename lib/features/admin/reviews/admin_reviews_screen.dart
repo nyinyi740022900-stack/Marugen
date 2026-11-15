@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/sized_network_image.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/reviewer_identity.dart';
@@ -166,6 +168,59 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Which product this is about — without it the owner is
+            // replying to "great koi!" blind. Tap opens the product.
+            InkWell(
+              onTap: () => context.push('/product/${review.productId}'),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                      child: SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: review.productImageUrl == null
+                            ? ColoredBox(
+                                color: AppPalette.of(context).surfaceMuted,
+                                child: Icon(
+                                  Icons.inventory_2_outlined,
+                                  size: 20,
+                                  color: AppPalette.of(context).textMuted,
+                                ),
+                              )
+                            : SizedNetworkImage(
+                                imageUrl: review.productImageUrl!,
+                                fit: BoxFit.cover,
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        review.productName ?? 'Product no longer listed',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: review.productName == null
+                              ? AppPalette.of(context).textMuted
+                              : AppPalette.of(context).text,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 18,
+                      color: AppPalette.of(context).textMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
             Row(
               children: [
                 ReviewerAvatar(
@@ -175,8 +230,12 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
+                  // Staff see the real name: a complaint has to be handled
+                  // with the customer. Shoppers still see it masked.
                   child: Text(
-                    maskedReviewerName(review.authorName),
+                    (review.authorName?.trim().isNotEmpty ?? false)
+                        ? review.authorName!.trim()
+                        : maskedReviewerName(review.authorName),
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),

@@ -711,7 +711,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                 : product.hasVariants
                                 ? (_selectedVariant != null
                                       ? formatPrice(_selectedVariant!.price)
-                                      : 'Select an option')
+                                      : _fromPriceLabel(product))
                                 : formatPrice(product.price!),
                             style: TextStyle(
                               fontSize: 20,
@@ -1093,10 +1093,14 @@ class _StockLine extends ConsumerWidget {
     if (!product.isPurchasable) return const SizedBox.shrink();
 
     final int available;
-    if (variant != null && product.hasSizeOptions) {
-      available = size == null
-          ? 0
-          : product.stockFor(variantId: variant!.id, size: size);
+    // Weight picked, size not yet: the weight row's total across sizes —
+    // never 0, which used to read as "Out of Stock" for a moment.
+    final awaitingSize =
+        variant != null && product.hasSizeOptions && size == null;
+    if (awaitingSize) {
+      available = variant!.stockForSize(null);
+    } else if (variant != null && product.hasSizeOptions) {
+      available = product.stockFor(variantId: variant!.id, size: size);
     } else {
       available = variant?.stockQuantity ?? product.availableStock;
     }
@@ -1104,7 +1108,13 @@ class _StockLine extends ConsumerWidget {
     final IconData icon;
     final Color color;
     final String label;
-    if (available <= 0) {
+    if (available > 0 && awaitingSize) {
+      icon = Icons.straighten_outlined;
+      color = AppPalette.of(context).success;
+      label = available <= threshold
+          ? 'Only $available left — choose a size'
+          : 'In stock — choose a size';
+    } else if (available <= 0) {
       icon = Icons.remove_circle_outline;
       color = AppPalette.of(context).textMuted;
       label = product.unavailableLabel;
@@ -1556,4 +1566,15 @@ class _ImagePageBadge extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "From S$X" for a variant product before a weight is picked — the same
+/// anchor the shop card showed, so the price never disappears on the page
+/// where the decision is made.
+String _fromPriceLabel(Product product) {
+  final prices = product.variants.map((v) => v.price).toList()..sort();
+  if (prices.isEmpty) return 'Select an option';
+  return prices.first == prices.last
+      ? formatPrice(prices.first)
+      : 'From ${formatPrice(prices.first)}';
 }

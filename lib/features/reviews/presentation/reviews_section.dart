@@ -1,5 +1,6 @@
 import '../../orders/presentation/purchase_intent.dart'
     show authRouteWithRedirect;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -330,7 +331,8 @@ class _ReviewForm extends ConsumerStatefulWidget {
 }
 
 class _ReviewFormState extends ConsumerState<_ReviewForm> {
-  late int _rating = widget.existing?.rating ?? 5;
+  // Unrated until the customer taps a star: a default 5★ inflates ratings.
+  late int _rating = widget.existing?.rating ?? 0;
   late final _commentCtrl = TextEditingController(
     text: widget.existing?.comment,
   );
@@ -392,11 +394,16 @@ class _ReviewFormState extends ConsumerState<_ReviewForm> {
               children: [
                 for (var i = 1; i <= 5; i++)
                   IconButton(
+                    tooltip: '$i star${i == 1 ? '' : 's'}',
                     onPressed: () => setState(() => _rating = i),
-                    icon: Icon(
-                      i <= _rating ? Icons.star : Icons.star_border,
-                      color: AppPalette.of(context).warning,
-                      size: 32,
+                    icon: Semantics(
+                      selected: i <= _rating,
+                      label: 'Rate $i star${i == 1 ? '' : 's'}',
+                      child: Icon(
+                        i <= _rating ? Icons.star : Icons.star_border,
+                        color: AppPalette.of(context).warning,
+                        size: 32,
+                      ),
                     ),
                   ),
               ],
@@ -413,7 +420,7 @@ class _ReviewFormState extends ConsumerState<_ReviewForm> {
           ),
           const SizedBox(height: AppSpacing.lg),
           ElevatedButton(
-            onPressed: _saving ? null : _save,
+            onPressed: _saving || _rating == 0 ? null : _save,
             child: _saving
                 ? const SizedBox(
                     height: 18,

@@ -106,12 +106,17 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
           );
           final items = fetched
               .where((item) => !_removedIds.contains(item.id))
+              // A product that was deleted or hidden has nothing to show;
+              // dropping it here keeps the grid free of blank cells.
+              .where((item) => item.product != null)
               .toList();
           if (items.isEmpty) {
-            return const EmptyState(
+            return EmptyState(
               icon: Icons.favorite_border,
               title: 'Your wishlist is empty',
               subtitle: 'Tap the heart on any product to save it here.',
+              actionLabel: 'Browse the shop',
+              onAction: () => context.go('/'),
             );
           }
           return ProductGrid(

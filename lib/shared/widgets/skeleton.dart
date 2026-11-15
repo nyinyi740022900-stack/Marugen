@@ -121,11 +121,13 @@ class ProductCardSkeleton extends StatelessWidget {
 /// A grid of [ProductCardSkeleton]s matching the shop screen's grid layout.
 class ProductGridSkeleton extends StatelessWidget {
   final int count;
-  const ProductGridSkeleton({super.key, this.count = 6});
+  final Widget? header;
+  const ProductGridSkeleton({super.key, this.count = 6, this.header});
 
   @override
   Widget build(BuildContext context) {
     return ProductGrid(
+      header: header,
       itemCount: count,
       itemBuilder: (context, i) => const ProductCardSkeleton(),
     );

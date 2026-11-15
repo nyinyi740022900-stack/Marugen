@@ -14,7 +14,14 @@ String? safeLocalRedirect(String? value) {
     return null;
   }
   final path = uri.path;
-  if (!['/', '/checkout', '/cart', '/notifications', '/admin'].contains(path) &&
+  if (![
+        '/',
+        '/checkout',
+        '/cart',
+        '/addresses',
+        '/notifications',
+        '/admin',
+      ].contains(path) &&
       !RegExp(r'^/(product|orders)/[^/]+$').hasMatch(path) &&
       !RegExp(r'^/admin/(customers|products)/[^/]+$').hasMatch(path) &&
       !['/admin/low-stock', '/admin/top-products'].contains(path)) {

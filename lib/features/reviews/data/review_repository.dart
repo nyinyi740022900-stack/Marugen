@@ -23,7 +23,9 @@ class ReviewRepository {
   Future<List<ProductReview>> fetchAllReviewsForAdmin() async {
     final data = await _client
         .from('product_reviews')
-        .select('*, profiles(full_name, avatar_url)')
+        .select(
+          '*, profiles(full_name, avatar_url), products(name, image_urls)',
+        )
         .order('created_at', ascending: false);
     return (data as List)
         .map((e) => ProductReview.fromMap(e as Map<String, dynamic>))
@@ -40,7 +42,9 @@ class ReviewRepository {
   }) async {
     final data = await _client
         .from('product_reviews')
-        .select('*, profiles(full_name, avatar_url)')
+        .select(
+          '*, profiles(full_name, avatar_url), products(name, image_urls)',
+        )
         .order('created_at', ascending: false)
         .range(offset, offset + limit - 1);
     return (data as List)
@@ -51,7 +55,8 @@ class ReviewRepository {
   Future<void> setHidden(String reviewId, bool hidden) async {
     await _client
         .from('product_reviews')
-        .update({'is_hidden': hidden}).eq('id', reviewId);
+        .update({'is_hidden': hidden})
+        .eq('id', reviewId);
   }
 
   /// Posts/edits the shop's public reply to a review, or clears it when
@@ -59,10 +64,15 @@ class ReviewRepository {
   /// "Admins can moderate reviews" RLS policy, same as [setHidden].
   Future<void> setShopReply(String reviewId, String? reply) async {
     final trimmed = reply?.trim();
-    await _client.from('product_reviews').update({
-      'admin_reply': (trimmed == null || trimmed.isEmpty) ? null : trimmed,
-      'admin_reply_at': (trimmed == null || trimmed.isEmpty) ? null : DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', reviewId);
+    await _client
+        .from('product_reviews')
+        .update({
+          'admin_reply': (trimmed == null || trimmed.isEmpty) ? null : trimmed,
+          'admin_reply_at': (trimmed == null || trimmed.isEmpty)
+              ? null
+              : DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', reviewId);
   }
 
   /// The current user's own review on [productId], if any — RLS lets
@@ -106,15 +116,12 @@ class ReviewRepository {
   }) async {
     final user = SupabaseService.currentUser;
     if (user == null) throw Exception('Not logged in');
-    await _client.from('product_reviews').upsert(
-      {
-        'product_id': productId,
-        'user_id': user.id,
-        'rating': rating,
-        'comment': comment,
-      },
-      onConflict: 'product_id,user_id',
-    );
+    await _client.from('product_reviews').upsert({
+      'product_id': productId,
+      'user_id': user.id,
+      'rating': rating,
+      'comment': comment,
+    }, onConflict: 'product_id,user_id');
   }
 
   Future<void> deleteMyReview(String reviewId) async {

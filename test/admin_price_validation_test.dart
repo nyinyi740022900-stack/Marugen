@@ -68,11 +68,11 @@ void main() {
     expect(textOf(tester, 'Stock quantity'), '3');
 
     await tester.scrollUntilVisible(
-      find.text('Add Weight'),
+      find.text('Add custom option'),
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('Add Weight'));
+    await tester.tap(find.text('Add custom option'));
     await tester.pumpAndSettle();
     // An unlabelled row is skipped on save, so it needs no price yet.
     expect(errorOf('Price'), isNull);

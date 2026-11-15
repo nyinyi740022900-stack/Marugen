@@ -13,7 +13,7 @@ class AdminTopProductsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ordersAsync = ref.watch(adminOrdersProvider);
+    final ordersAsync = ref.watch(adminAllOrdersProvider);
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('Top Products')),
@@ -67,7 +67,7 @@ class AdminTopProductsScreen extends ConsumerWidget {
           ),
         ),
         error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(adminOrdersProvider)),
+            ErrorState(onRetry: () => ref.invalidate(adminAllOrdersProvider)),
       ),
     );
   }

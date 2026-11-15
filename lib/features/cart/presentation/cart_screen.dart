@@ -305,6 +305,17 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'Delivery and GST are added at checkout.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppPalette.of(context).textMuted,
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     SizedBox(
                       width: double.infinity,

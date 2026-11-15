@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/utils/email_validator.dart';
 import 'auth_providers.dart';
 import 'login_screen.dart' show friendlyAuthError;
 
@@ -62,69 +63,73 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   }
 
   Widget _buildForm() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text(
-            'Forgot your password?',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "Enter your email and we'll send you a link to reset it.",
-            style: TextStyle(
-              fontSize: 13.5,
-              color: AppPalette.of(context).textMuted,
+    return AutofillGroup(
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Forgot your password?',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
             ),
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          TextFormField(
-            controller: _emailCtrl,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _submit(),
-            decoration: const InputDecoration(
-              errorMaxLines: 4,
-              labelText: 'Email',
-              prefixIcon: Icon(Icons.mail_outline, size: 20),
-            ),
-            validator: (v) =>
-                (v == null || !v.contains('@')) ? 'Enter a valid email' : null,
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: AppSpacing.md),
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppPalette.of(context).accentSoft,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
+            const SizedBox(height: 4),
+            Text(
+              "Enter your email and we'll send you a link to reset it.",
+              style: TextStyle(
+                fontSize: 13.5,
+                color: AppPalette.of(context).textMuted,
               ),
-              child: Text(
-                _error!,
-                style: TextStyle(
-                  color: AppPalette.of(context).accent,
-                  fontSize: 13,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            TextFormField(
+              controller: _emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.done,
+              autofillHints: const [AutofillHints.email],
+              autocorrect: false,
+              enableSuggestions: false,
+              onFieldSubmitted: (_) => _submit(),
+              decoration: const InputDecoration(
+                errorMaxLines: 4,
+                labelText: 'Email',
+                prefixIcon: Icon(Icons.mail_outline, size: 20),
+              ),
+              validator: validateEmail,
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpacing.md),
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppPalette.of(context).accentSoft,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: AppPalette.of(context).accent,
+                    fontSize: 13,
+                  ),
                 ),
               ),
+            ],
+            const SizedBox(height: AppSpacing.xl),
+            ElevatedButton(
+              onPressed: _loading ? null : _submit,
+              child: _loading
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppColors.white,
+                      ),
+                    )
+                  : const Text('Send Reset Link'),
             ),
           ],
-          const SizedBox(height: AppSpacing.xl),
-          ElevatedButton(
-            onPressed: _loading ? null : _submit,
-            child: _loading
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.white,
-                    ),
-                  )
-                : const Text('Send Reset Link'),
-          ),
-        ],
+        ),
       ),
     );
   }

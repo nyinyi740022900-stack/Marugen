@@ -187,6 +187,7 @@ void main() {
               overrides: [
                 productListProvider.overrideWith((ref) async => [product]),
                 adminOrdersProvider.overrideWith((ref) async => [order]),
+                adminAllOrdersProvider.overrideWith((ref) async => [order]),
                 shopSettingsProvider.overrideWith((ref) async => {}),
                 unreadNotificationCountProvider.overrideWith((ref) => 0),
               ],

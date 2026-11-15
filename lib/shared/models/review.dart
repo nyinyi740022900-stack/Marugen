@@ -21,6 +21,11 @@ class ProductReview {
   final String? shopReply;
   final DateTime? shopReplyAt;
 
+  /// Joined for the admin list only (`products(name, image_urls)`), so the
+  /// owner can see which product a review is about; null elsewhere.
+  final String? productName;
+  final String? productImageUrl;
+
   const ProductReview({
     required this.id,
     required this.productId,
@@ -33,10 +38,14 @@ class ProductReview {
     this.isHidden = false,
     this.shopReply,
     this.shopReplyAt,
+    this.productName,
+    this.productImageUrl,
   });
 
   factory ProductReview.fromMap(Map<String, dynamic> map) {
     final profile = map['profiles'] as Map<String, dynamic>?;
+    final product = map['products'] as Map<String, dynamic>?;
+    final productImages = (product?['image_urls'] as List?)?.cast<String>();
     final replyAt = map['admin_reply_at'] as String?;
     return ProductReview(
       id: map['id'] as String,
@@ -50,6 +59,10 @@ class ProductReview {
       isHidden: map['is_hidden'] as bool? ?? false,
       shopReply: map['admin_reply'] as String?,
       shopReplyAt: replyAt == null ? null : parseServerTime(replyAt),
+      productName: product?['name'] as String?,
+      productImageUrl: productImages == null || productImages.isEmpty
+          ? null
+          : productImages.first,
     );
   }
 }

@@ -105,7 +105,13 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(loads, 1);
-    await tester.fling(find.byType(GridView), const Offset(0, 400), 1200);
+    // The shop grid scrolls inside a CustomScrollView now that the hero
+    // carousel is its header.
+    await tester.fling(
+      find.byType(CustomScrollView),
+      const Offset(0, 400),
+      1200,
+    );
     await tester.pumpAndSettle();
     expect(loads, 2);
   });

@@ -7,6 +7,7 @@ import '../../core/notifications/push_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../orders/presentation/orders_providers.dart';
 import 'analytics/admin_analytics_screen.dart';
+import 'banners/admin_banners_screen.dart';
 import 'dashboard/admin_dashboard_screen.dart';
 import 'knowledge/admin_knowledge_screen.dart';
 import 'orders/admin_orders_screen.dart';
@@ -48,6 +49,7 @@ class AdminShell extends ConsumerWidget {
     AdminReviewsScreen(),
     AdminSettingsScreen(),
     AdminAnalyticsScreen(),
+    AdminBannersScreen(),
   ];
 
   static const _primaryDestinations = [
@@ -67,6 +69,11 @@ class AdminShell extends ConsumerWidget {
   static const _moreItems = [
     _MoreItem(icon: Icons.menu_book_outlined, label: 'Knowledge', index: 3),
     _MoreItem(icon: Icons.local_offer_outlined, label: 'Promo Codes', index: 4),
+    _MoreItem(
+      icon: Icons.view_carousel_outlined,
+      label: 'Home Banners',
+      index: 8,
+    ),
     _MoreItem(icon: Icons.rate_review_outlined, label: 'Reviews', index: 5),
     _MoreItem(icon: Icons.query_stats_outlined, label: 'Analytics', index: 7),
     _MoreItem(icon: Icons.settings_outlined, label: 'Settings', index: 6),

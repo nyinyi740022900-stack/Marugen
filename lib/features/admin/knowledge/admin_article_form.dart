@@ -11,6 +11,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/knowledge.dart';
 import '../../knowledge/presentation/knowledge_providers.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/sheet_header.dart';
+import '../../../shared/widgets/discard_changes_guard.dart';
 
 Future<void> showArticleForm(
   BuildContext context,
@@ -20,7 +22,8 @@ Future<void> showArticleForm(
   return showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    showDragHandle: true,
+    isDismissible: false,
+    enableDrag: false,
     builder: (_) => _ArticleFormSheet(existing: existing),
   );
 }
@@ -44,6 +47,14 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
   bool _submitted = false;
   String? _saveError;
   late String? _savedId = widget.existing?.id;
+  String? _baseline;
+
+  String _fingerprint() => [
+    _titleCtrl.text,
+    _bodyCtrl.text,
+    _existingCoverUrl,
+    _newCoverImage?.path,
+  ].join('\u0001');
 
   @override
   void initState() {
@@ -117,94 +128,96 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: AppSpacing.xl,
-        right: AppSpacing.xl,
-        top: AppSpacing.xl,
-        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.xl,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              widget.existing == null ? 'Add Guide' : 'Edit Guide',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            GestureDetector(
-              onTap: _pickCoverImage,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-                child: Container(
-                  height: 140,
-                  width: double.infinity,
-                  color: AppPalette.of(context).surfaceMuted,
-                  child: _newCoverImage != null
-                      ? _PickedImageThumb(file: _newCoverImage!)
-                      : (_existingCoverUrl != null
-                            ? Image.network(
-                                _existingCoverUrl!,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => Icon(
-                                  Icons.broken_image_outlined,
+    _baseline ??= _fingerprint();
+    return DiscardChangesGuard(
+      dirty: _fingerprint() != _baseline,
+      busy: _saving,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: AppSpacing.xl,
+          right: AppSpacing.xl,
+          top: AppSpacing.xl,
+          bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.xl,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SheetHeader(widget.existing == null ? 'Add Guide' : 'Edit Guide'),
+              const SizedBox(height: AppSpacing.lg),
+              GestureDetector(
+                onTap: _pickCoverImage,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  child: Container(
+                    height: 140,
+                    width: double.infinity,
+                    color: AppPalette.of(context).surfaceMuted,
+                    child: _newCoverImage != null
+                        ? _PickedImageThumb(file: _newCoverImage!)
+                        : (_existingCoverUrl != null
+                              ? Image.network(
+                                  _existingCoverUrl!,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, _, _) => Icon(
+                                    Icons.broken_image_outlined,
+                                    color: AppPalette.of(context).textMuted,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.add_a_photo_outlined,
                                   color: AppPalette.of(context).textMuted,
-                                ),
-                              )
-                            : Icon(
-                                Icons.add_a_photo_outlined,
-                                color: AppPalette.of(context).textMuted,
-                              )),
+                                )),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            TextField(
-              controller: _titleCtrl,
-              decoration: InputDecoration(
-                labelText: 'Title',
-                errorText: _submitted && _titleCtrl.text.trim().isEmpty
-                    ? 'Enter a title.'
-                    : null,
-                errorMaxLines: 3,
+              const SizedBox(height: AppSpacing.lg),
+              TextField(
+                controller: _titleCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Title',
+                  errorText: _submitted && _titleCtrl.text.trim().isEmpty
+                      ? 'Enter a title.'
+                      : null,
+                  errorMaxLines: 3,
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _bodyCtrl,
-              decoration: InputDecoration(
-                labelText: 'Content',
-                errorText: _submitted && _bodyCtrl.text.trim().isEmpty
-                    ? 'Enter guide content.'
-                    : null,
-                errorMaxLines: 3,
+              const SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _bodyCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Content',
+                  errorText: _submitted && _bodyCtrl.text.trim().isEmpty
+                      ? 'Enter guide content.'
+                      : null,
+                  errorMaxLines: 3,
+                ),
+                maxLines: 8,
               ),
-              maxLines: 8,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            if (_saveError != null) ...[
-              Text(
-                _saveError!,
-                style: TextStyle(color: AppPalette.of(context).error),
+              const SizedBox(height: AppSpacing.lg),
+              if (_saveError != null) ...[
+                Text(
+                  _saveError!,
+                  style: TextStyle(color: AppPalette.of(context).error),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+              ],
+              ElevatedButton(
+                onPressed: _saving ? null : _save,
+                child: _saving
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.white,
+                        ),
+                      )
+                    : const Text('Publish'),
               ),
-              const SizedBox(height: AppSpacing.sm),
             ],
-            ElevatedButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.white,
-                      ),
-                    )
-                  : const Text('Publish'),
-            ),
-          ],
+          ),
         ),
       ),
     );

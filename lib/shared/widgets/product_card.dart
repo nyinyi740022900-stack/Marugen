@@ -85,20 +85,28 @@ class ProductCard extends ConsumerWidget {
                                 size: 40,
                               ),
                             ),
-                      if (product.fishDetails?.variety != null)
+                      // Variety and discount stack: a koi on sale shows both.
+                      if (product.fishDetails?.variety != null ||
+                          product.hasActiveSale)
                         Positioned(
                           left: 8,
                           top: 8,
                           right: 60,
-                          child: _Tag(label: product.fishDetails!.variety!),
-                        )
-                      else if (product.hasActiveSale)
-                        Positioned(
-                          left: 8,
-                          top: 8,
-                          child: _Tag(
-                            label: '-${product.discountPercent}%',
-                            color: AppColors.red,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (product.fishDetails?.variety != null)
+                                _Tag(label: product.fishDetails!.variety!),
+                              if (product.fishDetails?.variety != null &&
+                                  product.hasActiveSale)
+                                const SizedBox(height: 4),
+                              if (product.hasActiveSale)
+                                _Tag(
+                                  label: '-${product.discountPercent}%',
+                                  color: AppColors.red,
+                                ),
+                            ],
                           ),
                         ),
                       if (showFavoriteToggle)
@@ -196,35 +204,60 @@ class ProductCard extends ConsumerWidget {
                       const SizedBox(height: 4),
                       // Price gets the full content width. A touch target must
                       // never take space away from the amount being purchased.
-                      if (product.hasActiveSale)
-                        Text(
-                          formatPrice(product.price!),
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            color: AppPalette.of(context).textMuted,
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                      Text(
-                        product.hasActiveSale
-                            ? formatPrice(product.salePrice!)
-                            : _priceLabel(product),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: product.isPurchasable
-                              ? AppPalette.of(context).accent
-                              : AppPalette.of(context).textMuted,
-                          fontSize: 14,
-                        ),
+                      // The price may wrap (it must never be cut short); on
+                      // sale the original sits struck through beside it at
+                      // normal text sizes — at large sizes the -N% tag on
+                      // the photo already says it, so the body stays one
+                      // height for every card.
+                      Builder(
+                        builder: (context) {
+                          final priceText = Text(
+                            product.hasActiveSale
+                                ? formatPrice(product.salePrice!)
+                                : _priceLabel(product),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: product.isPurchasable
+                                  ? AppPalette.of(context).accent
+                                  : AppPalette.of(context).textMuted,
+                              fontSize: 14,
+                            ),
+                          );
+                          final showOriginal =
+                              product.hasActiveSale &&
+                              MediaQuery.textScalerOf(context).scale(14) <=
+                                  14 * 1.3;
+                          if (!showOriginal) return priceText;
+                          return Wrap(
+                            spacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.end,
+                            children: [
+                              priceText,
+                              Text(
+                                formatPrice(product.price!),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: AppPalette.of(context).textMuted,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 4),
                       Row(
                         children: [
                           Expanded(
                             child:
-                                product.isPurchasable && !product.isOutOfStock
-                                ? const _DeliveryEstimateLabel()
-                                : const SizedBox.shrink(),
+                                !product.isPurchasable || product.isOutOfStock
+                                ? const SizedBox.shrink()
+                                : product.isLiveFish
+                                // A fish is hand-delivered; its size is the
+                                // fact a koi buyer scans for, not a courier
+                                // window that does not apply.
+                                ? _FishFactsLabel(product: product)
+                                : const _DeliveryEstimateLabel(),
                           ),
                           _CardActionButtons(
                             product: product,
@@ -281,8 +314,8 @@ class _CardActionButtons extends ConsumerWidget {
     if (product.isLiveFish && !product.hasVariants) {
       // One fish, straight to checkout: a cart icon here suggested it would
       // only be added to the cart.
-      return _RoundIconButton(
-        icon: Icons.bolt,
+      // The highest-value tap on the card says what it does.
+      return _BuyPill(
         tooltip: 'Buy ${product.name} now',
         onTap: () => beginCheckout(
           context,
@@ -604,6 +637,100 @@ class _Tag extends StatelessWidget {
           letterSpacing: 0.4,
         ),
       ),
+    );
+  }
+}
+
+/// "Buy" pill for one-of-a-kind fish: a word, not just a bolt, inside the
+/// same 48 pt hit area as the other card actions.
+class _BuyPill extends StatelessWidget {
+  final String tooltip;
+  final VoidCallback onTap;
+  const _BuyPill({required this.tooltip, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        label: tooltip,
+        child: SizedBox(
+          height: 48,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Center(
+                child: Ink(
+                  height: 32,
+                  padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
+                  decoration: const BoxDecoration(
+                    color: AppColors.black,
+                    borderRadius: BorderRadius.all(Radius.circular(16)),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bolt, size: 18, color: AppColors.white),
+                      SizedBox(width: 2),
+                      Text(
+                        'Buy',
+                        style: TextStyle(
+                          color: AppColors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// "45 cm · Male" style line for live fish, where the card's delivery
+/// window would be wrong (fish are hand-delivered).
+class _FishFactsLabel extends StatelessWidget {
+  final Product product;
+  const _FishFactsLabel({required this.product});
+
+  @override
+  Widget build(BuildContext context) {
+    final f = product.fishDetails;
+    final parts = <String>[
+      if (f?.sizeCm != null)
+        '${f!.sizeCm! % 1 == 0 ? f.sizeCm!.toInt() : f.sizeCm} cm',
+      if (f?.gender != null && f!.gender!.trim().isNotEmpty) f.gender!.trim(),
+    ];
+    final text = parts.isEmpty ? 'Hand-delivered' : parts.join(' · ');
+    return Row(
+      children: [
+        Icon(
+          parts.isEmpty ? Icons.volunteer_activism_outlined : Icons.straighten,
+          size: 14,
+          color: AppPalette.of(context).textMuted,
+        ),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 10.5,
+              color: AppPalette.of(context).textMuted,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

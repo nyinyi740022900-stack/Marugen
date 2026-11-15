@@ -12,6 +12,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/sized_network_image.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'orders_providers.dart';
@@ -170,6 +171,10 @@ class OrdersScreen extends ConsumerWidget {
                                       fontSize: 12,
                                     ),
                                   ),
+                                  if (order.items.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    _OrderItemsCue(order: order),
+                                  ],
                                   const SizedBox(height: 6),
                                   Text(
                                     formatPrice(order.total),
@@ -177,11 +182,22 @@ class OrdersScreen extends ConsumerWidget {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  if (order.qxpressTrackingNo != null) ...[
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'Tracking: ${order.qxpressTrackingNo}',
-                                      style: const TextStyle(fontSize: 12),
+                                  if (order.status == OrderStatus.pending) ...[
+                                    const SizedBox(height: 8),
+                                    // The fastest path to the money step;
+                                    // the order page resumes the payment.
+                                    ElevatedButton(
+                                      onPressed: () => context.push(
+                                        '/orders/${order.id}',
+                                        extra: order,
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                          horizontal: 20,
+                                        ),
+                                      ),
+                                      child: const Text('Complete payment'),
                                     ),
                                   ],
                                 ],
@@ -312,6 +328,7 @@ class _LoggedOutOrders extends StatelessWidget {
     return const GuestAccountState(
       icon: Icons.receipt_long_outlined,
       subtitle: 'View your orders and delivery updates.',
+      returnTo: '/?tab=orders',
     );
   }
 }
@@ -351,6 +368,60 @@ class _StatusBadge extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
+    );
+  }
+}
+
+/// First item with its photo and "+N more", so a customer with several
+/// orders can tell them apart without opening each one.
+class _OrderItemsCue extends StatelessWidget {
+  final Order order;
+  const _OrderItemsCue({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final first = order.items.first;
+    final more = order.items.length - 1;
+    final name = [
+      first.productName,
+      if (first.variantLabel != null) first.variantLabel,
+      if (first.sizeLabel != null) first.sizeLabel,
+    ].join(' · ');
+    return Row(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: first.imageUrl == null
+                ? ColoredBox(
+                    color: palette.surfaceMuted,
+                    child: Icon(
+                      Icons.inventory_2_outlined,
+                      size: 20,
+                      color: palette.textMuted,
+                    ),
+                  )
+                : SizedNetworkImage(
+                    imageUrl: first.imageUrl!,
+                    fit: BoxFit.cover,
+                  ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            more > 0
+                ? '${first.quantity} × $name  +$more more'
+                : '${first.quantity} × $name',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 13, color: palette.text),
+          ),
+        ),
+      ],
     );
   }
 }

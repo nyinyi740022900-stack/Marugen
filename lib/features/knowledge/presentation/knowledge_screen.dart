@@ -10,6 +10,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/knowledge.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/fullscreen_image_gallery.dart';
+import '../../../shared/widgets/simple_markdown.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../services/presentation/services_tab.dart';
 import 'knowledge_providers.dart';
@@ -555,7 +556,7 @@ class _ArticlesTab extends ConsumerWidget {
                                 ),
                               ),
                               const SizedBox(height: 12),
-                              Text(a.bodyMarkdown),
+                              SimpleMarkdown(a.bodyMarkdown),
                             ],
                           ),
                         ),
@@ -599,7 +600,7 @@ class _ArticlesTab extends ConsumerWidget {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  a.bodyMarkdown,
+                                  stripMarkdown(a.bodyMarkdown),
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(

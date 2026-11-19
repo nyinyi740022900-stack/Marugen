@@ -1,0 +1,43 @@
+# Closed beta 1.0.28 (33)
+
+Built 2026-11-19 from `codex/whole-app-audit-fixes` at 4d76192 plus the version bump, for Closed testing — Alpha. Not uploaded yet: the owner drags the bundle into Play Console (too large for the Chrome extension).
+
+- Release name: `1.0.28 (33) – Safer checkout, feedback and home banners`.
+- Release notes (en-US): "Checkout no longer resets while you pay, clearer payment confirmation, Send feedback and app version in Profile, help for guests, email confirmation with resend, home banners, fish video in the photo gallery, and many fixes."
+
+## Changes
+
+Everything since 1.0.27 (commits c65bec4, a035205, 4d76192), from the 18 Nov three-role review:
+
+- Checkout survives an auth token refresh; a slow payment confirmation shows "Payment received. We're confirming it with the bank" and clears the cart only once paid; a changed total can be paid on the second tap.
+- Order detail always refetches; reorder reports what was skipped; notification permission is asked after the first order instead of at launch.
+- Profile: Send feedback, app version, and FAQ / Terms / Privacy for guests. Sign-up shows "Confirm your email" with resend.
+- Home banners: link picker, no layout jump, refresh on pull and resume. The daily promo popup is retired.
+- Live fish: free hand-delivery promise, "this exact fish" line, video as a gallery slide, age and certificate photo.
+- One contact picker from product page, product card and Services.
+- Admin: Payments merged into Orders (payment line on each card, copyable Stripe id), "Collected through Stripe" on Home, bounded dashboard queries, guarded write buttons, unsaved-changes guard notices text edits, product editor no longer wipes fish gender.
+
+## Production backend
+
+NOT rolled out at build time. The Supabase CLI was signed in to a non-Marugen account on 2026-11-19, so nothing was applied. Order: migrations 0077 → 0078 → 0079, then Edge Functions (see `docs/sprint1-owner-steps.md`). The app works before and after the rollout: new RPCs fall back to client calculation, GST snapshot falls back to the current setting.
+
+## Verification
+
+- `flutter analyze`: no issues. `flutter test`: 754 passed, 4 skipped.
+- `deno test supabase/functions`: 151 passed. SQL suites `run_sprint1_security_fixes.sh`, `run_sprint3_hardening.sh`, `run_sprint4_leftovers.sh`: all pass on a local Postgres with 0001–0079.
+- Not checked on a device or emulator yet. Payment cannot be exercised by Claude: the build uses the live Stripe key.
+
+## Release artifact
+
+`output/releases/marugen-1.0.28-33.aab`, 86.9 MB (86,864,952 bytes), `jar verified` (upload key CN=Marugen Koi Farm). versionName 1.0.28, versionCode 33, built with `flutter build appbundle --release --dart-define-from-file=env/prod.json`. SHA-256: `2181ccc9030908f026f2231ea067db029ab1e3834ceb6499c3db550849ae2ae2`.
+
+## Message for testers (paste into the tester chat group)
+
+> Hi everyone — Marugen 1.0.28 is out on the test track. Please update from Play Store, then over the next 14 days:
+>
+> 1. Open the app at least once a day and browse a few fish and products.
+> 2. Try one thing each day: search, add to cart, wishlist, sign up / log in, read a care guide, open FAQ.
+> 3. Tell us what you think from inside the app: **Profile → Send feedback**. It opens WhatsApp or email with the app version already filled in. Even one line helps ("photo was slow", "couldn't find X").
+> 4. If something breaks, send a screenshot through the same Send feedback button.
+>
+> Please keep the app installed until 3 December. Thank you!

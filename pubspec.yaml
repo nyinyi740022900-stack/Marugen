@@ -1,7 +1,7 @@
 name: marugen_app
 description: "Marugen Fish Farm — e-commerce app for Koi, Arowana, fish food & accessories."
 publish_to: 'none'
-version: 1.0.27+32
+version: 1.0.28+33
 
 environment:
   sdk: ^3.13.2

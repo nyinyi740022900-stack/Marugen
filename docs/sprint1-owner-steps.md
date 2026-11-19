@@ -137,6 +137,13 @@ select order_number, total, gst_percent, gst_included_in_price, gst_amount_cents
 - EasyParcel webhook အစစ်တစ်ခု ရောက်ပြီးရင် Dashboard → Edge Functions → `easyparcel-webhook` → Logs မှာ `[easyparcel-webhook] source-ip` လိုင်းကို ကူးပြီး Claude ကို ပြပါ (IP စစ်ဆေးမှုကို အပြီးပြင်ဖို့ လိုပါတယ်)။
 - EasyParcel နဲ့ parcel တစ်ခု book လုပ်ကြည့်ပြီး label (AWB) ပေါ်လာ/မလာ စစ်ပါ။
 
+## ၇.၅။ Monitoring (0080)
+
+- [ ] `supabase/migrations/0080_ops_monitoring.sql` ကို run (0079 ပြီးမှ)။ ၁၅ မိနစ်တစ်ခါ စစ်ပြီး owner/staff ရဲ့ app notification ထဲ သတိပေးချက် ထည့်ပါတယ် (push မပါသေး၊ in-app ပဲ)။
+- သတိပေးမယ့်အရာ: ၄၅ မိနစ်ကျော် pending ဖြစ်နေတဲ့ ငွေချေမှု၊ refund fail / ၂၄ နာရီကျော် pending၊ payment စစ်တဲ့ cron job မအလုပ်လုပ်၊ courier booking ၃၀ မိနစ်ကျော် ပြဿနာရှိ၊ EasyParcel connection သက်တမ်းကုန်။
+- တင်ပြီးရင် `select * from public.ops_monitor_findings();` နဲ့ လက်ရှိတွေ့ရှိချက် ကြည့်နိုင်ပါတယ် (ဘာမှ မရေးပါ)။
+- သတိ: 0080 က payment cron function `reconcile_pending_orders()` ကို အစားထိုးပါတယ် (HTTP call က အတူတူ၊ request id မှတ်တာပဲ ထပ်တိုး)။
+
 ## ၈။ Sprint 2 + 3 app ကို device ပေါ်မှာ စမ်းရန် (1.0.28)
 
 - [ ] Fresh install → ပထမဆုံး order ဝယ်ပြီးမှ "Get a message when your order ships." dialog နဲ့ notification ခွင့်တောင်းရမယ်၊ ဒုတိယ order မှာ ထပ်မမေးရ။

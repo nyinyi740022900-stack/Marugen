@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -8,12 +10,23 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/email_validator.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/password_validator.dart';
+import '../../orders/presentation/purchase_intent.dart'
+    show authRouteWithRedirect;
 import 'auth_providers.dart';
 import 'login_screen.dart' show friendlyAuthError;
 
 class SignupScreen extends ConsumerStatefulWidget {
-  const SignupScreen({super.key});
+  /// How long "Resend email" stays disabled after an email goes out (the
+  /// sign-up one included). Supabase refuses a second email to the same
+  /// address inside a minute, so an earlier tap could only fail.
+  final Duration resendCooldown;
+
+  const SignupScreen({
+    super.key,
+    this.resendCooldown = const Duration(seconds: 60),
+  });
 
   @override
   ConsumerState<SignupScreen> createState() => _SignupScreenState();
@@ -28,10 +41,19 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   bool _obscure = true;
   bool _oauthLoading = false;
   String? _error;
-  String? _info;
+
+  /// Set once sign-up succeeded without a session: the address the
+  /// confirmation link went to. Replaces the form with the confirm state.
+  String? _confirmEmail;
+  bool _resending = false;
+  int _cooldownLeft = 0;
+  Timer? _cooldownTimer;
+  String? _resendInfo;
+  String? _resendError;
 
   @override
   void dispose() {
+    _cooldownTimer?.cancel();
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
@@ -44,24 +66,85 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     setState(() {
       _loading = true;
       _error = null;
-      _info = null;
     });
+    final email = _emailCtrl.text.trim();
     try {
-      await ref
+      final needsConfirmation = await ref
           .read(authRepositoryProvider)
           .signUpWithEmail(
-            _emailCtrl.text.trim(),
+            email,
             _passwordCtrl.text,
             fullName: _nameCtrl.text.trim(),
           );
-      if (mounted) {
-        setState(() => _info = 'Check your email to confirm your account.');
+      // With a session the router redirect takes the customer onward.
+      if (mounted && needsConfirmation) {
+        setState(() => _confirmEmail = email);
+        _startCooldown();
       }
     } catch (e) {
       if (mounted) setState(() => _error = friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _startCooldown() {
+    _cooldownTimer?.cancel();
+    _cooldownLeft = widget.resendCooldown.inSeconds;
+    if (_cooldownLeft <= 0) return;
+    _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() => _cooldownLeft--);
+      if (_cooldownLeft <= 0) timer.cancel();
+    });
+  }
+
+  Future<void> _resend() async {
+    final email = _confirmEmail;
+    if (email == null || _resending || _cooldownLeft > 0) return;
+    setState(() {
+      _resending = true;
+      _resendInfo = null;
+      _resendError = null;
+    });
+    try {
+      await ref
+          .read(authRepositoryProvider)
+          .resendVerificationEmail(email: email);
+      if (!mounted) return;
+      setState(() => _resendInfo = 'Email sent again.');
+      _startCooldown();
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+        () => _resendError = friendlyErrorMessage(
+          e,
+          fallback:
+              'Could not send the email. Check your connection and try again.',
+          context: 'auth.resend_confirmation',
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _resending = false);
+    }
+  }
+
+  /// Back to the Log In screen this one was opened from (it still holds
+  /// the redirect); from a direct link, open Log In with the same redirect.
+  void _goToLogin() {
+    if (context.canPop()) {
+      context.pop();
+      return;
+    }
+    context.go(
+      authRouteWithRedirect(
+        '/login',
+        GoRouterState.of(context).uri.queryParameters['redirect'],
+      ),
+    );
   }
 
   Future<void> _oauthSignIn(Future<void> Function() signIn) async {
@@ -83,6 +166,33 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final confirmEmail = _confirmEmail;
+    if (confirmEmail != null) {
+      return Scaffold(
+        backgroundColor: AppPalette.of(context).surface,
+        appBar: AppBar(
+          title: const Text('Create Account'),
+          backgroundColor: AppColors.black,
+        ),
+        body: ContentWidth(
+          maxWidth: 560,
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: _ConfirmEmailState(
+                email: confirmEmail,
+                resending: _resending,
+                cooldownLeft: _cooldownLeft,
+                info: _resendInfo,
+                error: _resendError,
+                onLogin: _goToLogin,
+                onResend: _resend,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppPalette.of(context).surface,
       appBar: AppBar(
@@ -186,24 +296,6 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                           _error!,
                           style: TextStyle(
                             color: AppPalette.of(context).accent,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (_info != null) ...[
-                      const SizedBox(height: AppSpacing.md),
-                      Container(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).success
-                              .withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(AppRadius.sm),
-                        ),
-                        child: Text(
-                          _info!,
-                          style: TextStyle(
-                            color: AppPalette.of(context).success,
                             fontSize: 13,
                           ),
                         ),
@@ -315,6 +407,95 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Shown instead of the form once the account exists but its email is not
+/// confirmed yet: says where the link went and what to do next.
+class _ConfirmEmailState extends StatelessWidget {
+  final String email;
+  final bool resending;
+  final int cooldownLeft;
+  final String? info;
+  final String? error;
+  final VoidCallback onLogin;
+  final VoidCallback onResend;
+
+  const _ConfirmEmailState({
+    required this.email,
+    required this.resending,
+    required this.cooldownLeft,
+    required this.info,
+    required this.error,
+    required this.onLogin,
+    required this.onResend,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final message = error ?? info;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: AppSpacing.lg),
+        Icon(Icons.mark_email_unread_outlined, size: 48, color: palette.accent),
+        const SizedBox(height: AppSpacing.lg),
+        Semantics(
+          header: true,
+          child: const Text(
+            'Confirm your email',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'We sent a link to $email. Open it, then come back and log in.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 14.5,
+            height: 1.4,
+            color: palette.textMuted,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        ElevatedButton(onPressed: onLogin, child: const Text('Go to Log In')),
+        const SizedBox(height: AppSpacing.md),
+        OutlinedButton(
+          onPressed: resending || cooldownLeft > 0 ? null : onResend,
+          child: resending
+              ? const SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(
+                  cooldownLeft > 0
+                      ? 'Resend email in ${cooldownLeft}s'
+                      : 'Resend email',
+                ),
+        ),
+        // Announced when it changes; the space is not reserved because the
+        // buttons above it never move.
+        Semantics(
+          liveRegion: true,
+          child: message == null
+              ? const SizedBox.shrink()
+              : Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.md),
+                  child: Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: error != null ? palette.error : palette.success,
+                    ),
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }

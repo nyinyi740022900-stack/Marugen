@@ -31,6 +31,7 @@ void main() {
     viewport(tester, const Size(360, 800));
     for (final theme in [AppTheme.light, AppTheme.dark]) {
       Rect? reference;
+      var referenceCentred = false;
       for (final page in [
         const ProfileScreen(),
         const OrdersScreen(),
@@ -54,8 +55,14 @@ void main() {
         );
         if (reference != null) {
           expect(rect.width, reference.width);
-          expect(rect.top, closeTo(reference.top, 1));
+          // Profile lists help, legal and feedback under its prompt, so the
+          // prompt sits at the top there instead of centred; the pages that
+          // are only a prompt must still agree with each other.
+          if (page is! ProfileScreen && referenceCentred) {
+            expect(rect.top, closeTo(reference.top, 1));
+          }
         }
+        referenceCentred = page is! ProfileScreen;
         reference = rect;
         expect(tester.takeException(), isNull);
       }

@@ -78,6 +78,7 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return jsonError(`${err}`, 500);
+    console.error('[easyparcel-oauth-start] failed', err);
+    return jsonError('Could not start EasyParcel connection', 500);
   }
 });

@@ -17,6 +17,8 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            // The database before migration 0078: no server total yet.
+            adminPaymentsSummaryProvider.overrideWith((ref) async => null),
             adminAllOrdersProvider.overrideWith(
               (ref) async => [
                 Order(

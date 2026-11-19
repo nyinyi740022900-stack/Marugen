@@ -11,6 +11,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/service.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/guarded_write.dart';
 import '../../services/presentation/service_providers.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/sheet_header.dart';
@@ -70,29 +71,38 @@ class AdminServicesTab extends ConsumerWidget {
                               : AppPalette.of(context).error,
                         ),
                       ),
-                      trailing: IconButton(
-                        tooltip: 'Delete',
-                        icon: Icon(
-                          Icons.delete_outline,
-                          color: AppPalette.of(context).error,
+                      trailing: GuardedWrite(
+                        errorFallback: 'Could not delete the service.',
+                        errorContext: 'admin.services',
+                        builder: (context, busy, run) => IconButton(
+                          tooltip: 'Delete',
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: AppPalette.of(context).error,
+                          ),
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  final container = ProviderScope.containerOf(
+                                    context,
+                                    listen: false,
+                                  );
+                                  final confirmed =
+                                      await confirmDestructiveAction(
+                                        context,
+                                        title: 'Delete service?',
+                                        message:
+                                            'This permanently removes "${s.name}". This cannot be undone.',
+                                      );
+                                  if (!confirmed) return;
+                                  await run(() async {
+                                    await container
+                                        .read(serviceRepositoryProvider)
+                                        .deleteService(s.id);
+                                    container.invalidate(servicesProvider);
+                                  });
+                                },
                         ),
-                        onPressed: () async {
-                          final container = ProviderScope.containerOf(
-                            context,
-                            listen: false,
-                          );
-                          final confirmed = await confirmDestructiveAction(
-                            context,
-                            title: 'Delete service?',
-                            message:
-                                'This permanently removes "${s.name}". This cannot be undone.',
-                          );
-                          if (!confirmed) return;
-                          await ref
-                              .read(serviceRepositoryProvider)
-                              .deleteService(s.id);
-                          container.invalidate(servicesProvider);
-                        },
                       ),
                       onTap: () => _showServiceForm(context, ref, existing: s),
                     ),
@@ -377,10 +387,20 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
                             ),
                           ),
                         ),
+                        // A 48pt target kept inside the thumbnail (the
+                        // Stack clips anything hanging outside it), with
+                        // the glyph still in the corner.
                         Positioned(
-                          top: -6,
-                          right: -6,
+                          top: 0,
+                          right: 0,
                           child: IconButton(
+                            tooltip: 'Remove photo',
+                            alignment: Alignment.topRight,
+                            padding: const EdgeInsets.all(2),
+                            constraints: const BoxConstraints(
+                              minWidth: 48,
+                              minHeight: 48,
+                            ),
                             icon: Icon(
                               Icons.cancel,
                               size: 18,

@@ -9,41 +9,76 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/home_banner.dart';
 import '../../../shared/widgets/sized_network_image.dart';
-import '../../../shared/widgets/skeleton.dart';
 import 'home_banner_providers.dart';
 
 /// The Shop tab's hero carousel, fed by [liveHomeBannersProvider].
 ///
-/// Takes no space when there are no live slides or the fetch fails — a
-/// banner problem must never push the catalogue down or block it.
-class HeroBannerCarousel extends ConsumerWidget {
+/// Takes no space until there are live slides to show: nothing is reserved
+/// while loading (most days there are no slides, and a skeleton that then
+/// collapsed made the catalogue jump on every cold start), and a failed
+/// fetch never pushes the catalogue down or blocks it. When slides arrive
+/// the banner eases open; Reduce Motion shows it at once.
+///
+/// Slides are fetched again whenever the app returns from the background,
+/// so a banner the owner just published or ended is not stale for the rest
+/// of the day.
+class HeroBannerCarousel extends ConsumerStatefulWidget {
   const HeroBannerCarousel({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ref
-        .watch(liveHomeBannersProvider)
-        .when(
-          data: (banners) => banners.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: BannerCarousel(
-                    banners: banners,
-                    onOpen: (banner) => openBannerLink(context, banner),
-                  ),
-                ),
-          loading: () => const Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: AspectRatio(
-              aspectRatio: BannerCarousel.aspectRatio,
-              child: Skeleton(
-                borderRadius: BorderRadius.all(Radius.circular(AppRadius.lg)),
-              ),
+  ConsumerState<HeroBannerCarousel> createState() => _HeroBannerCarouselState();
+}
+
+class _HeroBannerCarouselState extends ConsumerState<HeroBannerCarousel> {
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycle = AppLifecycleListener(
+      onResume: () => ref.invalidate(liveHomeBannersProvider),
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // The last good slides stay up through a refresh or a failed refetch.
+    final banners =
+        ref.watch(liveHomeBannersProvider).valueOrNull ?? const <HomeBanner>[];
+    final Widget content = banners.isEmpty
+        ? const SizedBox(key: ValueKey('no-banners'), width: double.infinity)
+        : Padding(
+            key: const ValueKey('banners'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: BannerCarousel(
+              banners: banners,
+              onOpen: (banner) => openBannerLink(context, banner),
             ),
-          ),
-          error: (_, _) => const SizedBox.shrink(),
-        );
+          );
+    // Reduce Motion: the banner is simply there, nothing grows or fades.
+    // (AnimatedSize also cannot take a zero duration.)
+    if (MediaQuery.disableAnimationsOf(context)) return content;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 280),
+        switchInCurve: Curves.easeOut,
+        // Top-aligned so the slides do not slide down while the space opens.
+        layoutBuilder: (current, previous) => Stack(
+          alignment: Alignment.topCenter,
+          children: [...previous, ?current],
+        ),
+        child: content,
+      ),
+    );
   }
 }
 
@@ -181,12 +216,12 @@ class _BannerCarouselState extends State<BannerCarousel> {
                 itemCount: banners.length,
                 onPageChanged: (i) => setState(() => _page = i),
                 itemBuilder: (context, i) => Semantics(
-                  label:
-                      'Banner ${i + 1} of ${banners.length}'
-                      '${banners[i].title != null ? ': ${banners[i].title}' : ''}',
+                  label: bannerSemanticsLabel(banners[i], i, banners.length),
                   button: banners[i].linkUrl != null,
                   child: BannerSlide(
                     banner: banners[i],
+                    // Already in the label above: not read a second time.
+                    headlineInSemantics: false,
                     onTap: banners[i].linkUrl == null
                         ? null
                         : () => widget.onOpen?.call(banners[i]),
@@ -197,7 +232,6 @@ class _BannerCarouselState extends State<BannerCarousel> {
           ),
         ),
         if (banners.length > 1) ...[
-          const SizedBox(height: 10),
           _PaginationDots(
             count: banners.length,
             index: _page,
@@ -217,6 +251,17 @@ class _BannerCarouselState extends State<BannerCarousel> {
   }
 }
 
+/// What a screen reader says for a slide: its position, headline and, when
+/// the slide leads somewhere, the button label that names the action.
+String bannerSemanticsLabel(HomeBanner banner, int index, int count) {
+  final parts = [
+    'Banner ${index + 1} of $count',
+    if (banner.title != null) ': ${banner.title}',
+    if (banner.showsCta) '. ${banner.ctaLabel}',
+  ];
+  return parts.join();
+}
+
 /// One slide: photo, scrim, headline/subtitle and a CTA pill. Also the
 /// admin form's live preview, where [localImage] shows a photo that has
 /// not been uploaded yet.
@@ -224,11 +269,16 @@ class BannerSlide extends StatelessWidget {
   final HomeBanner banner;
   final VoidCallback? onTap;
   final Uint8List? localImage;
+
+  /// False where a parent's semantics label already says the headline (the
+  /// carousel), so a screen reader does not read it twice.
+  final bool headlineInSemantics;
   const BannerSlide({
     super.key,
     required this.banner,
     this.onTap,
     this.localImage,
+    this.headlineInSemantics = true,
   });
 
   @override
@@ -272,7 +322,7 @@ class BannerSlide extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           image,
-          if (banner.hasText || banner.ctaLabel != null)
+          if (banner.hasText || banner.showsCta)
             // Legibility over any photo: a scrim that is darkest where the
             // text sits and clear at the top so the image still reads.
             const DecoratedBox(
@@ -285,7 +335,7 @@ class BannerSlide extends StatelessWidget {
                 ),
               ),
             ),
-          if (banner.hasText || banner.ctaLabel != null)
+          if (banner.hasText || banner.showsCta)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -293,19 +343,22 @@ class BannerSlide extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (banner.title != null)
-                    Text(
-                      banner.title!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppColors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        height: 1.15,
-                        letterSpacing: -0.3,
-                        shadows: const [
-                          Shadow(color: Color(0x66000000), blurRadius: 8),
-                        ],
+                    ExcludeSemantics(
+                      excluding: !headlineInSemantics,
+                      child: Text(
+                        banner.title!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                          letterSpacing: -0.3,
+                          shadows: const [
+                            Shadow(color: Color(0x66000000), blurRadius: 8),
+                          ],
+                        ),
                       ),
                     ),
                   if (banner.subtitle != null && scaler.scale(14) <= 20) ...[
@@ -321,7 +374,8 @@ class BannerSlide extends StatelessWidget {
                       ),
                     ),
                   ],
-                  if (banner.ctaLabel != null) ...[
+                  // A button with nowhere to go is never drawn.
+                  if (banner.showsCta) ...[
                     const SizedBox(height: 10),
                     // Visual only: the whole slide is the tap target.
                     ExcludeSemantics(
@@ -374,22 +428,35 @@ class _PaginationDots extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           for (var i = 0; i < count; i++)
-            GestureDetector(
-              onTap: () => onSelect(i),
-              behavior: HitTestBehavior.opaque,
-              // 24pt tall hit area per dot, the dots stay visually small.
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 8),
-                child: AnimatedContainer(
-                  duration: reduceMotion
-                      ? Duration.zero
-                      : const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  width: i == index ? 18 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: i == index ? palette.accent : palette.border,
-                    borderRadius: BorderRadius.circular(3),
+            // 44pt square target per dot (the dots stay visually small);
+            // Flexible lets a long row of slides still fit a narrow phone.
+            Flexible(
+              child: Semantics(
+                button: true,
+                selected: i == index,
+                label: 'Go to banner ${i + 1}',
+                onTap: () => onSelect(i),
+                child: GestureDetector(
+                  onTap: () => onSelect(i),
+                  behavior: HitTestBehavior.opaque,
+                  excludeFromSemantics: true,
+                  child: SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: Center(
+                      child: AnimatedContainer(
+                        duration: reduceMotion
+                            ? Duration.zero
+                            : const Duration(milliseconds: 260),
+                        curve: Curves.easeOutCubic,
+                        width: i == index ? 18 : 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: i == index ? palette.accent : palette.border,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),

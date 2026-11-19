@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/guarded_write.dart';
 import '../../knowledge/presentation/knowledge_providers.dart';
 import '../services/admin_services_screen.dart';
 import 'admin_article_form.dart';
@@ -74,49 +75,66 @@ class _AdminVarieties extends ConsumerWidget {
                     color: v.active ? null : AppPalette.of(context).error,
                   ),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: v.active
-                          ? 'Hide from customers'
-                          : 'Show to customers',
-                      icon: Icon(
-                        v.active
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                        color: v.active
-                            ? AppPalette.of(context).textMuted
-                            : AppPalette.of(context).error,
+                trailing: GuardedWrite(
+                  errorFallback: 'Could not update the variety.',
+                  errorContext: 'admin.knowledge',
+                  builder: (context, busy, run) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: v.active
+                            ? 'Hide from customers'
+                            : 'Show to customers',
+                        icon: Icon(
+                          v.active
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: v.active
+                              ? AppPalette.of(context).textMuted
+                              : AppPalette.of(context).error,
+                        ),
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                await ref
+                                    .read(knowledgeRepositoryProvider)
+                                    .upsertVariety({
+                                      'active': !v.active,
+                                    }, id: v.id);
+                                ref.invalidate(varietiesProvider);
+                              }),
                       ),
-                      onPressed: () async {
-                        await ref
-                            .read(knowledgeRepositoryProvider)
-                            .upsertVariety({'active': !v.active}, id: v.id);
-                        ref.invalidate(varietiesProvider);
-                      },
-                    ),
-                    IconButton(
-                      tooltip: 'Delete',
-                      icon: Icon(
-                        Icons.delete_outline,
-                        color: AppPalette.of(context).error,
+                      IconButton(
+                        tooltip: 'Delete',
+                        icon: Icon(
+                          Icons.delete_outline,
+                          color: AppPalette.of(context).error,
+                        ),
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                final container = ProviderScope.containerOf(
+                                  context,
+                                  listen: false,
+                                );
+                                final confirmed =
+                                    await confirmDestructiveAction(
+                                      context,
+                                      title: 'Delete variety?',
+                                      message:
+                                          'This permanently removes "${v.name}". This cannot be undone.',
+                                    );
+                                if (!confirmed) return;
+                                await run(() async {
+                                  await container
+                                      .read(knowledgeRepositoryProvider)
+                                      .deleteVariety(v.id);
+                                  container.invalidate(varietiesProvider);
+                                });
+                              },
                       ),
-                      onPressed: () async {
-                        final confirmed = await confirmDestructiveAction(
-                          context,
-                          title: 'Delete variety?',
-                          message:
-                              'This permanently removes "${v.name}". This cannot be undone.',
-                        );
-                        if (!confirmed) return;
-                        await ref
-                            .read(knowledgeRepositoryProvider)
-                            .deleteVariety(v.id);
-                        ref.invalidate(varietiesProvider);
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 onTap: () => showVarietyForm(context, ref, existing: v),
               ),

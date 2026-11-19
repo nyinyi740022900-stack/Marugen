@@ -606,11 +606,11 @@ class _DeferredAuth implements AuthRepository {
   @override
   Future<void> signInWithEmail(String email, String password) => request();
   @override
-  Future<void> signUpWithEmail(
+  Future<bool> signUpWithEmail(
     String email,
     String password, {
     String? fullName,
-  }) => request();
+  }) => request().then((_) => false);
   @override
   Future<void> sendPasswordResetEmail(String email) => request();
   @override

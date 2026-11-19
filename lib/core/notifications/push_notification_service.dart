@@ -107,10 +107,42 @@ class PushNotificationService {
     }
   }
 
+  /// Whether the OS would still show its permission prompt: nobody has
+  /// answered it yet. False when notifications are already allowed (the
+  /// token was registered by [initialize]), when iOS has recorded a "Don't
+  /// Allow" (it never prompts again; that is changed in Settings), and when
+  /// push is not set up on this build. Android reports "never asked" and
+  /// "denied" alike, so there the caller's own asked-once flag decides.
+  static Future<bool> canAskPermission() async {
+    // Only ever waits for the startup initialisation; never starts one.
+    final started = _initFuture;
+    if (started == null) return false;
+    await started;
+    if (!_initialized) return false;
+    try {
+      final settings = await FirebaseMessaging.instance
+          .getNotificationSettings()
+          .timeout(const Duration(seconds: 8));
+      return switch (settings.authorizationStatus) {
+        AuthorizationStatus.notDetermined => true,
+        AuthorizationStatus.denied =>
+          defaultTargetPlatform == TargetPlatform.android,
+        _ => false,
+      };
+    } catch (e) {
+      developer.log(
+        'Could not read push permission: $e',
+        name: 'PushNotificationService',
+      );
+      return false;
+    }
+  }
+
   /// Shows the OS notification-permission prompt once per app session.
-  /// Deliberately not part of [initialize]: on first launch the iOS prompt
-  /// would otherwise appear on top of the promo popup. Shells call this
-  /// once their own launch dialogs are dismissed. Safe to call repeatedly.
+  /// Deliberately not part of [initialize]: a prompt on first launch has no
+  /// context. Customers are asked by PushPermissionPrompt after their first
+  /// order; the admin shell calls this after first paint, since staff need
+  /// new-order pushes from the start. Safe to call repeatedly.
   static Future<void> requestPermission() async {
     if (_permissionRequested) return;
     _permissionRequested = true;

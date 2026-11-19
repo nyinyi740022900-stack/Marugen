@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/knowledge.dart';
+import '../../../shared/utils/image_upload.dart';
 
 class KnowledgeRepository {
   final _client = SupabaseService.client;
@@ -11,18 +12,24 @@ class KnowledgeRepository {
   /// bucket/policy migration is needed.
   Future<String> uploadVarietyImage(
       String varietyId, Uint8List bytes, String ext) async {
+    final upload = prepareImageUpload(bytes, ext);
     final path =
-        'varieties/$varietyId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _client.storage.from('product-images').uploadBinary(path, bytes);
+        'varieties/$varietyId/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
+    await _client.storage
+        .from('product-images')
+        .uploadBinary(path, bytes, fileOptions: upload.fileOptions);
     return _client.storage.from('product-images').getPublicUrl(path);
   }
 
   /// Same bucket, `articles/` prefix — for a guide's cover photo.
   Future<String> uploadArticleImage(
       String articleId, Uint8List bytes, String ext) async {
+    final upload = prepareImageUpload(bytes, ext);
     final path =
-        'articles/$articleId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _client.storage.from('product-images').uploadBinary(path, bytes);
+        'articles/$articleId/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
+    await _client.storage
+        .from('product-images')
+        .uploadBinary(path, bytes, fileOptions: upload.fileOptions);
     return _client.storage.from('product-images').getPublicUrl(path);
   }
 

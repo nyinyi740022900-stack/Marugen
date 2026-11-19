@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/product.dart';
+import '../../../shared/utils/image_upload.dart';
 
 /// True only for errors that mean "the schema/table/relationship isn't
 /// there yet" (e.g. migration 0008/0020 not applied) — the one case this
@@ -221,9 +222,12 @@ class ProductRepository {
 
   Future<String> uploadProductImage(
       String productId, Uint8List bytes, String ext) async {
+    final upload = prepareImageUpload(bytes, ext);
     final path =
-        'products/$productId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _client.storage.from('product-images').uploadBinary(path, bytes);
+        'products/$productId/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
+    await _client.storage
+        .from('product-images')
+        .uploadBinary(path, bytes, fileOptions: upload.fileOptions);
     return _client.storage.from('product-images').getPublicUrl(path);
   }
 }

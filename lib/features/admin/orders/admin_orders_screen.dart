@@ -379,6 +379,7 @@ class _AdminOrderSearchFieldState
         suffixIcon: query.isEmpty
             ? null
             : IconButton(
+                tooltip: 'Clear search',
                 icon: const Icon(Icons.close, size: 18),
                 onPressed: () =>
                     ref.read(adminOrderSearchQueryProvider.notifier).state = '',

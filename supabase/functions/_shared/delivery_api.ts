@@ -10,6 +10,7 @@ import {
   validateSingaporeAddress,
 } from "./delivery.ts";
 import { getEasyParcelAccessToken } from "./easyparcel_token.ts";
+import { fetchWithTimeout, TIMEOUT_MS } from "./http.ts";
 export const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 export const serviceRoleKey = Deno.env.get("SB_SERVICE_KEY") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -182,18 +183,30 @@ export async function fetchEasyparcelTracking(
   }
   const observedAt = new Date().toISOString();
   const token = await getEasyParcelAccessToken(admin);
-  const response = await fetch(
-    "https://api.easyparcel.com/open_api/2026-06/shipment/tracking_status",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+  let response: Response;
+  let body;
+  try {
+    response = await fetchWithTimeout(
+      "https://api.easyparcel.com/open_api/2026-06/shipment/tracking_status",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ awb_numbers: [number] }),
       },
-      body: JSON.stringify({ awb_numbers: [number] }),
-    },
-  );
-  const body = await response.json();
+      TIMEOUT_MS.provider,
+    );
+    body = await response.json();
+  } catch (error) {
+    // Timeout, dropped connection or a non-JSON body: nothing was verified.
+    console.error("[delivery] tracking_status did not complete", error);
+    throw new DeliveryError(
+      "EasyParcel tracking could not be verified; try again later",
+      502,
+    );
+  }
   if (!response.ok || (body.status_code && body.status_code !== 200)) {
     throw new DeliveryError(
       "EasyParcel tracking could not be verified; try again later",
@@ -209,12 +222,46 @@ export async function fetchEasyparcelTracking(
     );
   }
 }
+// Authenticated read of one shipment from EasyParcel. Returns the provider's
+// `data` array, or null when EasyParcel answered but refused the request.
+// Callers must still match the shipment number (and AWB) inside it before
+// trusting any field.
+export async function fetchEasyparcelShipmentDetails(
+  admin: SupabaseClient,
+  shipmentNumber: string,
+): Promise<unknown> {
+  const token = await getEasyParcelAccessToken(admin);
+  let response: Response;
+  let body;
+  try {
+    response = await fetchWithTimeout(
+      "https://api.easyparcel.com/open_api/2026-09/shipment/details",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ shipment_number: shipmentNumber }),
+      },
+      TIMEOUT_MS.provider,
+    );
+    body = await response.json();
+  } catch (error) {
+    console.error("[delivery] shipment details did not complete", error);
+    throw new DeliveryError(
+      "EasyParcel shipment details could not be read; try again later",
+      502,
+    );
+  }
+  return response.ok && body.status_code === 200 ? body.data : null;
+}
 export async function notifyOrder(
   orderId: string,
   payload: { status?: string; event?: string },
 ) {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${supabaseUrl}/functions/v1/send-order-notification`,
       {
         method: "POST",
@@ -224,6 +271,7 @@ export async function notifyOrder(
         },
         body: JSON.stringify({ order_id: orderId, ...payload }),
       },
+      TIMEOUT_MS.notify,
     );
     if (!res.ok) console.error("[delivery] notification failed", res.status);
   } catch (error) {

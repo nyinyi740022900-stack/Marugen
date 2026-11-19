@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/appearance_tile.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/guest_account_state.dart';
@@ -18,6 +19,7 @@ import '../../../shared/widgets/content_width.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 import 'account_details_tiles.dart';
 import 'auth_providers.dart';
+import 'profile_help_section.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -69,7 +71,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Your photo was not updated. Check your connection and try again.',
+              friendlyErrorMessage(
+                e,
+                fallback:
+                    'Your photo was not updated. Check your connection and try again.',
+                context: 'profile.avatar',
+              ),
             ),
           ),
         );
@@ -304,24 +311,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       },
                     ),
                     const Divider(),
-                    ListTile(
-                      leading: const Icon(Icons.help_outline),
-                      title: const Text('FAQ & Support'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => context.push('/faq'),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.description_outlined),
-                      title: const Text('Terms of Service'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => context.push('/terms'),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.privacy_tip_outlined),
-                      title: const Text('Privacy Policy'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () => context.push('/privacy'),
-                    ),
+                    const ProfileHelpTiles(),
                     const Divider(),
                     ListTile(
                       leading: _signingOut
@@ -365,6 +355,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       enabled: !_deletingAccount,
                       onTap: _confirmDeleteAccount,
                     ),
+                    const AppVersionFooter(),
                   ],
                 ),
                 loading: () => const Center(
@@ -385,16 +376,29 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 }
 
 /// Shown on the Profile tab when browsing as a guest — invites login
-/// instead of showing broken/empty account fields.
+/// instead of showing broken/empty account fields, with help, legal and
+/// feedback still within reach underneath.
 class _GuestProfile extends StatelessWidget {
   const _GuestProfile();
 
   @override
   Widget build(BuildContext context) {
-    return const GuestAccountState(
-      icon: Icons.person_outline,
-      subtitle: 'View your profile and saved addresses.',
-      returnTo: '/?tab=profile',
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 20).plusBottomInset(context),
+      children: const [
+        GuestAccountState(
+          icon: Icons.person_outline,
+          subtitle: 'View your profile and saved addresses.',
+          returnTo: '/?tab=profile',
+        ),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [Divider(), ProfileHelpTiles(), AppVersionFooter()],
+          ),
+        ),
+      ],
     );
   }
 }

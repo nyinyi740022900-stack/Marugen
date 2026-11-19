@@ -8,7 +8,13 @@ import 'package:marugen_app/shared/models/home_banner.dart';
 const _slides = [
   HomeBanner(id: 'a', imageUrl: '', title: 'First', linkUrl: '/product/1'),
   HomeBanner(id: 'b', imageUrl: '', title: 'Second'),
-  HomeBanner(id: 'c', imageUrl: '', title: 'Third', ctaLabel: 'Shop'),
+  HomeBanner(
+    id: 'c',
+    imageUrl: '',
+    title: 'Third',
+    ctaLabel: 'Shop',
+    linkUrl: '/faq',
+  ),
 ];
 
 Widget _host(

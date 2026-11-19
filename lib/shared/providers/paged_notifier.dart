@@ -48,17 +48,29 @@ abstract class PagedNotifier<T> extends Notifier<AsyncValue<PagedListState<T>>> 
   /// are added between fetches).
   Future<List<T>> fetchPage(int offset, int limit);
 
+  /// Identifies the list the state currently belongs to. Every first-page
+  /// load (the initial build, a filter change, [refresh]) starts a new
+  /// generation; a response that comes back for an older one is dropped,
+  /// so a slow request for a previous filter, or a [loadNextPage] that
+  /// finishes after a [refresh], can never overwrite newer rows.
+  int _generation = 0;
+
   @override
   AsyncValue<PagedListState<T>> build() {
+    // Also covers responses that arrive after the provider is disposed.
+    ref.onDispose(() => _generation++);
     _loadFirstPage();
     return const AsyncLoading();
   }
 
   Future<void> _loadFirstPage() async {
+    final generation = ++_generation;
     try {
       final items = await fetchPage(0, kAdminPageSize);
+      if (generation != _generation) return;
       state = AsyncData(PagedListState(items: items, hasMore: items.length == kAdminPageSize));
     } catch (e, st) {
+      if (generation != _generation) return;
       state = AsyncError(e, st);
     }
   }
@@ -72,14 +84,17 @@ abstract class PagedNotifier<T> extends Notifier<AsyncValue<PagedListState<T>>> 
   Future<void> loadNextPage() async {
     final current = state.valueOrNull;
     if (current == null || !current.hasMore || current.isLoadingMore) return;
+    final generation = _generation;
     state = AsyncData(current.copyWith(isLoadingMore: true));
     try {
       final next = await fetchPage(current.items.length, kAdminPageSize);
+      if (generation != _generation) return;
       state = AsyncData(PagedListState(
         items: [...current.items, ...next],
         hasMore: next.length == kAdminPageSize,
       ));
     } catch (_) {
+      if (generation != _generation) return;
       // A transient failure loading page N+1 shouldn't wipe the N pages
       // already showing — just stop the spinner; scrolling again retries.
       state = AsyncData(current.copyWith(isLoadingMore: false));

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/service.dart';
+import '../../../shared/utils/image_upload.dart';
 
 class ServiceRepository {
   final _client = SupabaseService.client;
@@ -30,9 +31,12 @@ class ServiceRepository {
   /// Reuses the `product-images` bucket under a `services/` prefix — same
   /// admin-write/anyone-read policies, no new bucket needed.
   Future<String> uploadServiceImage(String serviceId, Uint8List bytes, String ext) async {
+    final upload = prepareImageUpload(bytes, ext);
     final path =
-        'services/$serviceId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _client.storage.from('product-images').uploadBinary(path, bytes);
+        'services/$serviceId/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
+    await _client.storage
+        .from('product-images')
+        .uploadBinary(path, bytes, fileOptions: upload.fileOptions);
     return _client.storage.from('product-images').getPublicUrl(path);
   }
 }

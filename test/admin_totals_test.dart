@@ -84,6 +84,7 @@ void main() {
       ProviderScope(
         overrides: [
           productListProvider.overrideWith((ref) async => []),
+          adminAllProductsProvider.overrideWith((ref) async => []),
           adminOrdersProvider.overrideWith((ref) async => <Order>[]),
           unreadNotificationCountProvider.overrideWith((ref) => 0),
           adminOrderSummaryProvider.overrideWith(

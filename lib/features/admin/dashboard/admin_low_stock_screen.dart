@@ -73,8 +73,9 @@ class AdminLowStockScreen extends ConsumerWidget {
             color: AppPalette.of(context).accent,
           ),
         ),
+        // The low-stock list is derived; the fetch to retry is its source.
         error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(lowStockProductsProvider)),
+            ErrorState(onRetry: () => ref.invalidate(adminAllProductsProvider)),
       ),
     );
   }

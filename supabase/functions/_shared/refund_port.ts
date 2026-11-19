@@ -1,4 +1,5 @@
 import { createPaymentPort } from "./payment_port.ts";
+import { fetchWithTimeout, TIMEOUT_MS } from "./http.ts";
 import type { RefundPort } from "./refund_lifecycle.ts";
 
 export function createRefundPort(
@@ -48,7 +49,7 @@ export function createRefundPort(
     },
     notify: async (orderId) => {
       try {
-        const response = await fetch(
+        const response = await fetchWithTimeout(
           `${url}/functions/v1/send-order-notification`,
           {
             method: "POST",
@@ -58,6 +59,7 @@ export function createRefundPort(
             },
             body: JSON.stringify({ order_id: orderId, status: "refunded" }),
           },
+          TIMEOUT_MS.notify,
         );
         if (!response.ok) {
           console.error("Refund notification failed", orderId, response.status);

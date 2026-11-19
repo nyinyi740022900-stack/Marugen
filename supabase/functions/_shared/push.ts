@@ -6,6 +6,7 @@
 // reported, never thrown at the caller's order/cancellation flow.
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { GoogleAuth } from "https://esm.sh/google-auth-library@9?target=deno";
+import { fetchWithTimeout, TIMEOUT_MS } from "./http.ts";
 
 /// Must match the channel created in android/.../MainActivity.kt. A
 /// high-importance channel is what makes Android ring and show a banner
@@ -154,8 +155,10 @@ export async function pushToRecipients(
 
   const results = await Promise.all(
     tokenOwners.map(async (t) => {
-      const res = await fetch(
-        `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`,
+      let res: Response;
+      try {
+        res = await fetchWithTimeout(
+          `https://fcm.googleapis.com/v1/projects/${serviceAccount.project_id}/messages:send`,
         {
           method: "POST",
           headers: {
@@ -172,7 +175,14 @@ export async function pushToRecipients(
             ),
           ),
         },
-      );
+          TIMEOUT_MS.push,
+        );
+      } catch (error) {
+        // One slow or unreachable send must not fail the other devices, and
+        // says nothing about whether the token is still valid.
+        console.error("[push] FCM send did not complete", error);
+        return { token: t.token, ok: false, unregistered: false };
+      }
       if (res.ok) return { token: t.token, ok: true, unregistered: false };
       const text = await res.text();
       console.error("[push] FCM send failed", res.status, text);

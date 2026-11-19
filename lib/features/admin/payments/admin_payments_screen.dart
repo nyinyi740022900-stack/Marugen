@@ -17,6 +17,24 @@ class AdminPaymentsPane extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ordersAsync = ref.watch(adminAllOrdersProvider);
+    final summaryAsync = ref.watch(adminPaymentsSummaryProvider);
+    void retry() {
+      ref.invalidate(adminAllOrdersProvider);
+      ref.invalidate(adminPaymentsSummaryProvider);
+    }
+
+    // The headline is the server's figure. A failure to load it is an
+    // error like any other; only a database without the function yet
+    // (summary == null) falls back to adding up the loaded orders.
+    if (summaryAsync.hasError && !summaryAsync.isLoading) {
+      return ErrorState(onRetry: retry);
+    }
+    if (!summaryAsync.hasValue) {
+      return Center(
+        child: CircularProgressIndicator(color: AppPalette.of(context).accent),
+      );
+    }
+    final summary = summaryAsync.value;
 
     return OrderPullToRefresh(
       onRefresh: () => refreshAdminOrdersFromCarrier(
@@ -44,10 +62,12 @@ class AdminPaymentsPane extends ConsumerWidget {
               ],
             );
           }
-          final totalRevenue = transactions.fold<double>(
-            0,
-            (sum, order) => sum + order.netPaidAmount,
-          );
+          final totalRevenue =
+              summary?.collected ??
+              transactions.fold<double>(
+                0,
+                (sum, order) => sum + order.netPaidAmount,
+              );
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(AppSpacing.lg),
@@ -137,8 +157,7 @@ class AdminPaymentsPane extends ConsumerWidget {
             color: AppPalette.of(context).accent,
           ),
         ),
-        error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(adminAllOrdersProvider)),
+        error: (e, _) => ErrorState(onRetry: retry),
       ),
     );
   }

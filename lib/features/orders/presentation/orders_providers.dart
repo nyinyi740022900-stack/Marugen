@@ -4,6 +4,7 @@ import '../../../shared/models/order.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../cart/domain/cart_item.dart';
 import '../data/order_repository.dart';
 import '../../admin/delivery/delivery_repository.dart';
 import '../../admin/delivery/easyparcel_providers.dart';
@@ -66,7 +67,9 @@ Future<void> refreshAdminOrdersFromCarrier(ProviderContainer container) async {
     await refreshCarrierOrders(container, orders);
   } finally {
     container.invalidate(adminOrdersProvider);
+    container.invalidate(adminPaymentsSummaryProvider);
     container.invalidate(fulfillmentOrdersProvider);
+    container.invalidate(orderByIdProvider);
     await container.read(adminOrdersPagedProvider.notifier).refresh();
   }
 }
@@ -81,6 +84,7 @@ Future<void> refreshCustomerOrdersFromCarrier(
     await refreshCarrierOrders(container, orders);
   } finally {
     container.invalidate(myOrdersProvider);
+    container.invalidate(orderByIdProvider);
     await container.read(myOrdersProvider.future);
   }
 }
@@ -208,16 +212,80 @@ final adminOrderSummaryProvider = FutureProvider<AdminOrderSummary>((ref) {
   return ref.watch(orderRepositoryProvider).fetchAdminOrderSummary();
 });
 
+/// Payments pane headline from the server. Null until migration 0078 is
+/// applied; the pane then adds up [adminAllOrdersProvider] as it used to.
+final adminPaymentsSummaryProvider = FutureProvider<AdminPaymentsSummary?>((
+  ref,
+) {
+  return ref.watch(orderRepositoryProvider).fetchAdminPaymentsSummary();
+});
+
+/// Most rows the Top Products ranking asks for (the function's own cap).
+const int kTopProductsLimit = 1000;
+
+/// The one ranking behind both the dashboard's Top Products card and the
+/// full screen, so they can never disagree. Ranked on the server; until
+/// migration 0078 is applied it is ranked here from
+/// [adminAllOrdersProvider], as before.
+final adminTopProductsProvider = FutureProvider<List<TopProductSales>>((
+  ref,
+) async {
+  final ranked = await ref
+      .watch(orderRepositoryProvider)
+      .fetchAdminTopProducts(limit: kTopProductsLimit);
+  if (ranked != null) return ranked;
+  final orders = await ref.watch(adminAllOrdersProvider.future);
+  return rankTopProductSales(orders).take(kTopProductsLimit).toList();
+});
+
 void refreshAdminOrders(WidgetRef ref) {
   ref.invalidate(adminOrdersProvider);
   ref.invalidate(adminAllOrdersProvider);
   ref.invalidate(adminOrderSummaryProvider);
+  ref.invalidate(adminPaymentsSummaryProvider);
+  ref.invalidate(adminTopProductsProvider);
   ref.invalidate(fulfillmentOrdersProvider);
+  // Every open order detail (the whole family): a status change made from a
+  // list card must not leave the detail screen showing the old status.
+  ref.invalidate(orderByIdProvider);
   ref.read(adminOrdersPagedProvider.notifier).refresh();
 }
 
+/// "The payment sheet just reported success for this order, but the server
+/// has not recorded it yet" — set by checkout / Complete payment, read by the
+/// order screen, which shows a confirming state and keeps re-checking (see
+/// `_PaymentConfirmationPoller`). It is a display hint only: nothing here
+/// marks an order paid, the order's status still comes from the server.
+///
+/// Held in memory so a deep link or a restart can never claim a payment was
+/// received, and dropped when the signed-in account changes.
+class PaymentAwaitingConfirmation {
+  final String orderId;
+  final String ownerId;
+
+  /// The cart lines this payment bought — removed from the cart once the
+  /// server confirms. Empty for Buy Now, which never used the cart.
+  final List<CartItem> cartLines;
+
+  const PaymentAwaitingConfirmation({
+    required this.orderId,
+    required this.ownerId,
+    this.cartLines = const [],
+  });
+}
+
+final paymentAwaitingConfirmationProvider =
+    StateProvider<PaymentAwaitingConfirmation?>((ref) {
+      ref.watch(currentUserIdProvider);
+      return null;
+    });
+
 /// Session-scoped authoritative detail; backend RLS remains the access boundary.
-final orderByIdProvider = FutureProvider.family<Order?, String>((
+///
+/// Auto-disposed so every visit to an order (including one opened from a
+/// push notification about a status change) fetches its current state rather
+/// than whatever was cached the first time it was opened this session.
+final orderByIdProvider = FutureProvider.autoDispose.family<Order?, String>((
   ref,
   id,
 ) async {

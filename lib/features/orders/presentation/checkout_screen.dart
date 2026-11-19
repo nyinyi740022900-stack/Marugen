@@ -16,6 +16,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/crash/crash_reporting.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/address.dart';
+import '../../../shared/models/app_user.dart';
+import '../../../shared/models/product.dart';
 import '../../../shared/models/promo_code.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/price_format.dart';
@@ -62,6 +64,15 @@ class CheckoutScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<CheckoutScreen> createState() => _CheckoutScreenState();
+}
+
+/// The server's PaymentIntent is for a different amount than the total
+/// this screen showed. Nothing was charged.
+class _CheckoutTotalChanged implements Exception {
+  const _CheckoutTotalChanged();
+
+  @override
+  String toString() => 'Checkout total differs from the server total';
 }
 
 class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
@@ -391,12 +402,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         // Nothing was charged: release the reserved stock (a live fish
         // especially) now instead of holding it for the 30-minute cleanup.
         await _releasePendingOrder(pendingOrderId);
-        throw StateError(
-          'Checkout total changed. Review your order before paying.',
-        );
+        throw const _CheckoutTotalChanged();
       }
 
-      await presentPendingPayment(
+      final sheetReportedSuccess = await presentPendingPayment(
         intent: intent,
         ownsCheckout: () => _ownsCheckout,
         presentPayment: (clientSecret) => showStripePaymentSheet(
@@ -422,6 +431,20 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       );
       if (!mounted || !_ownsCheckout) return;
       if (!confirmed) {
+        // Charged, but the webhook has not reached the order yet. Tell the
+        // order screen so it shows "confirming" and keeps checking rather
+        // than offering to pay again — only when the sheet really reported
+        // success, and the cart is emptied there once the server agrees.
+        final ownerId = _checkoutOwner;
+        if (sheetReportedSuccess && ownerId != null) {
+          ref
+              .read(paymentAwaitingConfirmationProvider.notifier)
+              .state = PaymentAwaitingConfirmation(
+            orderId: pendingOrderId,
+            ownerId: ownerId,
+            cartLines: _isBuyNow ? const [] : List.of(freshItems),
+          );
+        }
         ref.invalidate(myOrdersProvider);
         context.go('/orders/$pendingOrderId');
         return;
@@ -432,10 +455,14 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       // customer who'd already opened "My Orders" before checking out
       // would place an order successfully (see the order-detail screen
       // that follows) but then find it missing from their order history
-      // until something else happened to invalidate it. Same reasoning
-      // for admin's list, since staff may have it open at the same time.
+      // until something else happened to invalidate it.
       ref.invalidate(myOrdersProvider);
-      refreshAdminOrders(ref);
+      // Only for staff buying on their own account: a customer has no
+      // admin lists, and refreshing them would start the admin order
+      // queries (which RLS answers with nothing) after every purchase.
+      if (ref.read(currentAppUserProvider).valueOrNull?.role.isAdmin == true) {
+        refreshAdminOrders(ref);
+      }
       // Land on the order itself (with a success banner) instead of
       // dumping the customer back to the shop grid with only a toast —
       // the order confirmation *is* the order detail screen, not a
@@ -459,6 +486,23 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           () => _error = e.error.code == FailureCode.Canceled
               ? 'No payment was taken. Your cart is unchanged — tap Pay when you are ready.'
               : 'Payment could not be completed. Check your payment details and try again.',
+        );
+      }
+    } on _CheckoutTotalChanged catch (e, st) {
+      // App and server priced this checkout differently: worth seeing even
+      // though the customer gets clear copy.
+      developer.log('Checkout total changed', name: 'CheckoutScreen');
+      CrashReporting.recordError(e, st, reason: 'checkout.payment');
+      if (_ownsCheckout) {
+        ref.invalidate(checkoutShippingQuoteProvider(shippingKey));
+        // Still "processing", so Pay stays disabled until what the total
+        // is made of has been fetched again.
+        await _refreshPricing();
+      }
+      if (mounted) {
+        setState(
+          () => _error =
+              'Checkout total changed. Review your order before paying.',
         );
       }
     } catch (e, st) {
@@ -486,6 +530,102 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     } finally {
       if (mounted) setState(() => _processing = false);
     }
+  }
+
+  /// Fetches again everything this screen prices the order from — the GST
+  /// setting, the applied promo code and the products themselves — after
+  /// the server charged a different total than the one shown. Without it
+  /// the screen kept its stale copy and every further Pay tap failed the
+  /// same way until the customer left checkout. Each part is best-effort:
+  /// one failing must not stop the others.
+  Future<void> _refreshPricing() async {
+    ref.invalidate(shopSettingsProvider);
+    try {
+      await ref.read(shopSettingsProvider.future);
+    } catch (_) {
+      // The totals card shows its own error state with a retry.
+    }
+    if (!_ownsCheckout) return;
+
+    final applied = _appliedPromo;
+    if (applied != null) {
+      try {
+        final promo = await ref
+            .read(promoRepositoryProvider)
+            .lookupCode(applied.code);
+        if (!_ownsCheckout) return;
+        final usable =
+            promo != null && promo.isUsable && !promo.alreadyRedeemed;
+        setState(() {
+          _appliedPromo = usable ? promo : null;
+          _promoError = usable
+              ? null
+              : 'This promo code can no longer be used.';
+          if (!usable) _promoCtrl.clear();
+        });
+      } catch (_) {
+        // Keep the code as applied; the server still decides at payment.
+      }
+    }
+    if (!_ownsCheckout) return;
+
+    try {
+      if (_isBuyNow) {
+        final fresh = await _freshBuyNowItems(List.of(_buyNowItems!));
+        if (!_ownsCheckout) return;
+        setState(() {
+          _buyNowItems
+            ..clear()
+            ..addAll(fresh);
+        });
+      } else {
+        await ref.read(cartProvider.notifier).refreshFromServer();
+      }
+    } catch (_) {
+      // Prices stay as shown; the server revalidates them at payment.
+    }
+  }
+
+  /// [items] with current prices and stock, the way
+  /// `CartNotifier.refreshFromServer` treats cart lines: a line that can
+  /// no longer be bought is dropped, a quantity above stock is reduced.
+  Future<List<CartItem>> _freshBuyNowItems(List<CartItem> items) async {
+    final repo = ref.read(productRepositoryProvider);
+    final fresh = <CartItem>[];
+    for (final item in items) {
+      final product = await repo.fetchProductById(item.product.id);
+      if (product == null ||
+          product.isSold ||
+          !product.isPurchasable ||
+          product.isOutOfStock) {
+        continue;
+      }
+      ProductVariant? variant;
+      final selected = item.selectedVariant;
+      if (selected != null) {
+        final match = product.variants.where((v) => v.id == selected.id);
+        if (match.isEmpty) continue;
+        variant = match.first;
+      } else if (product.hasVariants) {
+        continue;
+      }
+      final size = product.hasSizeOptions ? item.selectedSize : null;
+      if (product.hasSizeOptions &&
+          (size == null || !product.sizeOptions.contains(size))) {
+        continue;
+      }
+      final available = CartNotifier.availableFor(product, variant, size: size);
+      if (available < 1) continue;
+      fresh.add(
+        CartItem(
+          product: product,
+          quantity: product.isLiveFish ? 1 : item.quantity.clamp(1, available),
+          selectedVariant: variant,
+          selectedSize: size,
+        ),
+      );
+    }
+    return fresh;
   }
 
   /// Cancels an unpaid order this checkout created so its stock is free

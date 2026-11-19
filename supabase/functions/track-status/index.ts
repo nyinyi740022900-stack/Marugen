@@ -10,6 +10,11 @@
 import { seventeentrackOrderStatus } from "../_shared/delivery.ts";
 import { notifyOrder } from "../_shared/delivery_api.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import {
+  fetchWithTimeout,
+  isTimeoutError,
+  TIMEOUT_MS,
+} from "../_shared/http.ts";
 
 const track17ApiKey = Deno.env.get("TRACK17_API_KEY") ?? "";
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -83,7 +88,7 @@ Deno.serve(async (req) => {
       payload.carrier = order.tracking_carrier_code;
     }
 
-    const trackRes = await fetch(
+    const trackRes = await fetchWithTimeout(
       "https://api.17track.net/track/v2.4/gettrackinfo",
       {
         method: "POST",
@@ -93,6 +98,7 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify([payload]),
       },
+      TIMEOUT_MS.provider,
     );
 
     const trackData = await trackRes.json();
@@ -140,7 +146,13 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
-    return jsonError(`${err}`, 500);
+    console.error("[track-status] failed", err);
+    return jsonError(
+      isTimeoutError(err)
+        ? "17TRACK did not respond in time. Try again shortly."
+        : "Tracking status could not be refreshed",
+      isTimeoutError(err) ? 504 : 500,
+    );
   }
 });
 

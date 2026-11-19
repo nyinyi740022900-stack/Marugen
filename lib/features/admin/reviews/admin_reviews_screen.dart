@@ -121,6 +121,7 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
   bool _replying = false;
   late final _replyCtrl = TextEditingController(text: widget.review.shopReply);
   bool _saving = false;
+  bool _togglingHidden = false;
 
   @override
   void dispose() {
@@ -154,6 +155,41 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
       }
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _toggleHidden() async {
+    if (_togglingHidden) return;
+    final review = widget.review;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _togglingHidden = true);
+    try {
+      await ref
+          .read(reviewRepositoryProvider)
+          .setHidden(review.id, !review.isHidden);
+      ref.read(adminReviewsPagedProvider.notifier).refresh();
+      // Same gap _saveReply had above: the customer-facing product page
+      // watches this family provider, not the admin list, so
+      // hiding/unhiding never showed up there until something else
+      // happened to invalidate it.
+      ref.invalidate(productReviewsProvider(review.productId));
+    } catch (e, st) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: review.isHidden
+                  ? 'Could not unhide the review.'
+                  : 'Could not hide the review.',
+              context: 'admin.reviews',
+              stackTrace: st,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _togglingHidden = false);
     }
   }
 
@@ -362,18 +398,7 @@ class _AdminReviewCardState extends ConsumerState<_AdminReviewCard> {
                     child: Text(hasReply ? 'Edit Reply' : 'Reply'),
                   ),
                 TextButton(
-                  onPressed: () async {
-                    await ReviewRepository().setHidden(
-                      review.id,
-                      !review.isHidden,
-                    );
-                    ref.read(adminReviewsPagedProvider.notifier).refresh();
-                    // Same gap _saveReply had above: the customer-facing
-                    // product page watches this family provider, not the
-                    // admin list, so hiding/unhiding never showed up there
-                    // until something else happened to invalidate it.
-                    ref.invalidate(productReviewsProvider(review.productId));
-                  },
+                  onPressed: _togglingHidden ? null : _toggleHidden,
                   child: Text(review.isHidden ? 'Unhide' : 'Hide'),
                 ),
               ],

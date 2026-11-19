@@ -7,12 +7,24 @@ import '../models/support_contact.dart';
 import '../providers/settings_providers.dart';
 
 /// Choose a support colleague and an explicit contact channel.
-Future<void> showSupportContactPicker(BuildContext context, {String? message}) {
+///
+/// A [message] about an order belongs to the account that opened the picker
+/// and is withheld if the account changes. Pass [messageIsPersonal] false
+/// for a message with nothing private in it (app feedback), which a guest
+/// may send too.
+Future<void> showSupportContactPicker(
+  BuildContext context, {
+  String? message,
+  bool messageIsPersonal = true,
+}) {
   return Navigator.of(context).push<void>(
     MaterialPageRoute(
       builder: (_) => Scaffold(
         appBar: AppBar(title: const Text('Contact Support')),
-        body: SupportContactPicker(message: message),
+        body: SupportContactPicker(
+          message: message,
+          messageIsPersonal: messageIsPersonal,
+        ),
       ),
     ),
   );
@@ -20,7 +32,12 @@ Future<void> showSupportContactPicker(BuildContext context, {String? message}) {
 
 class SupportContactPicker extends ConsumerStatefulWidget {
   final String? message;
-  const SupportContactPicker({super.key, this.message});
+  final bool messageIsPersonal;
+  const SupportContactPicker({
+    super.key,
+    this.message,
+    this.messageIsPersonal = true,
+  });
 
   @override
   ConsumerState<SupportContactPicker> createState() =>
@@ -34,13 +51,15 @@ class _SupportContactPickerState extends ConsumerState<SupportContactPicker> {
   @override
   void initState() {
     super.initState();
-    if (widget.message != null) {
+    if (_guardsMessage) {
       _messageAccountId = ref.read(currentUserIdProvider);
     }
   }
 
+  bool get _guardsMessage => widget.message != null && widget.messageIsPersonal;
+
   bool get _canShareMessage =>
-      widget.message == null ||
+      !_guardsMessage ||
       (_messageAccountId != null &&
           ref.read(currentUserIdProvider) == _messageAccountId);
 
@@ -85,7 +104,7 @@ class _SupportContactPickerState extends ConsumerState<SupportContactPicker> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.message != null) {
+    if (_guardsMessage) {
       ref.watch(currentUserIdProvider);
       if (!_canShareMessage) {
         return ListView(

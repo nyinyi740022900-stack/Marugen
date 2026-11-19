@@ -535,6 +535,20 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        // A single live fish is the animal in the photos.
+                        // A batch listing ("choose fish") is several, so
+                        // the promise would not be true there.
+                        if (product.isLiveFish && !product.hasVariants) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            'You are buying this exact fish — photographed at our farm.',
+                            style: TextStyle(
+                              color: AppPalette.of(context).textMuted,
+                              fontSize: 13,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
                         if (product.hasVariants || product.hasSizeOptions) ...[
                           const SizedBox(height: AppSpacing.sm),
                           Text(
@@ -1288,11 +1302,15 @@ class _DeliveryInfoCard extends ConsumerWidget {
             children: [
               _InfoRow(
                 icon: Icons.local_shipping_outlined,
-                title: 'Island-wide delivery in Singapore',
+                // Live fish are not handed to a courier/API — the shop
+                // hand-delivers these orders itself for animal welfare, and
+                // the server always quotes that delivery at S$0 to the
+                // buyer (shop_delivery / seller_100), mixed baskets too.
+                title: isLiveFish
+                    ? 'Free hand delivery in Singapore'
+                    : 'Island-wide delivery in Singapore',
                 subtitle: isLiveFish
-                    // Live fish are not handed to a courier/API — the shop
-                    // hand-delivers these orders itself for animal welfare.
-                    ? 'Hand-delivered by our team; no courier tracking for live fish.'
+                    ? "Our team brings your fish to your door. We'll message you after payment to agree a time."
                     : 'Shipped by courier; tracking number appears on your order.',
               ),
               if (isLiveFish) ...[

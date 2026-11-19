@@ -7,14 +7,18 @@ import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/home_banner.dart';
+import '../../../shared/models/product.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/sized_network_image.dart'
     show SizedNetworkImage, uploadImageMaxSide;
 import '../../../shared/widgets/skeleton.dart';
+import '../../banners/domain/banner_link.dart';
 import '../../banners/presentation/hero_banner_carousel.dart';
 import '../../banners/presentation/home_banner_providers.dart';
+import '../../shop/presentation/shop_providers.dart';
+import 'banner_product_picker.dart';
 
 /// Admin › More › Home Banners: the slides of the Shop tab's hero carousel.
 /// Drag to reorder, switch to show/hide, tap to edit, + to add.
@@ -306,7 +310,22 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   late final _title = TextEditingController(text: widget.existing?.title);
   late final _subtitle = TextEditingController(text: widget.existing?.subtitle);
   late final _cta = TextEditingController(text: widget.existing?.ctaLabel);
-  late final _link = TextEditingController(text: widget.existing?.linkUrl);
+  // Where a tap leads: a choice, not a hand-typed path. A saved value
+  // opens on the choice it belongs to (see bannerLinkKindOf).
+  late final BannerLinkKind _savedLinkKind = bannerLinkKindOf(
+    widget.existing?.linkUrl,
+  );
+  late BannerLinkKind _linkKind = _savedLinkKind;
+  late String? _productId = productIdFromBannerLink(widget.existing?.linkUrl);
+  String? _pickedProductName;
+  late final _web = TextEditingController(
+    text: _savedLinkKind == BannerLinkKind.web ? widget.existing?.linkUrl : '',
+  );
+  late final _appPage = TextEditingController(
+    text: _savedLinkKind == BannerLinkKind.appPage
+        ? widget.existing?.linkUrl
+        : '',
+  );
   late bool _active = widget.existing?.active ?? true;
   late DateTime? _startsAt = widget.existing?.startsAt;
   late DateTime? _endsAt = widget.existing?.endsAt;
@@ -322,7 +341,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
         _title.text.trim() != (e?.title ?? '') ||
         _subtitle.text.trim() != (e?.subtitle ?? '') ||
         _cta.text.trim() != (e?.ctaLabel ?? '') ||
-        _link.text.trim() != (e?.linkUrl ?? '') ||
+        (_linkValue ?? '') != (e?.linkUrl ?? '') ||
         _active != (e?.active ?? true) ||
         _startsAt != e?.startsAt ||
         _endsAt != e?.endsAt;
@@ -331,15 +350,47 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   String? get _imageError =>
       _picked == null && widget.existing == null ? 'Add a photo.' : null;
 
-  String? get _linkError {
-    final v = _link.text.trim();
-    if (v.isEmpty || v.startsWith('/')) return null;
-    final uri = Uri.tryParse(v);
-    if (uri != null && (uri.isScheme('https') || uri.isScheme('http'))) {
-      return null;
-    }
-    return 'Use an in-app path like /product/… or a link starting with https://';
+  /// What is stored in `link_url` for the current choice; null is no link.
+  String? get _linkValue {
+    String? text(TextEditingController c) =>
+        c.text.trim().isEmpty ? null : c.text.trim();
+    return switch (_linkKind) {
+      BannerLinkKind.none => null,
+      BannerLinkKind.product =>
+        _productId == null ? null : productBannerLink(_productId!),
+      BannerLinkKind.faq => faqBannerLink,
+      BannerLinkKind.web => text(_web),
+      BannerLinkKind.appPage => text(_appPage),
+    };
   }
+
+  /// The linked product, once the product list has loaded. A product that
+  /// is no longer in the list was deleted.
+  Product? _linkedProduct(List<Product>? products) {
+    if (products == null || _productId == null) return null;
+    for (final p in products) {
+      if (p.id == _productId) return p;
+    }
+    return null;
+  }
+
+  String? _linkErrorFor(List<Product>? products) => switch (_linkKind) {
+    BannerLinkKind.none || BannerLinkKind.faq => null,
+    BannerLinkKind.product =>
+      _productId == null
+          ? 'Choose a product.'
+          : products != null && _linkedProduct(products) == null
+          ? 'That product no longer exists. Choose another one.'
+          : null,
+    BannerLinkKind.web => bannerWebAddressError(_web.text),
+    BannerLinkKind.appPage => bannerAppPageError(_appPage.text),
+  };
+
+  /// A button nobody can follow is a dead end for the customer.
+  String? get _ctaError =>
+      _cta.text.trim().isNotEmpty && _linkKind == BannerLinkKind.none
+      ? 'Add a link, or remove the button label.'
+      : null;
 
   String? get _windowError =>
       _startsAt != null && _endsAt != null && !_endsAt!.isAfter(_startsAt!)
@@ -349,7 +400,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   @override
   void initState() {
     super.initState();
-    for (final c in [_title, _subtitle, _cta, _link]) {
+    for (final c in [_title, _subtitle, _cta, _web, _appPage]) {
       c.addListener(() => setState(() {}));
     }
   }
@@ -359,7 +410,8 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
     _title.dispose();
     _subtitle.dispose();
     _cta.dispose();
-    _link.dispose();
+    _web.dispose();
+    _appPage.dispose();
     super.dispose();
   }
 
@@ -378,6 +430,15 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
         _pickedBytes = bytes;
       });
     }
+  }
+
+  Future<void> _pickProduct() async {
+    final product = await showBannerProductPicker(context);
+    if (product == null || !mounted) return;
+    setState(() {
+      _productId = product.id;
+      _pickedProductName = product.name;
+    });
   }
 
   Future<void> _pickDateTime({required bool start}) async {
@@ -427,8 +488,17 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     setState(() => _submitted = true);
-    if (_imageError != null || _linkError != null || _windowError != null) {
+    if (_imageError != null ||
+        _ctaError != null ||
+        _linkErrorFor(
+              _linkKind == BannerLinkKind.product
+                  ? ref.read(adminAllProductsProvider).valueOrNull
+                  : null,
+            ) !=
+            null ||
+        _windowError != null) {
       return;
     }
     setState(() {
@@ -451,7 +521,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
         'title': clean(_title),
         'subtitle': clean(_subtitle),
         'cta_label': clean(_cta),
-        'link_url': clean(_link),
+        'link_url': _linkValue,
         'active': _active,
         'starts_at': _startsAt?.toUtc().toIso8601String(),
         'ends_at': _endsAt?.toUtc().toIso8601String(),
@@ -516,13 +586,18 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   @override
   Widget build(BuildContext context) {
     final palette = AppPalette.of(context);
+    // Only needed to name the linked product and to notice a deleted one.
+    final products = _linkKind == BannerLinkKind.product
+        ? ref.watch(adminAllProductsProvider).valueOrNull
+        : null;
+    final linkError = _submitted ? _linkErrorFor(products) : null;
     final preview = HomeBanner(
       id: widget.existing?.id ?? 'new',
       imageUrl: widget.existing?.imageUrl ?? '',
       title: _title.text.trim().isEmpty ? null : _title.text.trim(),
       subtitle: _subtitle.text.trim().isEmpty ? null : _subtitle.text.trim(),
       ctaLabel: _cta.text.trim().isEmpty ? null : _cta.text.trim(),
-      linkUrl: _link.text.trim().isEmpty ? null : _link.text.trim(),
+      linkUrl: _linkValue,
     );
     return PopScope(
       canPop: !_dirty || _saving,
@@ -568,7 +643,12 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            Row(
+            // A Wrap, not a Row: at large text the hint drops under the
+            // button instead of being squeezed into a sliver beside it.
+            Wrap(
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 OutlinedButton.icon(
                   onPressed: _pickImage,
@@ -579,18 +659,15 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
                         : 'Replace photo',
                   ),
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Text(
-                    _submitted && _imageError != null
-                        ? _imageError!
-                        : 'Landscape photo, about 2:1. Resized to 1600 px.',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: _submitted && _imageError != null
-                          ? palette.error
-                          : palette.textMuted,
-                    ),
+                Text(
+                  _submitted && _imageError != null
+                      ? _imageError!
+                      : 'Landscape photo, about 2:1. Resized to 1600 px.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: _submitted && _imageError != null
+                        ? palette.error
+                        : palette.textMuted,
                   ),
                 ),
               ],
@@ -624,27 +701,102 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
               maxLength: 30,
               textCapitalization: TextCapitalization.words,
               textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Button label',
                 hintText: 'e.g. Shop Koi',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            _SectionLabel('TAP TARGET'),
-            TextField(
-              controller: _link,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              textInputAction: TextInputAction.done,
-              decoration: InputDecoration(
-                labelText: 'Link (optional)',
-                hintText: '/product/<id>  or  https://…',
-                helperText: 'In-app: /product/<id>, /faq. Web: https://… opens outside the app.',
-                helperMaxLines: 3,
-                errorText: _submitted ? _linkError : null,
+                helperText: 'Shown only when the banner has a link.',
+                errorText: _submitted ? _ctaError : null,
                 errorMaxLines: 3,
               ),
             ),
+            const SizedBox(height: AppSpacing.xl),
+            _SectionLabel('LINK TO'),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final kind in BannerLinkKind.values)
+                  if (kind != BannerLinkKind.appPage ||
+                      _savedLinkKind == BannerLinkKind.appPage)
+                    ChoiceChip(
+                      label: Text(kind.label),
+                      selected: _linkKind == kind,
+                      showCheckmark: false,
+                      onSelected: (_) => setState(() => _linkKind = kind),
+                    ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            switch (_linkKind) {
+              BannerLinkKind.none => _LinkHint(
+                'Tapping the banner does nothing.',
+              ),
+              BannerLinkKind.faq => _LinkHint(
+                'Opens the FAQ & Support page.',
+              ),
+              BannerLinkKind.product => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      Icons.inventory_2_outlined,
+                      color: palette.textMuted,
+                    ),
+                    title: Text(
+                      _productId == null
+                          ? 'No product chosen'
+                          : _linkedProduct(products)?.name ??
+                                _pickedProductName ??
+                                (products == null
+                                    ? 'Loading product…'
+                                    : 'Product no longer exists'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: TextButton(
+                      onPressed: _pickProduct,
+                      child: Text(_productId == null ? 'Choose' : 'Change'),
+                    ),
+                    onTap: _pickProduct,
+                  ),
+                  if (linkError != null)
+                    Text(
+                      linkError,
+                      style: TextStyle(color: palette.error, fontSize: 12.5),
+                    ),
+                ],
+              ),
+              BannerLinkKind.web => TextField(
+                controller: _web,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  labelText: 'Web address',
+                  hintText: 'https://…',
+                  helperText: 'Opens outside the app, in the browser.',
+                  errorText: linkError,
+                  errorMaxLines: 3,
+                ),
+              ),
+              BannerLinkKind.appPage => TextField(
+                controller: _appPage,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  labelText: 'App page',
+                  hintText: '/cart',
+                  helperText:
+                      'An older banner link. Prefer A product or FAQ for new '
+                      'banners.',
+                  helperMaxLines: 3,
+                  errorText: linkError,
+                  errorMaxLines: 3,
+                ),
+              ),
+            },
             const SizedBox(height: AppSpacing.xl),
             _SectionLabel('SCHEDULE (OPTIONAL)'),
             _DateTimeTile(
@@ -720,6 +872,17 @@ class _SectionLabel extends StatelessWidget {
       style: Theme.of(context).textTheme.labelSmall
           ?.copyWith(color: AppPalette.of(context).textMuted),
     ),
+  );
+}
+
+class _LinkHint extends StatelessWidget {
+  final String text;
+  const _LinkHint(this.text);
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    style: TextStyle(fontSize: 12.5, color: AppPalette.of(context).textMuted),
   );
 }
 

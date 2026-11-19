@@ -8,6 +8,7 @@ import '../../../shared/models/product.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/notification_bell_button.dart';
+import '../../orders/data/order_repository.dart' show TopProductSales;
 import '../../orders/presentation/orders_providers.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../admin_shell.dart';
@@ -24,9 +25,10 @@ class AdminDashboardScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final productsAsync = ref.watch(productListProvider);
+    final productsAsync = ref.watch(adminAllProductsProvider);
     final ordersAsync = ref.watch(adminAllOrdersProvider);
     final summaryAsync = ref.watch(adminOrderSummaryProvider);
+    final topProductsAsync = ref.watch(adminTopProductsProvider);
     final lowStockAsync = ref.watch(lowStockProductsProvider);
     final queueAsync = ref.watch(fulfillmentOrdersProvider);
 
@@ -156,9 +158,8 @@ class AdminDashboardScreen extends ConsumerWidget {
                   ),
                 ),
                 const Spacer(),
-                ordersAsync.maybeWhen(
-                  data: (orders) =>
-                      rankTopProducts(orders).length > _TopProductsCard.maxRows
+                topProductsAsync.maybeWhen(
+                  data: (ranked) => ranked.length > _TopProductsCard.maxRows
                       ? TextButton(
                           onPressed: () => context.push('/admin/top-products'),
                           style: TextButton.styleFrom(
@@ -179,8 +180,8 @@ class AdminDashboardScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
-            ordersAsync.when(
-              data: (orders) => _TopProductsCard(orders: orders),
+            topProductsAsync.when(
+              data: (ranked) => _TopProductsCard(ranked: ranked),
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Center(child: CircularProgressIndicator()),
@@ -188,10 +189,13 @@ class AdminDashboardScreen extends ConsumerWidget {
               error: (e, _) => InlineErrorState(
                 message: friendlyErrorMessage(
                   e,
-                  fallback: 'Could not load orders.',
+                  fallback: 'Could not load top products.',
                   context: 'admin.dashboard',
                 ),
-                onRetry: () => ref.invalidate(adminAllOrdersProvider),
+                onRetry: () {
+                  ref.invalidate(adminAllOrdersProvider);
+                  ref.invalidate(adminTopProductsProvider);
+                },
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
@@ -537,7 +541,7 @@ class _StuckPendingSection extends ConsumerWidget {
   }
 }
 
-/// Top products by order-item quantity across all orders. Renders an
+/// Top products by units sold (see [adminTopProductsProvider]). Renders an
 /// empty state rather than nothing when there isn't enough order data yet.
 /// Only shows the top [maxRows] on the dashboard home to avoid the list
 /// growing unbounded as more products sell — "See all" (above) opens the
@@ -545,12 +549,11 @@ class _StuckPendingSection extends ConsumerWidget {
 class _TopProductsCard extends StatelessWidget {
   static const maxRows = 5;
 
-  final List<Order> orders;
-  const _TopProductsCard({required this.orders});
+  final List<TopProductSales> ranked;
+  const _TopProductsCard({required this.ranked});
 
   @override
   Widget build(BuildContext context) {
-    final ranked = rankTopProducts(orders);
     final top = ranked.take(maxRows).toList();
     final hasMore = ranked.length > top.length;
 
@@ -597,7 +600,7 @@ class _TopProductsCard extends StatelessWidget {
                   ),
                 ),
                 title: Text(
-                  top[i].key,
+                  top[i].name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -606,7 +609,7 @@ class _TopProductsCard extends StatelessWidget {
                   ),
                 ),
                 trailing: Text(
-                  '${top[i].value} sold',
+                  '${top[i].units} sold',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: AppPalette.of(context).textMuted,
@@ -639,23 +642,6 @@ class _TopProductsCard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Product name → total quantity sold across non-cancelled orders,
-/// ranked highest-first. Shared by the dashboard's capped preview and the
-/// full "See all" page so both agree on the same ranking.
-List<MapEntry<String, int>> rankTopProducts(List<Order> orders) {
-  final qtyByName = <String, int>{};
-  for (final order in orders) {
-    if (order.status == OrderStatus.cancelled) continue;
-    for (final item in order.items) {
-      qtyByName[item.productName] =
-          (qtyByName[item.productName] ?? 0) + item.quantity;
-    }
-  }
-  final ranked = qtyByName.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  return ranked;
 }
 
 class _StatCard extends StatelessWidget {

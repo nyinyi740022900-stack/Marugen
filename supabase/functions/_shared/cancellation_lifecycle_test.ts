@@ -131,3 +131,19 @@ Deno.test("denied transition cannot reach Stripe", async () => {
   }
   assert(failed && f.creates === 0, "authorization failure reached Stripe");
 });
+Deno.test("refund_error is present but never carries Stripe or database text", async () => {
+  const f = fixture();
+  f.port.createRefund = async () => {
+    throw new Error("No such payment_intent: 'pi_live_123'; req_abc");
+  };
+  const result = await handleCancellation("o", "a", "approve", undefined, f);
+  assert(
+    result.request.status === "approved" &&
+      typeof result.refund_error === "string" && result.refund_error.length > 0,
+    "the app relies on refund_error being set",
+  );
+  assert(
+    !/pi_live_123|req_abc|payment_intent/.test(result.refund_error!),
+    "provider detail leaked",
+  );
+});

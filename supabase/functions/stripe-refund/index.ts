@@ -1,7 +1,10 @@
 // Admin-only full refund request. Pending/failed refunds are reconciled, never labelled complete.
 import Stripe from "https://esm.sh/stripe@17?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { requestOrderRefund } from "../_shared/refund_lifecycle.ts";
+import {
+  refundErrorMessage,
+  requestOrderRefund,
+} from "../_shared/refund_lifecycle.ts";
 import { createRefundPort } from "../_shared/refund_port.ts";
 
 const stripe = new Stripe(Deno.env.get("STRIPE_SECRET_KEY") ?? "", {
@@ -68,6 +71,9 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    return jsonError(`${err}`, 500);
+    // Stripe and database detail stays in the logs; staff see either the
+    // refund rule that stopped the request or fixed copy.
+    console.error("[stripe-refund] failed", err);
+    return jsonError(refundErrorMessage(err), 500);
   }
 });

@@ -388,3 +388,37 @@ Deno.test("checkout distinguishes door-to-door services from collection-point se
     >)?.door_to_door === false,
   );
 });
+Deno.test("GST snapshot: the tax added on top, or the portion inside an inclusive price", async () => {
+  const { checkoutMerchandiseCents, merchandiseGstCents } = await import(
+    "./shipping_finance.ts"
+  );
+  // GST-inclusive S$109.00 at 9%: 10900 - round(10900 / 1.09) = 900.
+  assert(merchandiseGstCents(109, 0, 9, true) === 900);
+  // Same formula the invoice used: total - total / (1 + rate).
+  assert(merchandiseGstCents(9.95, .995, 9, true) === 895 - Math.round(895 / 1.09));
+  // GST added on top: exactly the cents checkout added to the charge.
+  assert(merchandiseGstCents(30.50, 0, 9, false) === 3325 - 3050);
+  assert(
+    merchandiseGstCents(20.05, 2.0050000000000003, 9, false) ===
+      checkoutMerchandiseCents(20.05, 2.0050000000000003, 9, false) -
+        checkoutMerchandiseCents(20.05, 2.0050000000000003, 0, false),
+  );
+  // Promo discount comes off before tax; a full discount leaves no GST.
+  assert(merchandiseGstCents(100, 100, 9, false) === 0);
+  assert(merchandiseGstCents(100, 100, 9, true) === 0);
+  // A zero rate is a valid snapshot.
+  assert(merchandiseGstCents(50, 0, 0, true) === 0);
+  assert(merchandiseGstCents(50, 0, 0, false) === 0);
+  // Always whole cents, never more than the merchandise total.
+  for (const pct of [7, 8, 9, 9.5]) {
+    for (const price of [0.01, 0.05, 1.99, 33.33, 1234.56]) {
+      for (const included of [true, false]) {
+        const gst = merchandiseGstCents(price, 0, pct, included);
+        assert(Number.isSafeInteger(gst) && gst >= 0);
+        assert(gst <= checkoutMerchandiseCents(price, 0, pct, included));
+      }
+    }
+  }
+  await rejects(() => merchandiseGstCents(10, 0, -1, true));
+  await rejects(() => merchandiseGstCents(10, 0, NaN, false));
+});

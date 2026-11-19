@@ -5,6 +5,46 @@ import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/crash/crash_reporting.dart';
+import 'image_upload.dart';
+
+/// The copy an Edge Function sent with a failed call: the `error` (or
+/// `message`) field of its JSON body. Those are fixed, hand-written
+/// sentences on the server. Null when the body has none.
+String? functionErrorMessage(FunctionException error) {
+  final details = error.details;
+  if (details is! Map) return null;
+  for (final field in const ['error', 'message']) {
+    final value = details[field];
+    if (value is String && value.trim().isNotEmpty && value.length < 200) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+/// A failed Edge Function call, reduced to copy that is safe to show: the
+/// server's own sentence, or the repository's hand-written one when the
+/// server sent none. `functions.invoke` throws on every non-2xx response,
+/// so repositories convert that [FunctionException] into this.
+class ServerMessageException implements Exception {
+  final String message;
+
+  /// HTTP status of the failed call; 5xx is still reported as a bug.
+  final int status;
+
+  const ServerMessageException(this.message, {required this.status});
+
+  factory ServerMessageException.fromFunction(
+    FunctionException error, {
+    required String fallback,
+  }) => ServerMessageException(
+    functionErrorMessage(error) ?? fallback,
+    status: error.status,
+  );
+
+  @override
+  String toString() => message;
+}
 
 /// Maps an exception to short, user-safe copy so screens never show raw
 /// Postgres/HTTP/stack text (`'Error: $e'`). The original error is logged
@@ -41,12 +81,12 @@ String friendlyErrorMessage(
       error is HttpException) {
     return ('Network problem — check your connection and try again.', false);
   }
+  if (error is ServerMessageException) {
+    return (error.message, error.status >= 500);
+  }
   if (error is FunctionException) {
-    final details = error.details;
-    final message = details is Map ? details['error']?.toString() : null;
-    if (message != null && message.isNotEmpty && message.length < 200) {
-      return (message, error.status >= 500);
-    }
+    final message = functionErrorMessage(error);
+    if (message != null) return (message, error.status >= 500);
     return (fallback, true);
   }
   if (error is PostgrestException) {
@@ -63,6 +103,11 @@ String friendlyErrorMessage(
     return (fallback, true);
   }
   if (error is StorageException) {
+    // The bucket refused the file itself (wrong type or too large): the
+    // person can fix that, so say how. Not a bug to report.
+    if (isImageUploadRejection(error)) {
+      return (imageUploadRejectedMessage, false);
+    }
     return ('Could not upload or load the file. Please try again.', true);
   }
   if (error is AuthException) {

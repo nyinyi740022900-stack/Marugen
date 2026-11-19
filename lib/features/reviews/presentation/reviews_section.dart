@@ -247,6 +247,7 @@ class _MyReviewCard extends ConsumerWidget {
                   ),
                   const Spacer(),
                   IconButton(
+                    tooltip: 'Edit your review',
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     onPressed: () => openReviewForm(
@@ -257,6 +258,7 @@ class _MyReviewCard extends ConsumerWidget {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'Delete your review',
                     visualDensity: VisualDensity.compact,
                     icon: Icon(
                       Icons.delete_outline,

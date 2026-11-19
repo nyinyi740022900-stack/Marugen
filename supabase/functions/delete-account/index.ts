@@ -67,6 +67,11 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
-    return jsonError(`${err}`, 500);
+    // Storage and auth error text stays in the logs.
+    console.error('[delete-account] failed', err);
+    return jsonError(
+      'Could not delete your account. Please try again or contact support.',
+      500,
+    );
   }
 });

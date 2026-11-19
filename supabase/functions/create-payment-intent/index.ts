@@ -1,7 +1,15 @@
 import {
   checkoutAmountCents,
   checkoutMerchandiseCents,
+  merchandiseGstCents,
 } from "../_shared/shipping_finance.ts";
+import {
+  CHECKOUT_FAILED_MESSAGE,
+  IDEMPOTENCY_KEY_REQUIRED_MESSAGE,
+  parseIdempotencyKey,
+  PAYMENT_START_FAILED_MESSAGE,
+  paymentIntentIdempotencyKey,
+} from "./checkout_request.ts";
 // Supabase Edge Function: create-payment-intent
 //
 // Validates cart against DB prices/stock, creates a pending order (stock
@@ -131,8 +139,13 @@ Deno.serve(async (req) => {
       | Record<string, unknown>
       | undefined;
     const promoCodeRaw = (body.promo_code as string | undefined)?.trim();
-    const idempotencyKey =
-      (body.idempotency_key as string | undefined)?.trim() || null;
+    // Required: every released app version sends one per checkout attempt
+    // (checkout_screen.dart). Without it a retry after a dropped response
+    // would reserve stock and open a second PaymentIntent.
+    const idempotencyKey = parseIdempotencyKey(body.idempotency_key);
+    if (!idempotencyKey) {
+      return jsonResponse({ error: IDEMPOTENCY_KEY_REQUIRED_MESSAGE }, 400);
+    }
     let customerRemarks: string | null;
     let customerRemarksRevision: number;
     try {
@@ -186,7 +199,6 @@ Deno.serve(async (req) => {
     // and creating a Stripe PaymentIntent a second time.
     const userId: string = user.id;
     async function findExistingCheckout() {
-      if (!idempotencyKey) return null;
       const { data: existing, error: lookupError } = await admin
         .from("orders")
         .select(
@@ -555,6 +567,14 @@ Deno.serve(async (req) => {
       gstPercent,
       gstIncluded,
     ) / 100;
+    // Snapshot the GST this order was charged (migration 0078) so a later
+    // change to the shop's rate cannot restate its invoice.
+    const gstAmountCents = merchandiseGstCents(
+      subtotal,
+      discountAmount,
+      gstPercent,
+      gstIncluded,
+    );
 
     let shippingFields: Record<string, unknown>;
     try {
@@ -617,6 +637,9 @@ Deno.serve(async (req) => {
         promo_code: promoCode,
         discount_amount: discountAmount > 0 ? discountAmount : null,
         idempotency_key: idempotencyKey,
+        gst_percent: gstPercent,
+        gst_included_in_price: gstIncluded,
+        gst_amount_cents: gstAmountCents,
       })
       .select("id")
       .single();
@@ -721,6 +744,9 @@ Deno.serve(async (req) => {
 
     let paymentIntent: Stripe.PaymentIntent;
     try {
+      // One order, one PaymentIntent: if the request is repeated (the Stripe
+      // client retries a dropped connection) Stripe returns the first intent
+      // instead of opening another for the same order.
       paymentIntent = await stripe.paymentIntents.create({
         amount: amountCents,
         currency,
@@ -729,13 +755,15 @@ Deno.serve(async (req) => {
           order_id: orderId,
           user_id: user.id,
         },
-      });
+      }, { idempotencyKey: paymentIntentIdempotencyKey(orderId) });
     } catch (stripeErr) {
       await admin.from("orders").update({ status: "cancelled" }).eq(
         "id",
         orderId,
       );
-      return jsonResponse({ error: `Stripe error: ${stripeErr}` }, 500);
+      // Stripe's message can name keys, request ids and account settings.
+      console.error("PaymentIntent creation failed", orderId, stripeErr);
+      return jsonResponse({ error: PAYMENT_START_FAILED_MESSAGE }, 500);
     }
 
     const { data: linkedOrder, error: linkError } = await admin
@@ -773,6 +801,7 @@ Deno.serve(async (req) => {
       currency,
     });
   } catch (err) {
-    return jsonResponse({ error: `${err}` }, 500);
+    console.error("create-payment-intent failed", err);
+    return jsonResponse({ error: CHECKOUT_FAILED_MESSAGE }, 500);
   }
 });

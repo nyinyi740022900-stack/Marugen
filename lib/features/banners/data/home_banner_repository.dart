@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/home_banner.dart';
+import '../../../shared/utils/image_upload.dart';
 
 class HomeBannerRepository {
   final _client = SupabaseService.client;
@@ -55,8 +56,12 @@ class HomeBannerRepository {
   /// Same bucket and policies as product/service photos, under its own
   /// prefix.
   Future<String> uploadBannerImage(Uint8List bytes, String ext) async {
-    final path = 'home-banners/${DateTime.now().millisecondsSinceEpoch}.$ext';
-    await _client.storage.from('product-images').uploadBinary(path, bytes);
+    final upload = prepareImageUpload(bytes, ext);
+    final path =
+        'home-banners/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
+    await _client.storage
+        .from('product-images')
+        .uploadBinary(path, bytes, fileOptions: upload.fileOptions);
     return _client.storage.from('product-images').getPublicUrl(path);
   }
 }

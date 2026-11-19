@@ -16,6 +16,7 @@ import '../../../shared/models/product.dart';
 import '../../shop/data/product_repository.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/utils/image_upload.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/discard_changes_guard.dart';
 
@@ -690,8 +691,21 @@ class _AdminProductEditScreenState
         photo.status = _PhotoStatus.ready;
       });
       return true;
-    } catch (_) {
-      if (mounted) setState(() => photo.status = _PhotoStatus.failed);
+    } catch (e) {
+      if (mounted) {
+        setState(() => photo.status = _PhotoStatus.failed);
+        // Retrying will not help a file the bucket refuses: say why.
+        final message = friendlyErrorMessage(
+          e,
+          fallback: '',
+          context: 'admin.product_photo',
+        );
+        if (message == imageUploadRejectedMessage) {
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(SnackBar(content: Text(message)));
+        }
+      }
       return false;
     }
   }
@@ -1766,15 +1780,17 @@ class _SizeOptionEditRow extends StatelessWidget {
               ),
             ),
           ),
+          // The glyph stays small; the button around it is a full 48pt
+          // target with a name for screen readers.
           IconButton(
+            tooltip: 'Remove size',
             icon: Icon(
               Icons.close,
               size: 18,
               color: AppPalette.of(context).textMuted,
             ),
             onPressed: onRemove,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           ),
         ],
       ),

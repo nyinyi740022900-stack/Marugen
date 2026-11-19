@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../orders/presentation/orders_providers.dart';
-import 'admin_dashboard_screen.dart' show rankTopProducts;
 
 /// Full product-sales ranking — the "See all" destination from the
 /// dashboard's capped Top Products preview (see admin_dashboard_screen.dart).
@@ -13,13 +12,12 @@ class AdminTopProductsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ordersAsync = ref.watch(adminAllOrdersProvider);
+    final rankedAsync = ref.watch(adminTopProductsProvider);
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(title: const Text('Top Products')),
-      body: ordersAsync.when(
-        data: (orders) {
-          final ranked = rankTopProducts(orders);
+      body: rankedAsync.when(
+        data: (ranked) {
           if (ranked.isEmpty) {
             return const EmptyState(
               icon: Icons.bar_chart_outlined,
@@ -47,11 +45,11 @@ class AdminTopProductsScreen extends ConsumerWidget {
                   ),
                 ),
                 title: Text(
-                  ranked[i].key,
+                  ranked[i].name,
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 trailing: Text(
-                  '${ranked[i].value} sold',
+                  '${ranked[i].units} sold',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: AppPalette.of(context).textMuted,
@@ -66,8 +64,12 @@ class AdminTopProductsScreen extends ConsumerWidget {
             color: AppPalette.of(context).accent,
           ),
         ),
-        error: (e, _) =>
-            ErrorState(onRetry: () => ref.invalidate(adminAllOrdersProvider)),
+        error: (e, _) => ErrorState(
+          onRetry: () {
+            ref.invalidate(adminAllOrdersProvider);
+            ref.invalidate(adminTopProductsProvider);
+          },
+        ),
       ),
     );
   }

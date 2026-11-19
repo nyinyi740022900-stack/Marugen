@@ -2,6 +2,8 @@ import '../../../shared/widgets/parcel_tracking_list.dart';
 
 import '../../../shared/widgets/sized_network_image.dart';
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/content_width.dart';
@@ -13,6 +15,7 @@ import 'package:flutter_stripe/flutter_stripe.dart'
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/notifications/push_permission_prompt.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/models/app_user.dart';
@@ -83,7 +86,9 @@ class OrderDetailScreen extends ConsumerWidget {
         ? previewSource
         : null;
 
-    return Scaffold(
+    return _PaymentConfirmationPoller(
+      orderId: orderId,
+      child: Scaffold(
       backgroundColor: AppPalette.of(context).background,
       appBar: AppBar(
         title: Text(
@@ -181,6 +186,167 @@ class OrderDetailScreen extends ConsumerWidget {
                 ),
               ),
             ),
+      ),
+    );
+  }
+}
+
+/// True while [order] is this customer's just-paid order that the server has
+/// not confirmed yet (see [paymentAwaitingConfirmationProvider]).
+bool _awaitingPaymentConfirmation(WidgetRef ref, Order order) {
+  final awaiting = ref.watch(paymentAwaitingConfirmationProvider);
+  return awaiting != null &&
+      awaiting.orderId == order.id &&
+      awaiting.ownerId == order.userId &&
+      awaiting.ownerId == ref.watch(currentUserIdProvider) &&
+      order.status == OrderStatus.pending;
+}
+
+/// Keeps asking the server about an order whose payment sheet succeeded but
+/// whose webhook has not landed, for a bounded window (see
+/// [paymentConfirmationBackoff]). It only ever reads: when the server says
+/// the order is paid the purchased cart lines are removed and the order is
+/// re-fetched so the normal paid screen appears; when the window runs out
+/// the hint is dropped and the ordinary pending screen comes back.
+///
+/// Sits above the order's loading/data switch so a refresh of the order does
+/// not restart it, and stops with the screen.
+class _PaymentConfirmationPoller extends ConsumerStatefulWidget {
+  final String orderId;
+  final Widget child;
+  const _PaymentConfirmationPoller({
+    required this.orderId,
+    required this.child,
+  });
+
+  @override
+  ConsumerState<_PaymentConfirmationPoller> createState() =>
+      _PaymentConfirmationPollerState();
+}
+
+class _PaymentConfirmationPollerState
+    extends ConsumerState<_PaymentConfirmationPoller> {
+  Timer? _timer;
+  int _attempt = 0;
+
+  PaymentAwaitingConfirmation? get _awaiting {
+    final awaiting = ref.read(paymentAwaitingConfirmationProvider);
+    return awaiting != null &&
+            awaiting.orderId == widget.orderId &&
+            awaiting.ownerId == ref.read(currentUserIdProvider)
+        ? awaiting
+        : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleNext();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleNext() {
+    _timer?.cancel();
+    if (_awaiting == null) return;
+    _timer = Timer(paymentConfirmationBackoff[_attempt], _check);
+  }
+
+  Future<void> _check() async {
+    final awaiting = _awaiting;
+    if (awaiting == null) return;
+    Order? order;
+    try {
+      order = await ref
+          .read(orderRepositoryProvider)
+          .fetchOrderById(widget.orderId);
+    } catch (_) {
+      // A failed read is just another "not confirmed yet".
+    }
+    // Left the screen, switched account, or already settled meanwhile.
+    if (!mounted || !identical(_awaiting, awaiting)) return;
+    final settled =
+        order != null &&
+        order.id == awaiting.orderId &&
+        order.userId == awaiting.ownerId &&
+        order.status != OrderStatus.pending;
+    _attempt++;
+    if (!settled && _attempt < paymentConfirmationBackoff.length) {
+      _scheduleNext();
+      return;
+    }
+    if (settled && paidOrderStatuses.contains(order.status)) {
+      final cart = ref.read(cartProvider.notifier);
+      for (final line in awaiting.cartLines) {
+        cart.remove(
+          line.product.id,
+          variantId: line.selectedVariant?.id,
+          size: line.selectedSize,
+        );
+      }
+    }
+    ref.read(paymentAwaitingConfirmationProvider.notifier).state = null;
+    ref.invalidate(orderByIdProvider(widget.orderId));
+    ref.invalidate(myOrdersProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A payment completed from this screen ("Complete payment") starts the
+    // window while the poller is already mounted.
+    ref.listen(paymentAwaitingConfirmationProvider, (previous, next) {
+      if (identical(previous, next)) return;
+      _attempt = 0;
+      _scheduleNext();
+    });
+    return widget.child;
+  }
+}
+
+class _ConfirmingPaymentBanner extends StatelessWidget {
+  const _ConfirmingPaymentBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: palette.success.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: palette.success.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: ExcludeSemantics(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: palette.success,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            const Expanded(
+              child: Text(
+                "Payment received. We're confirming it with the bank — this "
+                'can take a minute.',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -209,12 +375,19 @@ class _OrderDetailBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final shipping = order.shippingAddress;
+    final confirmingPayment = _awaitingPaymentConfirmation(ref, order);
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
+        if (confirmingPayment) ...[
+          const _ConfirmingPaymentBanner(),
+          const SizedBox(height: AppSpacing.lg),
+        ],
         if (justPlaced) ...[
-          Container(
+          // The one moment a customer has a reason to allow notifications.
+          AskPushPermissionOnce(
+            child: Container(
             width: double.infinity,
             padding: const EdgeInsets.all(AppSpacing.lg),
             decoration: BoxDecoration(
@@ -256,6 +429,7 @@ class _OrderDetailBody extends ConsumerWidget {
                   ),
                 ),
               ],
+            ),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -645,13 +819,16 @@ class _OrderDetailBody extends ConsumerWidget {
             if (justPlaced) return const _ContinueShoppingButton();
             return Column(
               children: [
-                if (order.status == OrderStatus.pending) ...[
+                // Already charged and being confirmed: paying again or
+                // cancelling here would be acting on stale information.
+                if (order.status == OrderStatus.pending &&
+                    !confirmingPayment) ...[
                   _CompletePaymentButton(order: order),
                   const SizedBox(height: AppSpacing.md),
                   _CancelOrderButton(order: order),
                   const SizedBox(height: AppSpacing.lg),
                 ],
-                _ReorderButton(order: order),
+                ReorderButton(order: order),
               ],
             );
           },
@@ -864,87 +1041,137 @@ class _ContinueShoppingButton extends ConsumerWidget {
 /// or is otherwise unavailable, it's skipped with a warning rather than
 /// silently added. Regular restockable items (fish food, accessories) are
 /// added normally.
-class _ReorderButton extends ConsumerStatefulWidget {
+class ReorderButton extends ConsumerStatefulWidget {
   final Order order;
-  const _ReorderButton({required this.order});
+  const ReorderButton({super.key, required this.order});
 
   @override
-  ConsumerState<_ReorderButton> createState() => _ReorderButtonState();
+  ConsumerState<ReorderButton> createState() => _ReorderButtonState();
 }
 
-class _ReorderButtonState extends ConsumerState<_ReorderButton> {
+/// What the customer is told after a reorder: how many lines went into the
+/// cart and how many could not.
+String reorderResultMessage({required int added, required int skipped}) {
+  if (added == 0) {
+    return skipped == 1
+        ? 'This item is no longer available.'
+        : 'These items are no longer available.';
+  }
+  final addedText = '$added item${added == 1 ? '' : 's'} added.';
+  if (skipped == 0) return addedText;
+  return '$addedText $skipped ${skipped == 1 ? 'is' : 'are'} no longer available.';
+}
+
+class _ReorderButtonState extends ConsumerState<ReorderButton> {
   bool _loading = false;
 
   Future<void> _reorder() async {
+    if (_loading) return;
     setState(() => _loading = true);
     final repo = ref.read(productRepositoryProvider);
     final cart = ref.read(cartProvider.notifier);
+    final messenger = ScaffoldMessenger.of(context);
 
-    var added = 0;
-    var skipped = 0;
-    for (final item in widget.order.items) {
-      // Product deleted since the order was placed — nothing to re-add.
-      if (item.productId.isEmpty) {
-        skipped++;
-        continue;
+    try {
+      // Look every line up before touching the cart, so a dropped
+      // connection halfway through leaves the cart exactly as it was.
+      final lines =
+          <({Product product, int quantity, ProductVariant? variant, String? size})>[];
+      var skipped = 0;
+      for (final item in widget.order.items) {
+        // Product deleted since the order was placed — nothing to re-add.
+        if (item.productId.isEmpty) {
+          skipped++;
+          continue;
+        }
+        final product = await repo.fetchProductById(item.productId);
+        if (product == null) {
+          skipped++;
+          continue;
+        }
+        if (product.isLiveFish &&
+            !product.hasVariants &&
+            (product.isSold || product.stockQuantity <= 0)) {
+          // This exact fish is gone — can't reorder a unique animal. A batch
+          // listing with fish options falls through to the per-variant stock
+          // check below instead (the base stock field doesn't apply to it).
+          skipped++;
+          continue;
+        }
+        // Re-select the same variant by label (ids are stable, but matching
+        // by label is more forgiving if variants were recreated).
+        final wantedVariant = item.variantLabel?.isNotEmpty == true
+            ? item.variantLabel
+            : null;
+        final matchingVariants = wantedVariant == null
+            ? const <ProductVariant>[]
+            : product.variants.where((v) => v.label == wantedVariant);
+        final variant = matchingVariants.isNotEmpty
+            ? matchingVariants.first
+            : null;
+        // The option they bought is gone (or the product now needs one):
+        // the base product is a different thing at a different price, so
+        // it is not put in the cart in its place.
+        if (variant == null && (wantedVariant != null || product.hasVariants)) {
+          skipped++;
+          continue;
+        }
+        final size =
+            item.sizeLabel != null &&
+                product.hasSizeOptions &&
+                product.sizeOptions.contains(item.sizeLabel)
+            ? item.sizeLabel
+            : null;
+        // Size-required products can't reorder without a valid size pick.
+        if (product.hasSizeOptions && size == null) {
+          skipped++;
+          continue;
+        }
+        lines.add((
+          product: product,
+          quantity: product.isLiveFish ? 1 : item.quantity,
+          variant: variant,
+          size: size,
+        ));
       }
-      final product = await repo.fetchProductById(item.productId);
-      if (product == null) {
-        skipped++;
-        continue;
+
+      var added = 0;
+      for (final line in lines) {
+        final result = cart.add(
+          line.product,
+          quantity: line.quantity,
+          variant: line.variant,
+          size: line.size,
+        );
+        if (result == CartAddResult.outOfStock) {
+          skipped++;
+        } else {
+          added++;
+        }
       }
-      if (product.isLiveFish &&
-          !product.hasVariants &&
-          (product.isSold || product.stockQuantity <= 0)) {
-        // This exact fish is gone — can't reorder a unique animal. A batch
-        // listing with fish options falls through to the per-variant stock
-        // check below instead (the base stock field doesn't apply to it).
-        skipped++;
-        continue;
-      }
-      // Try to re-select the same variant by label (ids are stable, but
-      // matching by label is more forgiving if variants were recreated).
-      // If it's gone, fall back to the base product rather than skipping
-      // the whole line.
-      final matchingVariants = item.variantLabel == null
-          ? const <ProductVariant>[]
-          : product.variants.where((v) => v.label == item.variantLabel);
-      final variant = matchingVariants.isNotEmpty
-          ? matchingVariants.first
-          : null;
-      final size =
-          item.sizeLabel != null &&
-              product.hasSizeOptions &&
-              product.sizeOptions.contains(item.sizeLabel)
-          ? item.sizeLabel
-          : null;
-      // Size-required products can't reorder without a valid size pick.
-      if (product.hasSizeOptions && size == null) {
-        skipped++;
-        continue;
-      }
-      final result = cart.add(
-        product,
-        quantity: product.isLiveFish ? 1 : item.quantity,
-        variant: variant,
-        size: size,
+
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(reorderResultMessage(added: added, skipped: skipped)),
+        ),
       );
-      if (result == CartAddResult.outOfStock) {
-        skipped++;
-      } else {
-        added++;
-      }
+      if (added > 0 && mounted) context.push('/cart');
+    } catch (e, st) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            friendlyErrorMessage(
+              e,
+              fallback: 'Could not reorder these items. Please try again.',
+              context: 'orders.reorder',
+              stackTrace: st,
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
-
-    if (!mounted) return;
-    setState(() => _loading = false);
-
-    final message = skipped == 0
-        ? 'Added $added item${added == 1 ? '' : 's'} to cart'
-        : 'Added $added item${added == 1 ? '' : 's'} — $skipped no longer available';
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
-    if (added > 0) context.push('/cart');
   }
 
   @override
@@ -998,7 +1225,7 @@ class _CompletePaymentButtonState
       final intent = await ref
           .read(paymentRepositoryProvider)
           .resumePayment(widget.order.id);
-      await presentPendingPayment(
+      final sheetReportedSuccess = await presentPendingPayment(
         intent: intent,
         ownsCheckout: stillOwner,
         presentPayment: (secret) => showStripePaymentSheet(
@@ -1014,6 +1241,14 @@ class _CompletePaymentButtonState
         ownsCheckout: stillOwner,
         fetchOrder: ref.read(orderRepositoryProvider).fetchOrderById,
       );
+      if (!paid && sheetReportedSuccess && stillOwner()) {
+        ref
+            .read(paymentAwaitingConfirmationProvider.notifier)
+            .state = PaymentAwaitingConfirmation(
+          orderId: widget.order.id,
+          ownerId: ownerId,
+        );
+      }
       message = paid
           ? 'Payment received. Thank you!'
           : 'Payment sent. This order updates once the payment is confirmed.';

@@ -27,13 +27,27 @@ String categoryLabel(ProductCategory c) {
 }
 
 /// Extra biological details that only apply to live fish (koi/arowana),
-/// since each fish is a unique, single-stock item.
+/// since each fish is a unique, single-stock item. Stored as the
+/// `products.fish_details` jsonb object.
 class FishDetails {
+  /// Longest age text the editor accepts ("2 years", "Tosai").
+  static const maxAgeLength = 30;
+
   final String? variety; // e.g. Kohaku, Showa, Super Red
   final double? sizeCm;
   final String? gender;
   final String? breeder;
   final bool hasCertificate;
+
+  /// Free text, as the farm describes it: "2 years", "Tosai".
+  final String? age;
+
+  /// A photo of the certificate. Only meaningful with [hasCertificate].
+  final String? certificateImageUrl;
+
+  /// Keys found in the stored object that this version of the app does not
+  /// know. Carried through [toMap] so saving never drops them.
+  final Map<String, dynamic> unknownKeys;
 
   const FishDetails({
     this.variety,
@@ -41,16 +55,43 @@ class FishDetails {
     this.gender,
     this.breeder,
     this.hasCertificate = false,
+    this.age,
+    this.certificateImageUrl,
+    this.unknownKeys = const {},
   });
+
+  static const _knownKeys = {
+    'variety',
+    'size_cm',
+    'gender',
+    'breeder',
+    'has_certificate',
+    'age',
+    'certificate_image_url',
+  };
 
   /// Whether there's anything real to show under a "DETAILS" section —
   /// guards against rendering an empty header when every field is null.
-  bool get hasAnyDetail =>
+  /// [age] counts only for a single fish ([Product.isSingleFish]); a batch
+  /// listing does not show it.
+  bool hasAnyDetail({required bool singleFish}) =>
       variety != null ||
       sizeCm != null ||
       gender != null ||
       breeder != null ||
+      (singleFish && age != null) ||
       hasCertificate;
+
+  /// The certificate photo customers may open: one exists and the fish is
+  /// still marked as having a certificate.
+  String? get viewableCertificateUrl =>
+      hasCertificate ? certificateImageUrl : null;
+
+  static String? _text(dynamic value) {
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
 
   factory FishDetails.fromMap(Map<String, dynamic> map) {
     return FishDetails(
@@ -59,8 +100,28 @@ class FishDetails {
       gender: map['gender'] as String?,
       breeder: map['breeder'] as String?,
       hasCertificate: map['has_certificate'] as bool? ?? false,
+      age: _text(map['age']),
+      certificateImageUrl: _text(map['certificate_image_url']),
+      unknownKeys: {
+        for (final entry in map.entries)
+          if (!_knownKeys.contains(entry.key)) entry.key: entry.value,
+      },
     );
   }
+
+  /// The object to store. `age` and `certificate_image_url` are optional
+  /// keys: they are left out when empty rather than written as null.
+  Map<String, dynamic> toMap() => {
+    ...unknownKeys,
+    'variety': variety,
+    'size_cm': sizeCm,
+    if (gender != null) 'gender': gender,
+    'breeder': breeder,
+    'has_certificate': hasCertificate,
+    if (age != null) 'age': age,
+    if (certificateImageUrl != null)
+      'certificate_image_url': certificateImageUrl,
+  };
 }
 
 /// A single purchasable option under a restockable product — e.g. "500g"
@@ -252,6 +313,11 @@ class Product {
 
   bool get isLiveFish =>
       category == ProductCategory.koi || category == ProductCategory.arowana;
+
+  /// One specific animal: a live fish that is not a batch ("choose fish")
+  /// listing. Only then do the photos, age and certificate describe the
+  /// fish the customer receives.
+  bool get isSingleFish => isLiveFish && !hasVariants;
 
   /// True for both restockable goods (weight options) and a live-fish
   /// listing photographed as a batch (e.g. "Japan Imported Koi Selection")

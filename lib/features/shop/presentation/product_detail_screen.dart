@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/contact_launcher.dart';
+import '../../../shared/widgets/support_contact_picker.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/utils/view_tracker.dart';
 import '../../../shared/widgets/empty_state.dart';
@@ -24,8 +25,10 @@ import '../../orders/presentation/purchase_intent.dart';
 import '../../cart/presentation/cart_providers.dart';
 import '../../reviews/presentation/reviews_section.dart';
 import '../../wishlist/presentation/wishlist_providers.dart';
+import 'gallery_video_slide.dart';
 import 'product_share.dart';
 import 'shop_providers.dart';
+import '../../../shared/widgets/section_label.dart';
 
 class ProductDetailScreen extends ConsumerStatefulWidget {
   final String productId;
@@ -166,25 +169,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
     }
   }
 
-  Future<void> _contactShop(Product product) async {
-    try {
-      final settings = await ref.read(shopSettingsProvider.future);
-      if (!mounted) return;
-      await contactShop(
-        context,
-        settings['shop_phone'] as String? ?? '',
-        message: "Hi, I'm interested in ${product.name}",
-      );
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Shop contact is unavailable. Please try again.'),
-          ),
-        );
-      }
-    }
-  }
+  /// The same support picker as FAQ and order help. The message names
+  /// only the product, so a guest may send it too.
+  Future<void> _contactShop(Product product) => showSupportContactPicker(
+    context,
+    message: "Hi, I'm interested in ${product.name}",
+    messageIsPersonal: false,
+  );
 
   Future<void> _shareProduct(ProductShareDetails details) async {
     if (_isSharing ||
@@ -320,8 +311,36 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
             ViewTracker.logProductView(product.id);
           }
           final fish = product.fishDetails;
-          final hasFishDetails = fish != null && fish.hasAnyDetail;
+          final hasFishDetails =
+              fish != null &&
+              fish.hasAnyDetail(singleFish: product.isSingleFish);
           final hasImages = product.imageUrls.isNotEmpty;
+          // A live fish's video is the second slide of the gallery, straight
+          // after the cover photo (the only slide when it has no photos).
+          // Other products keep their video further down the page.
+          final galleryVideoUrl =
+              product.isLiveFish && (product.videoUrl?.isNotEmpty ?? false)
+              ? product.videoUrl
+              : null;
+          final int? videoSlide = galleryVideoUrl == null
+              ? null
+              : (hasImages ? 1 : 0);
+          final slideCount =
+              product.imageUrls.length + (videoSlide == null ? 0 : 1);
+          // The gallery pages and the photos are numbered differently once
+          // a video sits between them; the video maps to the cover photo.
+          int imageOfSlide(int slide) => videoSlide == null || slide < videoSlide
+              ? slide
+              : (slide > 0 ? slide - 1 : 0);
+          int slideOfImage(int image) =>
+              videoSlide == null || image < videoSlide ? image : image + 1;
+          Widget videoSlideWidget() => GalleryVideoSlide(
+            key: ValueKey('gallery-video-${product.id}'),
+            videoUrl: galleryVideoUrl!,
+            productName: product.name,
+            posterUrl: hasImages ? product.imageUrls.first : null,
+            selected: _imagePage == videoSlide,
+          );
           return RefreshIndicator.adaptive(
             onRefresh: () =>
                 ref.refresh(productDetailProvider(widget.productId).future),
@@ -330,7 +349,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 SliverAppBar(
-                  expandedHeight: hasImages ? 320 : 200,
+                  expandedHeight: slideCount > 0 ? 320 : 200,
                   pinned: true,
                   backgroundColor: AppColors.black,
                   foregroundColor: AppColors.white,
@@ -352,7 +371,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                   product,
                                   variant: _selectedVariant,
                                   size: _selectedSize,
-                                  imageIndex: _imagePage,
+                                  imageIndex: imageOfSlide(_imagePage),
                                 ),
                               ),
                         icon: _isSharing
@@ -375,7 +394,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                     _FavoriteAppBarButton(productId: product.id),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
-                    background: hasImages
+                    background: slideCount > 0
                         ? Stack(
                             fit: StackFit.expand,
                             children: [
@@ -385,18 +404,21 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                     setState(() => _imagePage = i),
                                 children: [
                                   for (final (i, url)
-                                      in product.imageUrls.indexed)
+                                      in product.imageUrls.indexed) ...[
+                                    if (i == videoSlide) videoSlideWidget(),
                                     GestureDetector(
                                       onTap: () => FullscreenImageGallery.open(
                                         context,
                                         imageUrls: product.imageUrls,
-                                        initialIndex: _imagePage,
+                                        initialIndex: imageOfSlide(_imagePage),
                                         heroTagPrefix: _heroPrefix(product),
                                         // Follow the gallery so the photo
                                         // flies back to the matching page.
                                         onIndexChanged: (page) {
                                           if (_imageController.hasClients) {
-                                            _imageController.jumpToPage(page);
+                                            _imageController.jumpToPage(
+                                              slideOfImage(page),
+                                            );
                                           }
                                         },
                                       ),
@@ -434,6 +456,10 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                         ),
                                       ),
                                     ),
+                                  ],
+                                  if (videoSlide != null &&
+                                      videoSlide >= product.imageUrls.length)
+                                    videoSlideWidget(),
                                 ],
                               ),
                               // Scrim so the back/share/heart icons stay legible
@@ -454,13 +480,16 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                   ),
                                 ),
                               ),
-                              if (product.imageUrls.length > 1)
+                              if (slideCount > 1)
                                 Positioned(
                                   right: AppSpacing.md,
                                   bottom: AppSpacing.md,
                                   child: _ImagePageBadge(
                                     page: _imagePage + 1,
-                                    count: product.imageUrls.length,
+                                    count: slideCount,
+                                    videoPage: videoSlide == null
+                                        ? null
+                                        : videoSlide + 1,
                                   ),
                                 ),
                             ],
@@ -561,19 +590,13 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                         ],
                         if (product.hasVariants) ...[
                           const SizedBox(height: AppSpacing.md),
-                          Text(
+                          SectionLabel(
                             key: _variantKey,
                             product.hasSizeOptions
                                 ? 'WEIGHT'
                                 : (product.isLiveFish
                                       ? 'CHOOSE FISH'
                                       : 'OPTIONS'),
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                              letterSpacing: 0.8,
-                              color: AppPalette.of(context).textMuted,
-                            ),
                           ),
                           const SizedBox(height: AppSpacing.sm),
                           Focus(
@@ -622,15 +645,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                         ],
                         if (product.hasSizeOptions) ...[
                           const SizedBox(height: AppSpacing.md),
-                          Text(
+                          SectionLabel(
                             key: _sizeKey,
                             'SIZE',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                              letterSpacing: 0.8,
-                              color: AppPalette.of(context).textMuted,
-                            ),
                           ),
                           const SizedBox(height: AppSpacing.sm),
                           Focus(
@@ -761,17 +778,11 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                         const SizedBox(height: AppSpacing.xl),
                         _DeliveryInfoCard(isLiveFish: product.isLiveFish),
                         const SizedBox(height: AppSpacing.xl),
-                        if (product.videoUrl != null &&
+                        // A live fish's video is in the gallery above.
+                        if (galleryVideoUrl == null &&
+                            product.videoUrl != null &&
                             product.videoUrl!.isNotEmpty) ...[
-                          Text(
-                            'VIDEO',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                              letterSpacing: 0.8,
-                              color: AppPalette.of(context).textMuted,
-                            ),
-                          ),
+                          const SectionLabel('VIDEO'),
                           const SizedBox(height: AppSpacing.sm),
                           ProductVideoPlayer(videoUrl: product.videoUrl!),
                         ],
@@ -801,15 +812,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                             ),
                           ),
                         if (hasFishDetails) ...[
-                          Text(
-                            'DETAILS',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                              letterSpacing: 0.8,
-                              color: AppPalette.of(context).textMuted,
-                            ),
-                          ),
+                          const SectionLabel('DETAILS'),
                           const SizedBox(height: AppSpacing.sm),
                           Container(
                             decoration: BoxDecoration(
@@ -829,25 +832,28 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                                   ),
                                 if (fish.gender != null)
                                   _SpecRow('Gender', fish.gender!),
+                                // Age and the certificate photo describe
+                                // one animal; a batch listing is several
+                                // (same rule as the "exact fish" line).
+                                if (fish.age != null && product.isSingleFish)
+                                  _SpecRow('Age', fish.age!),
                                 if (fish.breeder != null)
                                   _SpecRow('Breeder', fish.breeder!),
                                 if (fish.hasCertificate)
-                                  _SpecRow('Certificate', 'Included'),
+                                  if (product.isSingleFish &&
+                                      fish.viewableCertificateUrl != null)
+                                    _CertificateRow(
+                                      imageUrl: fish.viewableCertificateUrl!,
+                                    )
+                                  else
+                                    _SpecRow('Certificate', 'Included'),
                               ],
                             ),
                           ),
                           const SizedBox(height: AppSpacing.xl),
                         ],
                         if (product.description != null) ...[
-                          Text(
-                            'DESCRIPTION',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12,
-                              letterSpacing: 0.8,
-                              color: AppPalette.of(context).textMuted,
-                            ),
-                          ),
+                          const SectionLabel('DESCRIPTION'),
                           const SizedBox(height: AppSpacing.sm),
                           Text(
                             product.description!,
@@ -1281,15 +1287,7 @@ class _DeliveryInfoCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'DELIVERY',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 0.8,
-            color: AppPalette.of(context).textMuted,
-          ),
-        ),
+        const SectionLabel('DELIVERY'),
         const SizedBox(height: AppSpacing.sm),
         Container(
           decoration: BoxDecoration(
@@ -1526,6 +1524,82 @@ class _SpecRow extends StatelessWidget {
   }
 }
 
+/// "Certificate: Included" for a fish with a certificate photo: the whole
+/// row opens the photo in the fullscreen viewer.
+class _CertificateRow extends StatelessWidget {
+  final String imageUrl;
+  const _CertificateRow({required this.imageUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Semantics(
+      button: true,
+      label: 'Certificate included. View certificate photo',
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () =>
+              FullscreenImageGallery.open(context, imageUrls: [imageUrl]),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: kMinInteractiveDimension,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.md,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Certificate',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        color: palette.textMuted,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Included',
+                          textAlign: TextAlign.end,
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          'View certificate',
+                          textAlign: TextAlign.end,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: palette.accent,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Icon(Icons.chevron_right, size: 18, color: palette.textMuted),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Pinned Overview/Product Details/Reviews/Recommendations tab bar — the
 /// Lazada/Shopee-style PDP chrome, sitting between the collapsed hero
 /// image app bar and the scrolling sections below (see the scroll-spy
@@ -1556,16 +1630,36 @@ class _PdpTabBarDelegate extends SliverPersistentHeaderDelegate {
 }
 
 /// "2 / 5" over the product photos, so shoppers can tell there are more to
-/// swipe through.
+/// swipe through. When one of the slides is a video ([videoPage], 1-based)
+/// the badge carries a video mark on every page, so the video is announced
+/// before it is reached, and the mark is filled in on the video itself.
 class _ImagePageBadge extends StatelessWidget {
   final int page;
   final int count;
-  const _ImagePageBadge({required this.page, required this.count});
+  final int? videoPage;
+  const _ImagePageBadge({
+    required this.page,
+    required this.count,
+    this.videoPage,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final onVideo = page == videoPage;
+    final text = Text(
+      '$page / $count',
+      style: const TextStyle(
+        color: AppColors.white,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
+    );
     return Semantics(
-      label: 'Photo $page of $count',
+      label: videoPage == null
+          ? 'Photo $page of $count'
+          : onVideo
+          ? 'Video, slide $page of $count'
+          : 'Photo, slide $page of $count. Slide $videoPage is a video',
       excludeSemantics: true,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -1573,14 +1667,20 @@ class _ImagePageBadge extends StatelessWidget {
           color: AppColors.black.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(
-          '$page / $count',
-          style: const TextStyle(
-            color: AppColors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        child: videoPage == null
+            ? text
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    onVideo ? Icons.videocam : Icons.videocam_outlined,
+                    size: MediaQuery.textScalerOf(context).scale(14),
+                    color: AppColors.white,
+                  ),
+                  const SizedBox(width: 4),
+                  text,
+                ],
+              ),
       ),
     );
   }

@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// wa.me and tel: links need the country code, and Singapore numbers are
@@ -30,68 +29,4 @@ Future<bool> launchShopContact(String phone, {String? message}) async {
     return launchUrl(telUri);
   }
   return false;
-}
-
-enum _ContactChannel { whatsApp, call }
-
-/// Lets the customer choose WhatsApp or a phone call to reach the shop, for
-/// "Contact for price" and the always-visible "Contact shop" button. The
-/// wa.me link used to win every time — it opens a web page when WhatsApp is
-/// missing — so customers without WhatsApp never reached the dialer.
-/// `phone` comes from `settings.shop_phone`.
-Future<void> contactShop(
-  BuildContext context,
-  String phone, {
-  String? message,
-}) async {
-  final digits = internationalDigits(phone);
-  if (digits.isEmpty) {
-    _showContactProblem(context);
-    return;
-  }
-  final channel = await showModalBottomSheet<_ContactChannel>(
-    context: context,
-    builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.chat_outlined),
-            title: const Text('WhatsApp'),
-            subtitle: const Text('Message the shop'),
-            onTap: () => Navigator.pop(sheetContext, _ContactChannel.whatsApp),
-          ),
-          ListTile(
-            leading: const Icon(Icons.call_outlined),
-            title: const Text('Call'),
-            subtitle: Text('+$digits'),
-            onTap: () => Navigator.pop(sheetContext, _ContactChannel.call),
-          ),
-        ],
-      ),
-    ),
-  );
-  if (channel == null) return;
-  var opened = false;
-  try {
-    opened = await launchUrl(
-      channel == _ContactChannel.whatsApp
-          ? whatsAppUri(digits, message: message)
-          : Uri.parse('tel:+$digits'),
-      mode: LaunchMode.externalApplication,
-    );
-  } catch (_) {
-    // Recover in this screen rather than exposing a platform exception.
-  }
-  if (!opened && context.mounted) _showContactProblem(context);
-}
-
-void _showContactProblem(BuildContext context) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text(
-        'Could not open shop contact. Try again or use FAQ & Support in your profile.',
-      ),
-    ),
-  );
 }

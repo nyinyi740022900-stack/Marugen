@@ -16,10 +16,12 @@ import '../../orders/presentation/orders_providers.dart';
 import '../../orders/presentation/order_pull_to_refresh.dart';
 import '../../orders/utils/invoice_pdf.dart';
 import '../delivery/admin_delivery_screen.dart';
-import '../payments/admin_payments_screen.dart';
+import '../../orders/utils/order_payment_line.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/utils/price_format.dart';
 
-/// Orders hub: status list + fulfillment (ex-Delivery) + payments ledger.
+/// Orders hub: status list + fulfillment (ex-Delivery). Each order's payment
+/// state is on its card and its detail screen; there is no separate ledger.
 class AdminOrdersScreen extends ConsumerStatefulWidget {
   const AdminOrdersScreen({super.key});
 
@@ -29,7 +31,7 @@ class AdminOrdersScreen extends ConsumerStatefulWidget {
 
 class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen>
     with SingleTickerProviderStateMixin {
-  late final _tabs = TabController(length: 3, vsync: this);
+  late final _tabs = TabController(length: 2, vsync: this);
 
   @override
   void dispose() {
@@ -54,7 +56,7 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen>
       });
     }
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Orders'),
@@ -62,7 +64,7 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen>
             preferredSize: const Size.fromHeight(kTextTabBarHeight),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                const labels = ['All', 'Fulfillment', 'Payments'];
+                const labels = ['All', 'Fulfillment'];
                 final theme = Theme.of(context);
                 final style = theme.textTheme.titleSmall!.merge(
                   theme.tabBarTheme.labelStyle,
@@ -97,11 +99,7 @@ class _AdminOrdersScreenState extends ConsumerState<AdminOrdersScreen>
         ),
         body: TabBarView(
           controller: _tabs,
-          children: const [
-            _OrdersListPane(),
-            AdminDeliveryPane(),
-            AdminPaymentsPane(),
-          ],
+          children: const [_OrdersListPane(), AdminDeliveryPane()],
         ),
       ),
     );
@@ -599,15 +597,22 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                   spacing: AppSpacing.md,
                   runSpacing: AppSpacing.sm,
                   children: [
-                    Text(
-                      'Order total',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: AppPalette.of(context).textMuted,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Order total',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
+                        _PaymentLine(order: order),
+                      ],
                     ),
                     Text(
-                      'S\$${order.total.toStringAsFixed(2)}',
+                      formatPrice(order.total),
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 17,
@@ -665,6 +670,30 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// What was paid and what went back, in one line under "Order total".
+class _PaymentLine extends StatelessWidget {
+  final Order order;
+  const _PaymentLine({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final line = orderPaymentLine(order);
+    return Text(
+      line.text,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: switch (line.tone) {
+          PaymentLineTone.problem => palette.error,
+          PaymentLineTone.pending => palette.warning,
+          PaymentLineTone.neutral => palette.textMuted,
+        },
       ),
     );
   }

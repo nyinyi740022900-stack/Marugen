@@ -1,6 +1,7 @@
-import 'package:supabase_flutter/supabase_flutter.dart' show FunctionException;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase/supabase_client.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/server_time.dart';
 
 /// Talks to the `easyparcel-*` Supabase Edge Functions — the automated
@@ -13,7 +14,24 @@ import '../../../shared/utils/server_time.dart';
 /// The actual sender/receiver/rate-quote payload building happens
 /// server-side in the Edge Functions.
 class EasyParcelRepository {
-  final _client = SupabaseService.client;
+  final SupabaseClient _client;
+  EasyParcelRepository({SupabaseClient? client})
+    : _client = client ?? SupabaseService.client;
+
+  /// `functions.invoke` throws on every non-2xx response, so a failed call
+  /// never returns: it is turned into the function's own `error` sentence
+  /// (fixed copy written for staff), or [fallback] when it sent none.
+  Future<FunctionResponse> _invoke(
+    String function, {
+    Map<String, dynamic>? body,
+    required String fallback,
+  }) async {
+    try {
+      return await _client.functions.invoke(function, body: body);
+    } on FunctionException catch (e) {
+      throw ServerMessageException.fromFunction(e, fallback: fallback);
+    }
+  }
 
   /// Server-generates and stores a single-use OAuth `state` value for the
   /// connect flow (see 0047_easyparcel_oauth_state.sql / easyparcel-oauth-
@@ -23,18 +41,18 @@ class EasyParcelRepository {
   /// actually verify the request came from a real admin session instead of
   /// accepting any code for any EasyParcel account.
   Future<String> startOAuth() async {
-    final res = await _client.functions.invoke('easyparcel-oauth-start');
-    if (res.status >= 400) {
-      throw Exception('Could not start EasyParcel connection');
-    }
+    final res = await _invoke(
+      'easyparcel-oauth-start',
+      fallback: 'Could not start the EasyParcel connection. Try again.',
+    );
     return (res.data as Map)['state'] as String;
   }
 
   Future<EasyParcelStatus> connectionStatus() async {
-    final res = await _client.functions.invoke('easyparcel-status');
-    if (res.status >= 400) {
-      throw Exception('Could not check EasyParcel connection status');
-    }
+    final res = await _invoke(
+      'easyparcel-status',
+      fallback: 'Could not check the EasyParcel connection. Try again.',
+    );
     final data = res.data as Map;
     return EasyParcelStatus(
       connected: data['connected'] as bool? ?? false,
@@ -50,17 +68,11 @@ class EasyParcelRepository {
     String orderId, {
     required ParcelDetails parcel,
   }) async {
-    final res = await _client.functions.invoke(
+    final res = await _invoke(
       'easyparcel-get-rates',
       body: {'order_id': orderId, 'parcel': parcel.toJson()},
+      fallback: 'Could not fetch shipping rates. Try again.',
     );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not fetch shipping rates';
-      throw Exception(message);
-    }
     final rawRates = (res.data as Map)['rates'];
     final list = rawRates is List
         ? rawRates
@@ -79,7 +91,7 @@ class EasyParcelRepository {
     required ParcelDetails parcel,
     String? courierId,
   }) async {
-    final res = await _client.functions.invoke(
+    await _invoke(
       'easyparcel-book-shipment',
       body: {
         'order_id': orderId,
@@ -87,34 +99,23 @@ class EasyParcelRepository {
         'parcel': parcel.toJson(),
         'courier_id': ?courierId,
       },
+      fallback:
+          'Could not book the shipment. Check EasyParcel before trying again.',
     );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not book the shipment';
-      throw Exception(message);
-    }
   }
 
   /// Attaches an existing booking's verified AWB; never creates another shipment.
   Future<void> reconcileShipment(String orderId, String trackingNumber) async {
-    final res = await _client.functions.invoke(
+    await _invoke(
       'easyparcel-reconcile-shipment',
       body: {
         'order_id': orderId,
         'tracking_number': trackingNumber,
         'confirmed_existing_shipment': true,
       },
+      fallback:
+          'Could not recover the existing shipment. Check the tracking number.',
     );
-    if (res.status >= 400) {
-      final data = res.data;
-      throw Exception(
-        data is Map && data['error'] != null
-            ? data['error'].toString()
-            : 'Could not recover the existing shipment',
-      );
-    }
   }
 
   /// Parcel planning/booking is owner-only; the backend owns all prices and claims.
@@ -123,7 +124,9 @@ class EasyParcelRepository {
     String orderId, {
     Map<String, dynamic> data = const {},
   }) async {
-    final dynamic response;
+    // The parcel panel shows a StateError's message as it is.
+    const fallback = 'Could not update parcels. Refresh and try again.';
+    final FunctionResponse response;
     try {
       response = await _client.functions
           .invoke(
@@ -132,33 +135,21 @@ class EasyParcelRepository {
           )
           .timeout(Duration(seconds: action == 'book' ? 90 : 45));
     } on FunctionException catch (error) {
-      final details = error.details;
-      throw StateError(
-        details is Map && details['error'] is String
-            ? details['error'] as String
-            : 'Could not update parcels. Refresh and try again.',
-      );
+      throw StateError(functionErrorMessage(error) ?? fallback);
     }
-    if (response.status >= 400 || response.data is! Map) {
-      final body = response.data;
-      throw StateError(
-        body is Map && body['error'] is String
-            ? body['error'] as String
-            : 'Could not update parcels. Refresh and try again.',
-      );
-    }
+    if (response.data is! Map) throw StateError(fallback);
     return Map<String, dynamic>.from(response.data as Map);
   }
 
   /// Read-only owner check: never pays, submits or retries a shipment.
   Future<Map<String, dynamic>> pickupDiagnostics(String orderId) async {
-    final res = await _client.functions.invoke(
+    const fallback = 'Could not verify pickup. Check EasyParcel.';
+    final res = await _invoke(
       'easyparcel-pickup-diagnostics',
       body: {'order_id': orderId},
+      fallback: fallback,
     );
-    if (res.status >= 400 || res.data is! Map) {
-      throw StateError('Could not verify pickup. Check EasyParcel.');
-    }
+    if (res.data is! Map) throw StateError(fallback);
     return Map<String, dynamic>.from(res.data as Map);
   }
 
@@ -169,17 +160,11 @@ class EasyParcelRepository {
   /// on alone (unverified signature — see its file header) and doesn't fire
   /// at all in the EasyParcel sandbox.
   Future<void> refreshStatus(String orderId) async {
-    final res = await _client.functions.invoke(
+    await _invoke(
       'easyparcel-refresh-status',
       body: {'order_id': orderId},
+      fallback: 'Could not refresh the tracking status. Try again shortly.',
     );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not refresh tracking status';
-      throw Exception(message);
-    }
   }
 }
 

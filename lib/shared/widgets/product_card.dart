@@ -1,6 +1,7 @@
 import 'heart_icon.dart';
 import 'press_scale.dart';
 import 'sized_network_image.dart';
+import 'support_contact_picker.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,7 +16,6 @@ import '../../features/orders/presentation/purchase_intent.dart';
 import '../../features/wishlist/presentation/wishlist_providers.dart';
 import '../models/product.dart';
 import '../providers/settings_providers.dart';
-import '../utils/contact_launcher.dart';
 import '../utils/delivery_estimate.dart';
 import '../utils/price_format.dart';
 
@@ -303,7 +303,7 @@ class _CardActionButtons extends ConsumerWidget {
       return _RoundIconButton(
         icon: Icons.chat_bubble_outline,
         tooltip: 'Contact shop about ${product.name}',
-        onTap: () => _chatAbout(context, ref, product),
+        onTap: () => _chatAbout(context, product),
       );
     }
 
@@ -328,29 +328,13 @@ class _CardActionButtons extends ConsumerWidget {
     return _QuickAddButton(product: product, onOpenDetail: onOpenDetail);
   }
 
-  Future<void> _chatAbout(
-    BuildContext context,
-    WidgetRef ref,
-    Product product,
-  ) async {
-    try {
-      final settings = await ref.read(shopSettingsProvider.future);
-      if (!context.mounted) return;
-      await contactShop(
+  /// The same support picker as the product page, FAQ and order help.
+  Future<void> _chatAbout(BuildContext context, Product product) =>
+      showSupportContactPicker(
         context,
-        settings['shop_phone'] as String? ?? '',
         message: "Hi, I'm interested in ${product.name}",
+        messageIsPersonal: false,
       );
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Shop contact is unavailable. Please try again.'),
-          ),
-        );
-      }
-    }
-  }
 }
 
 class _RoundIconButton extends StatelessWidget {

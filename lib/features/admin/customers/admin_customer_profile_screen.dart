@@ -10,6 +10,7 @@ import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import 'admin_customer_providers.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// Admin-only: a customer's profile, saved addresses, and full order
 /// history — reached by tapping the profile icon on an order that isn't
@@ -145,15 +146,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontWeight: FontWeight.w700,
-        fontSize: 12,
-        letterSpacing: 0.8,
-        color: AppPalette.of(context).textMuted,
-      ),
-    );
+    return SectionLabel(text);
   }
 }
 

@@ -1,9 +1,49 @@
+// EasyParcel webhook.
+//
+// SOURCE-IP DIAGNOSTIC (temporary, added to settle the allowlist question
+// below). Every request logs one line:
+//
+//   [easyparcel-webhook] source-ip {"allowed":true,"decision_ip":"47.254.255.46",
+//     "decision_from":"x-forwarded-for[0]",
+//     "x_forwarded_for":["47.254.255.46","172.70.1.9"],
+//     "headers":{"x-real-ip":["172.70.1.9"],"cf-connecting-ip":["47.254.255.46"]},
+//     "other_header_names":[],
+//     "allowlisted_at":[{"header":"x-forwarded-for","index":0,"from_end":2,"ip":"47.254.255.46"}, ...]}
+//
+// It holds IP addresses and header names only: never the body, the
+// Authorization header or any other header value.
+//
+// How to read it, using ONE delivery that is known to be genuine (trigger a
+// status change in EasyParcel and match the log line by time):
+//   * `x_forwarded_for` is left to right; index 0 is what the caller (or its
+//     own proxy) wrote, later entries were appended by the hops in front of
+//     this function. `from_end` counts from the right (1 = last entry).
+//   * `allowlisted_at` shows where EasyParcel's address really arrives. The
+//     trustworthy position is one the platform writes itself: a fixed
+//     `from_end` in x-forwarded-for, or a single-value header such as
+//     cf-connecting-ip / x-real-ip.
+//   * To confirm that position cannot be chosen by the caller, send one test
+//     request from another machine with a made-up header
+//     (curl -H 'x-forwarded-for: 47.254.255.46' ...): it is answered 403 or
+//     200 exactly as today, and its log line shows whether the made-up value
+//     landed at index 0 only (then index 0 is forgeable, as suspected) and
+//     which header/position held the machine's real address instead.
+//
+// What to change afterwards, in the handler below:
+//   * replace the `ip` expression with the position the genuine delivery
+//     proved, e.g. the entry `from_end` N of x-forwarded-for
+//     (`chain[chain.length - N]`) or `req.headers.get("cf-connecting-ip")`;
+//   * if EasyParcel's address never appears at a platform-written position,
+//     the allowlist cannot be made reliable: drop it and rely only on the
+//     authenticated re-read (already the only thing that changes state);
+//   * then delete this diagnostic, its import and _shared/source_ip.ts.
 import { refreshOrderParcels } from "../_shared/order_parcels_api.ts";
 import { parcelRecoveryDetails } from "../_shared/order_parcels.ts";
 // EasyParcel has no signed webhook (per existing integration support notes).
 // Retain source allowlist, treat payloads as hints, then verify status with
 // authenticated tracking_status API before changing the order lifecycle.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { ipOnly, sourceIpDiagnostic } from "../_shared/source_ip.ts";
 import {
   applyEasyparcelTracking,
   fetchEasyparcelShipmentDetails,
@@ -34,7 +74,28 @@ Deno.serve(async (req) => {
     // read matched on the stored shipment number and AWB.
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       req.headers.get("x-real-ip");
-    if (!ip || !ALLOWED_SOURCE_IPS.has(ip)) {
+    const allowed = !!ip && ALLOWED_SOURCE_IPS.has(ip);
+    // Diagnostic only (see the file header); it never changes `allowed`.
+    try {
+      console.log(
+        "[easyparcel-webhook] source-ip",
+        JSON.stringify({
+          allowed,
+          // The entry the allowlist was applied to.
+          decision_ip: ip ? ipOnly(ip) : null,
+          decision_from: req.headers.get("x-forwarded-for") !== null
+            ? "x-forwarded-for[0]"
+            : "x-real-ip",
+          ...sourceIpDiagnostic(req.headers, ALLOWED_SOURCE_IPS),
+        }),
+      );
+    } catch (diagnosticError) {
+      console.error(
+        "[easyparcel-webhook] source-ip diagnostic failed",
+        diagnosticError,
+      );
+    }
+    if (!allowed) {
       return reply({ received: false, error: "untrusted source" }, 403);
     }
     const body = await req.json();

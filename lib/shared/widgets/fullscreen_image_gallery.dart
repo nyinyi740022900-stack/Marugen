@@ -269,9 +269,8 @@ class _FullscreenImageGalleryState extends State<FullscreenImageGallery>
 }
 
 /// Small circular icon button (translucent black, white icon) used for
-/// "close" affordances floating over photo content — the fullscreen
-/// gallery's close button and the promo banner popup's dismiss button
-/// (see promo_banner_dialog.dart) both use this.
+/// "close" affordances floating over photo content, such as the fullscreen
+/// gallery's close button.
 class CircleIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;

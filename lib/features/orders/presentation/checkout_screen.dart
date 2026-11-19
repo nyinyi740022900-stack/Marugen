@@ -39,6 +39,7 @@ import 'shipping_quote_providers.dart';
 import '../domain/shipping_quote.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/undo_snack_bar.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// A random per-attempt key for `create-payment-intent` — see
 /// CheckoutScreen's `_idempotencyKey` doc. Just needs to be unique per
@@ -811,15 +812,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                 Expanded(
                   child: ListView(
                     children: [
-                      Text(
-                        'DELIVERY ADDRESS',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.8,
-                          color: AppPalette.of(context).textMuted,
-                        ),
-                      ),
+                      const SectionLabel('DELIVERY ADDRESS'),
                       const SizedBox(height: AppSpacing.sm),
                       addressesAsync.when(
                         data: (addresses) {
@@ -975,15 +968,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           ),
                         ),
                       const SizedBox(height: AppSpacing.lg),
-                      Text(
-                        'ORDER SUMMARY',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.8,
-                          color: AppPalette.of(context).textMuted,
-                        ),
-                      ),
+                      const SectionLabel('ORDER SUMMARY'),
                       const SizedBox(height: AppSpacing.sm),
                       Container(
                         decoration: BoxDecoration(
@@ -1058,15 +1043,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       if (ownerValid) ...[
-                        Text(
-                          'ORDER REQUESTS',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            letterSpacing: 0.8,
-                            color: AppPalette.of(context).textMuted,
-                          ),
-                        ),
+                        const SectionLabel('ORDER REQUESTS'),
                         const SizedBox(height: AppSpacing.sm),
                         Container(
                           padding: const EdgeInsets.all(AppSpacing.lg),
@@ -1116,15 +1093,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         ),
                         const SizedBox(height: AppSpacing.lg),
                       ],
-                      Text(
-                        'PROMO CODE',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
-                          letterSpacing: 0.8,
-                          color: AppPalette.of(context).textMuted,
-                        ),
-                      ),
+                      const SectionLabel('PROMO CODE'),
                       const SizedBox(height: AppSpacing.sm),
                       Container(
                         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -1576,15 +1545,7 @@ class _DeliveryPromise extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'DELIVERY',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 0.8,
-            color: AppPalette.of(context).textMuted,
-          ),
-        ),
+        const SectionLabel('DELIVERY'),
         const SizedBox(height: AppSpacing.sm),
         if (shopDelivery) ...[
           const Text(

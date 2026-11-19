@@ -68,6 +68,8 @@ Future<void> refreshAdminOrdersFromCarrier(ProviderContainer container) async {
   } finally {
     container.invalidate(adminOrdersProvider);
     container.invalidate(adminPaymentsSummaryProvider);
+    container.invalidate(adminRecentOrdersProvider);
+    container.invalidate(adminStuckPendingOrdersProvider);
     container.invalidate(fulfillmentOrdersProvider);
     container.invalidate(orderByIdProvider);
     await container.read(adminOrdersPagedProvider.notifier).refresh();
@@ -160,9 +162,10 @@ final adminOrdersProvider = FutureProvider<List<Order>>((ref) {
   return ref.watch(orderRepositoryProvider).fetchAllOrders(status: status);
 });
 
-/// Every order regardless of the Orders › All status chip — for the
-/// dashboard, the payments ledger and the top-products ranking, which must
-/// never quietly change because staff tapped "Shipped" in another tab.
+/// Every order regardless of the Orders › All status chip. Unbounded, so it
+/// is read only by the payments summary and the top-products ranking on a
+/// database without their server functions (before migration 0078); no
+/// screen watches it directly.
 final adminAllOrdersProvider = FutureProvider<List<Order>>((ref) {
   return ref.watch(orderRepositoryProvider).fetchAllOrders();
 });
@@ -172,8 +175,8 @@ final adminAllOrdersProvider = FutureProvider<List<Order>>((ref) {
 /// looking at instead of the top of the queue.
 final focusFulfillmentOrderProvider = StateProvider<String?>((ref) => null);
 
-/// Asks the Orders hub to switch to a tab (0 All, 1 Fulfillment,
-/// 2 Payments) the next time it is shown — set by the Home queue counters.
+/// Asks the Orders hub to switch to a tab (0 All, 1 Fulfillment) the next
+/// time it is shown — set by the Home queue counters.
 final requestedOrdersTabProvider = StateProvider<int?>((ref) => null);
 
 /// Never inherits the All-tab status filter: all outstanding deliveries stay visible.
@@ -212,12 +215,40 @@ final adminOrderSummaryProvider = FutureProvider<AdminOrderSummary>((ref) {
   return ref.watch(orderRepositoryProvider).fetchAdminOrderSummary();
 });
 
-/// Payments pane headline from the server. Null until migration 0078 is
-/// applied; the pane then adds up [adminAllOrdersProvider] as it used to.
-final adminPaymentsSummaryProvider = FutureProvider<AdminPaymentsSummary?>((
+/// The dashboard's "collected through Stripe" card: the server's figures.
+/// Until migration 0078 is applied they are added up here from
+/// [adminAllOrdersProvider], which is watched only in that case, so a
+/// database that has the function never downloads every order for it.
+final adminPaymentsSummaryProvider = FutureProvider<AdminPaymentsSummary>((
+  ref,
+) async {
+  final summary = await ref
+      .watch(orderRepositoryProvider)
+      .fetchAdminPaymentsSummary();
+  if (summary != null) return summary;
+  final orders = await ref.watch(adminAllOrdersProvider.future);
+  return AdminPaymentsSummary.fromOrders(orders);
+});
+
+/// How many orders the dashboard's "Recent orders" card shows.
+const int kRecentOrdersLimit = 5;
+
+/// The newest orders for the dashboard: one small page, never every order.
+final adminRecentOrdersProvider = FutureProvider<List<Order>>((ref) {
+  return ref
+      .watch(orderRepositoryProvider)
+      .fetchAllOrdersPage(offset: 0, limit: kRecentOrdersLimit);
+});
+
+/// Orders still `pending` after [kStuckPendingAge], for the dashboard.
+final adminStuckPendingOrdersProvider = FutureProvider<StuckPendingOrders>((
   ref,
 ) {
-  return ref.watch(orderRepositoryProvider).fetchAdminPaymentsSummary();
+  return ref
+      .watch(orderRepositoryProvider)
+      .fetchStuckPendingOrders(
+        createdBefore: DateTime.now().subtract(kStuckPendingAge),
+      );
 });
 
 /// Most rows the Top Products ranking asks for (the function's own cap).
@@ -244,6 +275,8 @@ void refreshAdminOrders(WidgetRef ref) {
   ref.invalidate(adminOrderSummaryProvider);
   ref.invalidate(adminPaymentsSummaryProvider);
   ref.invalidate(adminTopProductsProvider);
+  ref.invalidate(adminRecentOrdersProvider);
+  ref.invalidate(adminStuckPendingOrdersProvider);
   ref.invalidate(fulfillmentOrdersProvider);
   // Every open order detail (the whole family): a status change made from a
   // list card must not leave the detail screen showing the old status.

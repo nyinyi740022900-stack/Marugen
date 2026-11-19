@@ -40,6 +40,8 @@ import 'orders_providers.dart';
 import 'purchase_intent.dart';
 import 'order_pull_to_refresh.dart';
 import 'order_cancellation_panel.dart';
+import 'order_payment_section.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// Router extras provide a preview while the current session fetches the order.
 /// Only a successful authoritative fetch enables actions.
@@ -356,8 +358,6 @@ class _OrderDetailBody extends ConsumerWidget {
   final bool justPlaced;
   const _OrderDetailBody({required this.order, this.justPlaced = false});
 
-  String _shortId(String id) => id.length > 18 ? '${id.substring(0, 18)}…' : id;
-
   void _copyAddress(BuildContext context, Map<String, dynamic> shipping) {
     final text = [
       shipping['recipient_name'],
@@ -469,25 +469,6 @@ class _OrderDetailBody extends ConsumerWidget {
                   fontSize: 12.5,
                 ),
               ),
-              // The Stripe reference means something to staff reconciling
-              // a payout; to a customer it reads like an error code.
-              if (order.stripePaymentIntentId != null &&
-                  order.stripePaymentIntentId!.isNotEmpty &&
-                  (ref
-                          .watch(currentAppUserProvider)
-                          .valueOrNull
-                          ?.role
-                          .isAdmin ??
-                      false)) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Payment: ${_shortId(order.stripePaymentIntentId!)}',
-                  style: TextStyle(
-                    color: AppPalette.of(context).textMuted,
-                    fontSize: 12.5,
-                  ),
-                ),
-              ],
               if (order.refundStatusLabel != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -573,21 +554,20 @@ class _OrderDetailBody extends ConsumerWidget {
             statusHistory: order.statusHistory,
           ),
         const SizedBox(height: AppSpacing.lg),
+        // Staff only: the Stripe reference means something to someone
+        // reconciling a payout; to a customer it reads like an error code.
+        if (ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ??
+            false) ...[
+          AdminOrderPaymentSection(order: order),
+          const SizedBox(height: AppSpacing.lg),
+        ],
         if (shipping != null) ...[
           Wrap(
             alignment: WrapAlignment.spaceBetween,
             spacing: AppSpacing.md,
             runSpacing: AppSpacing.sm,
             children: [
-              Text(
-                'SHIPPING ADDRESS',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                  letterSpacing: 0.8,
-                  color: AppPalette.of(context).textMuted,
-                ),
-              ),
+              const SectionLabel('SHIPPING ADDRESS'),
               // Admin-only: staff copying an address to paste into a
               // courier's own app/label almost always needs it as one
               // block of text, not retyped field-by-field from the screen.
@@ -665,15 +645,7 @@ class _OrderDetailBody extends ConsumerWidget {
           const SizedBox(height: AppSpacing.lg),
         ],
         if (order.customerRemarks?.trim().isNotEmpty ?? false) ...[
-          Text(
-            'CUSTOMER REQUESTS / REMARKS',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-              letterSpacing: 0.8,
-              color: AppPalette.of(context).textMuted,
-            ),
-          ),
+          const SectionLabel('CUSTOMER REQUESTS / REMARKS'),
           const SizedBox(height: AppSpacing.sm),
           Container(
             width: double.infinity,
@@ -694,15 +666,7 @@ class _OrderDetailBody extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
         ],
-        Text(
-          'ITEMS',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 0.8,
-            color: AppPalette.of(context).textMuted,
-          ),
-        ),
+        const SectionLabel('ITEMS'),
         const SizedBox(height: AppSpacing.sm),
         Container(
           decoration: BoxDecoration(

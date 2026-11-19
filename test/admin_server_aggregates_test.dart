@@ -8,7 +8,6 @@ import 'package:http/testing.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:marugen_app/features/admin/dashboard/admin_dashboard_screen.dart';
 import 'package:marugen_app/features/admin/dashboard/admin_top_products_screen.dart';
-import 'package:marugen_app/features/admin/payments/admin_payments_screen.dart';
 import 'package:marugen_app/features/notifications/presentation/notification_providers.dart';
 import 'package:marugen_app/features/orders/data/order_repository.dart';
 import 'package:marugen_app/features/orders/presentation/orders_providers.dart';
@@ -247,64 +246,59 @@ void main() {
     });
   });
 
-  group('payments pane', () {
-    Future<void> showPane(WidgetTester tester, Aggregates repo) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            orderRepositoryProvider.overrideWithValue(repo),
-            // Only what a 1000-row fetch would have returned.
-            adminAllOrdersProvider.overrideWith(
-              (ref) async => [order('a', total: 20), order('b', total: 30)],
-            ),
-          ],
-          child: MaterialApp(
-            theme: AppTheme.light,
-            home: const Scaffold(body: AdminPaymentsPane()),
+  group('payments summary provider', () {
+    ProviderContainer containerWith(Aggregates repo) {
+      final container = ProviderContainer(
+        overrides: [
+          orderRepositoryProvider.overrideWithValue(repo),
+          // Only what a 1000-row fetch would have returned.
+          adminAllOrdersProvider.overrideWith(
+            (ref) async => [
+              order('a', total: 20),
+              order('b', total: 30),
+              order('unpaid', total: 99, status: OrderStatus.pending),
+            ],
           ),
-        ),
+        ],
       );
-      await tester.pumpAndSettle();
+      addTearDown(container.dispose);
+      return container;
     }
 
-    testWidgets('the headline is the server total, not the sum of the rows '
-        'that happened to load', (tester) async {
-      await showPane(
-        tester,
+    test('is the server total, not the sum of the orders the app '
+        'holds', () async {
+      final container = containerWith(
         Aggregates()
           ..payments = const AdminPaymentsSummary(
             transactionCount: 1500,
             collected: 98765.4,
           ),
       );
-      expect(find.text('S\$98765.40'), findsOneWidget);
-      expect(find.text('S\$50.00'), findsNothing);
+      final summary = await container.read(adminPaymentsSummaryProvider.future);
+      expect(summary.collected, 98765.4);
+      expect(summary.transactionCount, 1500);
+      expect(container.exists(adminAllOrdersProvider), isFalse);
     });
 
-    testWidgets('before migration 0078 it adds up the loaded orders as '
-        'before', (tester) async {
-      await showPane(tester, Aggregates());
-      expect(find.text('S\$50.00'), findsOneWidget);
+    test('before migration 0078 it adds up every order as before', () async {
+      final container = containerWith(Aggregates());
+      final summary = await container.read(adminPaymentsSummaryProvider.future);
+      // The unpaid checkout reached Stripe, so it counts as a transaction,
+      // but nothing was collected from it.
+      expect(summary.collected, 50);
+      expect(summary.transactionCount, 3);
     });
 
-    testWidgets('a failed total shows the error state and Retry loads it', (
-      tester,
-    ) async {
-      final repo = Aggregates()
-        ..failure = const PostgrestException(message: 'boom', code: '42501');
-      await showPane(tester, repo);
-      expect(find.text('Something went wrong'), findsOneWidget);
-      expect(find.textContaining('S\$'), findsNothing);
-
-      repo
-        ..failure = null
-        ..payments = const AdminPaymentsSummary(
-          transactionCount: 2,
-          collected: 41,
-        );
-      await tester.tap(find.text('Retry'));
-      await tester.pumpAndSettle();
-      expect(find.text('S\$41.00'), findsOneWidget);
+    test('a real failure is not papered over with the fallback', () async {
+      final container = containerWith(
+        Aggregates()
+          ..failure = const PostgrestException(message: 'boom', code: '42501'),
+      );
+      await expectLater(
+        container.read(adminPaymentsSummaryProvider.future),
+        throwsA(isA<PostgrestException>()),
+      );
+      expect(container.exists(adminAllOrdersProvider), isFalse);
     });
   });
 
@@ -330,6 +324,10 @@ void main() {
         ],
       ),
       fulfillmentOrdersProvider.overrideWith((ref) async => <Order>[]),
+      adminRecentOrdersProvider.overrideWith((ref) async => <Order>[]),
+      adminStuckPendingOrdersProvider.overrideWith(
+        (ref) async => const StuckPendingOrders(orders: [], total: 0),
+      ),
       unreadNotificationCountProvider.overrideWith((ref) => 0),
       adminOrderSummaryProvider.overrideWith(
         (ref) async => const AdminOrderSummary(

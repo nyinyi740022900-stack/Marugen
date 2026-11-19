@@ -6,7 +6,10 @@ import '../../features/auth/presentation/auth_providers.dart';
 import '../models/support_contact.dart';
 import '../providers/settings_providers.dart';
 
-/// Choose a support colleague and an explicit contact channel.
+/// Choose a support colleague and an explicit contact channel. Every
+/// customer "contact the shop" entry (FAQ, order help, a product, a service)
+/// opens this one picker; a shop without a support directory is reached on
+/// its `shop_phone` instead, so there is always a route.
 ///
 /// A [message] about an order belongs to the account that opened the picker
 /// and is withheld if the account changes. Pass [messageIsPersonal] false
@@ -124,13 +127,19 @@ class _SupportContactPickerState extends ConsumerState<SupportContactPicker> {
         'Could not load support contacts. Check your connection and retry.',
       ),
       data: (data) {
-        final List<SupportContact> contacts;
+        List<SupportContact> contacts;
         try {
           contacts = supportDirectoryFromSettings(data);
         } on FormatException {
-          return _recovery(
-            'Support contact details are unavailable. Please retry later.',
-          );
+          // A directory that cannot be read must not leave the customer
+          // without a route while the shop's own number is on file.
+          final shop = legacyShopContact(data);
+          if (shop == null) {
+            return _recovery(
+              'Support contact details are unavailable. Please retry later.',
+            );
+          }
+          contacts = [shop];
         }
         if (contacts.isEmpty) {
           return _recovery(

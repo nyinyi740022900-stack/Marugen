@@ -8,8 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/service.dart';
-import '../../../shared/providers/settings_providers.dart';
-import '../../../shared/utils/contact_launcher.dart';
+import '../../../shared/widgets/support_contact_picker.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import 'service_providers.dart';
@@ -135,32 +134,14 @@ class _ServiceCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     ElevatedButton.icon(
-                      onPressed: () async {
-                        try {
-                          final settings = await ref.read(
-                            shopSettingsProvider.future,
-                          );
-                          if (!context.mounted) return;
-                          final phone =
-                              settings['shop_phone']?.toString() ?? '';
-                          await contactShop(
-                            context,
-                            phone,
-                            message:
-                                'Hi, I\'d like to ask about "${service.name}".',
-                          );
-                        } catch (_) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Could not load shop contact. Check your connection and try again.',
-                                ),
-                              ),
-                            );
-                          }
-                        }
-                      },
+                      // The same support picker as FAQ and order help; the
+                      // message names only the service.
+                      onPressed: () => showSupportContactPicker(
+                        context,
+                        message:
+                            'Hi, I\'d like to ask about "${service.name}".',
+                        messageIsPersonal: false,
+                      ),
                       icon: const Icon(Icons.chat_bubble_outline, size: 16),
                       label: const Text('Contact to book'),
                     ),

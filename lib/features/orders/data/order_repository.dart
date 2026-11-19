@@ -27,7 +27,8 @@ class OrderRepository {
     );
   }
 
-  /// Payments pane headline (`admin_payments_summary`, migration 0078).
+  /// Dashboard "collected through Stripe" figure (`admin_payments_summary`,
+  /// migration 0078).
   /// Null when the database does not have the function yet, so the caller
   /// can fall back to adding up the orders it already loaded.
   Future<AdminPaymentsSummary?> fetchAdminPaymentsSummary() async {
@@ -158,6 +159,31 @@ class OrderRepository {
     return (data as List)
         .map((e) => Order.fromMap(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Admin: orders still `pending` that were created before [createdBefore]
+  /// (the dashboard's "stuck pending" list), newest first. At most [limit]
+  /// rows come back; [StuckPendingOrders.total] is how many match in all.
+  /// The rows carry no items: the dashboard shows number, total and age.
+  Future<StuckPendingOrders> fetchStuckPendingOrders({
+    required DateTime createdBefore,
+    int limit = kStuckPendingLimit,
+  }) async {
+    final response = await _client
+        .from('orders')
+        .select('*')
+        .eq('status', OrderStatus.pending.name)
+        .lt('created_at', createdBefore.toUtc().toIso8601String())
+        .order('created_at', ascending: false)
+        .order('id')
+        .limit(limit)
+        .count(CountOption.exact);
+    final orders = response.data.map(Order.fromMap).toList();
+    return StuckPendingOrders(
+      orders: orders,
+      // Never report fewer than the rows actually shown.
+      total: response.count < orders.length ? orders.length : response.count,
+    );
   }
 
   Future<void> confirmShopDelivery(String orderId) async {
@@ -317,8 +343,8 @@ bool isMissingRpc(Object error) =>
     error is PostgrestException &&
     const {'PGRST202', '42883', '404'}.contains(error.code);
 
-/// Payments made through Stripe: how many orders, and what was collected
-/// from them after refunds.
+/// Payments made through Stripe: how many orders reached Stripe (whatever
+/// became of them), and what was collected from them after refunds.
 class AdminPaymentsSummary {
   final int transactionCount;
   final double collected;
@@ -327,6 +353,33 @@ class AdminPaymentsSummary {
     required this.transactionCount,
     required this.collected,
   });
+
+  /// The app's copy of `admin_payments_summary`, used until migration 0078
+  /// is applied: the same figures added up from every order.
+  factory AdminPaymentsSummary.fromOrders(Iterable<Order> orders) {
+    var count = 0;
+    var collected = 0.0;
+    for (final order in orders) {
+      if (order.stripePaymentIntentId?.isEmpty ?? true) continue;
+      count++;
+      collected += order.netPaidAmount;
+    }
+    return AdminPaymentsSummary(transactionCount: count, collected: collected);
+  }
+}
+
+/// Most stuck pending orders the dashboard lists at once.
+const int kStuckPendingLimit = 20;
+
+/// How long an order may stay `pending` before the dashboard calls it stuck.
+const Duration kStuckPendingAge = Duration(minutes: 30);
+
+/// The newest stuck pending orders, and how many there are in all.
+class StuckPendingOrders {
+  final List<Order> orders;
+  final int total;
+
+  const StuckPendingOrders({required this.orders, required this.total});
 }
 
 /// One row of the Top Products ranking.

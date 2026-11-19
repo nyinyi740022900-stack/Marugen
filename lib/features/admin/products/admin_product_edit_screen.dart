@@ -19,11 +19,21 @@ import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/image_upload.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/discard_changes_guard.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// Create/edit form for a product. Pass `productId == null` to create new.
 class AdminProductEditScreen extends ConsumerStatefulWidget {
   final String? productId;
-  const AdminProductEditScreen({super.key, this.productId});
+
+  /// Replaces the gallery picker for the certificate photo in tests.
+  @visibleForTesting
+  final Future<XFile?> Function()? certificatePicker;
+
+  const AdminProductEditScreen({
+    super.key,
+    this.productId,
+    this.certificatePicker,
+  });
 
   @override
   ConsumerState<AdminProductEditScreen> createState() =>
@@ -44,10 +54,19 @@ class _AdminProductEditScreenState
   final _varietyCtrl = TextEditingController();
   final _sizeCtrl = TextEditingController();
   final _breederCtrl = TextEditingController();
+  final _ageCtrl = TextEditingController();
 
   ProductCategory _category = ProductCategory.koi;
   bool _showPrice = true;
   bool _hasCertificate = false;
+
+  /// The certificate photo: already uploaded, or a local file that uploads
+  /// on Save like the product photos. Null when there is none.
+  _Photo? _certificate;
+
+  /// The fish details as loaded, so saving keeps what this form has no
+  /// field for (gender, keys written by a newer version of the app).
+  FishDetails? _loadedFish;
 
   /// Photos in display order (first = cover). Each is either already
   /// uploaded (`url`) or still a local file; uploads happen on Save, one
@@ -93,9 +112,11 @@ class _AdminProductEditScreenState
     _varietyCtrl.text,
     _sizeCtrl.text,
     _breederCtrl.text,
+    _ageCtrl.text,
     _category.name,
     _showPrice,
     _hasCertificate,
+    _certificate == null ? '' : _certificate!.url ?? _certificate!.file!.path,
     _photos.map((ph) => ph.url ?? ph.file!.path).join(','),
     for (final v in _variants) ...[
       v.id,
@@ -114,6 +135,12 @@ class _AdminProductEditScreenState
   ].join('\u0001');
 
   bool get _dirty => _baseline != null && _fingerprint() != _baseline;
+
+  /// What the unsaved-changes guard was last built with. Typing in a field
+  /// does not rebuild this screen, so the form asks for a rebuild when the
+  /// answer flips; otherwise a text-only edit could be backed out of
+  /// without the "Discard changes?" question.
+  bool _guardDirty = false;
 
   bool get isLiveFish =>
       _category == ProductCategory.koi || _category == ProductCategory.arowana;
@@ -187,6 +214,12 @@ class _AdminProductEditScreenState
         _sizeCtrl.text = product.fishDetails!.sizeCm?.toString() ?? '';
         _breederCtrl.text = product.fishDetails!.breeder ?? '';
         _hasCertificate = product.fishDetails!.hasCertificate;
+        _ageCtrl.text = product.fishDetails!.age ?? '';
+        final certificateUrl = product.fishDetails!.certificateImageUrl;
+        _certificate = certificateUrl == null
+            ? null
+            : _Photo.uploaded(certificateUrl);
+        _loadedFish = product.fishDetails;
       }
       for (var i = 0; i < product.variants.length; i++) {
         final v = product.variants[i];
@@ -247,7 +280,9 @@ class _AdminProductEditScreenState
     final hasFishData =
         _varietyCtrl.text.trim().isNotEmpty ||
         _sizeCtrl.text.trim().isNotEmpty ||
-        _breederCtrl.text.trim().isNotEmpty;
+        _breederCtrl.text.trim().isNotEmpty ||
+        _ageCtrl.text.trim().isNotEmpty ||
+        _certificate != null;
     final hasGoodsData =
         _variants.any((v) => v.labelCtrl.text.trim().isNotEmpty) ||
         _sizeOptionCtrls.any((c) => c.text.trim().isNotEmpty);
@@ -440,6 +475,53 @@ class _AdminProductEditScreenState
     }
   }
 
+  Future<void> _pickCertificate() async {
+    if (_loading) return;
+    final picked =
+        await (widget.certificatePicker ??
+            () => ImagePicker().pickImage(
+              source: ImageSource.gallery,
+              imageQuality: 85,
+              maxWidth: uploadImageMaxSide,
+              maxHeight: uploadImageMaxSide,
+            ))();
+    if (picked != null && mounted && !_loading) {
+      setState(() => _certificate = _Photo.local(picked));
+    }
+  }
+
+  /// Retry a failed certificate upload right away when the product already
+  /// exists; the link itself is written by the next Save.
+  Future<void> _retryCertificate() async {
+    final photo = _certificate;
+    if (photo == null) return;
+    final productId = widget.productId ?? _createdProductId;
+    if (productId == null || _loading) {
+      setState(() => photo.status = _PhotoStatus.ready);
+      return;
+    }
+    await _uploadPhoto(ProductRepository(), productId, photo);
+  }
+
+  /// `fish_details` as it should be stored: the form's fields over whatever
+  /// was loaded, so keys this form does not edit survive a save. The
+  /// certificate photo goes with the certificate: switching "Has
+  /// certificate" off, or removing the photo, drops its key.
+  Map<String, dynamic> _fishDetailsPayload() {
+    String? text(TextEditingController c) =>
+        c.text.trim().isEmpty ? null : c.text.trim();
+    return FishDetails(
+      variety: text(_varietyCtrl),
+      sizeCm: double.tryParse(_sizeCtrl.text.trim()),
+      gender: _loadedFish?.gender,
+      breeder: text(_breederCtrl),
+      hasCertificate: _hasCertificate,
+      age: text(_ageCtrl),
+      certificateImageUrl: _hasCertificate ? _certificate?.url : null,
+      unknownKeys: _loadedFish?.unknownKeys ?? const {},
+    ).toMap();
+  }
+
   Future<void> _save() async {
     if (_loading) return;
     if (!_formKey.currentState!.validate()) {
@@ -480,19 +562,7 @@ class _AdminProductEditScreenState
         'size_options': supportsSizeMatrix
             ? _collectedSizeOptions()
             : <String>[],
-        if (isLiveFish)
-          'fish_details': {
-            'variety': _varietyCtrl.text.trim().isEmpty
-                ? null
-                : _varietyCtrl.text.trim(),
-            'size_cm': double.tryParse(_sizeCtrl.text.trim()),
-            'breeder': _breederCtrl.text.trim().isEmpty
-                ? null
-                : _breederCtrl.text.trim(),
-            'has_certificate': _hasCertificate,
-          }
-        else
-          'fish_details': null,
+        'fish_details': isLiveFish ? _fishDetailsPayload() : null,
       };
 
       String productId;
@@ -519,16 +589,31 @@ class _AdminProductEditScreenState
         );
         if (!await _uploadPhoto(repo, productId, pending[i])) failedPhotos++;
       }
+      // The certificate photo uploads the same way, and its link is
+      // written with the fish details below.
+      final certificate = _certificate;
+      final uploadCertificate =
+          isLiveFish &&
+          _hasCertificate &&
+          certificate != null &&
+          certificate.url == null;
+      var certificateFailed = false;
+      if (uploadCertificate) {
+        if (!mounted) return;
+        setState(() => _uploadNote = 'Uploading certificate photo…');
+        certificateFailed = !await _uploadPhoto(repo, productId, certificate);
+      }
       if (!mounted) return;
       setState(() => _uploadNote = null);
       payload['image_urls'] = _photos
           .map((ph) => ph.url)
           .whereType<String>()
           .toList();
-      if (pending.isNotEmpty || !creating) {
+      if (isLiveFish) payload['fish_details'] = _fishDetailsPayload();
+      if (pending.isNotEmpty || uploadCertificate || !creating) {
         await repo.updateProduct(productId, payload);
       }
-      if (failedPhotos > 0) {
+      if (failedPhotos > 0 || certificateFailed) {
         if (!mounted) return;
         setState(() => _loading = false);
         ScaffoldMessenger.of(context)
@@ -536,7 +621,11 @@ class _AdminProductEditScreenState
           ..showSnackBar(
             SnackBar(
               content: Text(
-                failedPhotos == 1
+                failedPhotos == 0
+                    ? "The certificate photo didn't upload. Tap it to retry, then Save."
+                    : certificateFailed
+                    ? "Some photos, including the certificate photo, didn't upload. Tap each to retry, then Save."
+                    : failedPhotos == 1
                     ? "1 photo didn't upload. Tap it to retry, then Save."
                     : "$failedPhotos photos didn't upload. Tap each to retry, then Save.",
               ),
@@ -764,8 +853,9 @@ class _AdminProductEditScreenState
     }
     // A blank form has no load step; take its baseline on first build.
     _baseline ??= _fingerprint();
+    _guardDirty = _dirty;
     return DiscardChangesGuard(
-      dirty: _dirty,
+      dirty: _guardDirty,
       busy: _loading,
       child: Scaffold(
         appBar: AppBar(
@@ -785,6 +875,9 @@ class _AdminProductEditScreenState
           absorbing: _loading,
           child: Form(
             key: _formKey,
+            onChanged: () {
+              if (_dirty != _guardDirty) setState(() {});
+            },
             child: ListView(
               padding: const EdgeInsets.all(AppSpacing.xl),
               children: [
@@ -1154,6 +1247,24 @@ class _AdminProductEditScreenState
                       decimal: true,
                     ),
                   ),
+                  // Age and the certificate photo describe one animal, so
+                  // a batch listing (fish options) does not offer them.
+                  if (_variants.isEmpty) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    TextFormField(
+                      controller: _ageCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Age',
+                        hintText: 'e.g. 2 years, Tosai',
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      inputFormatters: [
+                        LengthLimitingTextInputFormatter(
+                          FishDetails.maxAgeLength,
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.md),
                   TextFormField(
                     controller: _breederCtrl,
@@ -1168,6 +1279,27 @@ class _AdminProductEditScreenState
                     value: _hasCertificate,
                     onChanged: (v) => setState(() => _hasCertificate = v),
                   ),
+                  if (_hasCertificate && _variants.isEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    _CertificatePhotoField(
+                      photo: _certificate,
+                      enabled: !_loading,
+                      onPick: _pickCertificate,
+                      onRemove: () => setState(() => _certificate = null),
+                      onRetry: _retryCertificate,
+                    ),
+                  ],
+                  if (_variants.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Age and a certificate photo describe one fish, so they '
+                      'are not used for a listing with fish options.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: AppSpacing.xxl),
                 ElevatedButton(
@@ -1211,15 +1343,7 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontWeight: FontWeight.w700,
-        fontSize: 12,
-        letterSpacing: 0.8,
-        color: AppPalette.of(context).textMuted,
-      ),
-    );
+    return SectionLabel(text);
   }
 }
 
@@ -1233,6 +1357,97 @@ class _Photo {
   _PhotoStatus status = _PhotoStatus.ready;
   _Photo.uploaded(String this.url) : file = null;
   _Photo.local(XFile this.file) : url = null;
+}
+
+/// The certificate photo under "Has certificate": an add tile, or the photo
+/// with the same upload states and actions as a product photo.
+class _CertificatePhotoField extends StatelessWidget {
+  final _Photo? photo;
+  final bool enabled;
+  final VoidCallback onPick;
+  final VoidCallback onRemove;
+  final VoidCallback onRetry;
+  const _CertificatePhotoField({
+    required this.photo,
+    required this.enabled,
+    required this.onPick,
+    required this.onRemove,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final photo = this.photo;
+    final caption = photo == null
+        ? 'Optional. Customers can open it from the product page.'
+        : photo.status == _PhotoStatus.failed
+        ? "Didn't upload. Tap the photo to retry."
+        : photo.status == _PhotoStatus.uploading
+        ? 'Uploading…'
+        : photo.url == null
+        ? 'Uploads when you save.'
+        : 'Customers can open it from the product page.';
+    return Row(
+      children: [
+        if (photo == null)
+          Semantics(
+            button: true,
+            label: 'Add certificate photo',
+            child: InkWell(
+              onTap: enabled ? onPick : null,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Container(
+                width: _PhotoStrip._tile,
+                height: _PhotoStrip._tile,
+                decoration: BoxDecoration(
+                  color: palette.surfaceMuted,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(color: palette.border),
+                ),
+                child: Icon(
+                  Icons.add_a_photo_outlined,
+                  color: palette.textMuted,
+                ),
+              ),
+            ),
+          )
+        else
+          _PhotoTile(
+            photo: photo,
+            label: 'Certificate photo',
+            isCover: false,
+            enabled: enabled,
+            onRemove: onRemove,
+            onMakeCover: null,
+            onRetry: onRetry,
+          ),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Certificate photo',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                caption,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: photo?.status == _PhotoStatus.failed
+                      ? palette.error
+                      : palette.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// Horizontal, reorderable photo strip: cover badge on the first tile,
@@ -1327,6 +1542,9 @@ class _PhotoStrip extends StatelessWidget {
 
 class _PhotoTile extends StatelessWidget {
   final _Photo photo;
+
+  /// What a screen reader calls it; "Cover photo" / "Photo" when null.
+  final String? label;
   final bool isCover;
   final bool enabled;
   final VoidCallback onRemove;
@@ -1334,6 +1552,7 @@ class _PhotoTile extends StatelessWidget {
   final VoidCallback onRetry;
   const _PhotoTile({
     required this.photo,
+    this.label,
     required this.isCover,
     required this.enabled,
     required this.onRemove,
@@ -1402,7 +1621,7 @@ class _PhotoTile extends StatelessWidget {
     return Semantics(
       button: true,
       label:
-          '${isCover ? 'Cover photo' : 'Photo'}'
+          '${label ?? (isCover ? 'Cover photo' : 'Photo')}'
           '${status == _PhotoStatus.failed ? ', upload failed' : ''}'
           '${status == _PhotoStatus.uploading ? ', uploading' : ''}',
       child: InkWell(

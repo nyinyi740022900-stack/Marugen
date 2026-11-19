@@ -103,7 +103,7 @@ Future<GoRouter> startApp(
       checkoutShippingQuoteProvider.overrideWith(
         (ref, key) async => fixtureShippingQuote(key),
       ),
-      adminAllOrdersProvider.overrideWith((ref) async => []),
+      adminRecentOrdersProvider.overrideWith((ref) async => []),
     ],
   );
   addTearDown(container.dispose);

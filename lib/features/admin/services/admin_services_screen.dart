@@ -16,6 +16,7 @@ import '../../services/presentation/service_providers.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/sheet_header.dart';
 import '../../../shared/widgets/discard_changes_guard.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// "Services" tab inside admin Knowledge — farm services like fish
 /// recovery/quarantine or pond-renovation boarding, shown to customers
@@ -356,15 +357,7 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
                 onChanged: (v) => setState(() => _active = v),
               ),
               const SizedBox(height: AppSpacing.md),
-              Text(
-                'PHOTOS',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                  letterSpacing: 0.8,
-                  color: AppPalette.of(context).textMuted,
-                ),
-              ),
+              const SectionLabel('PHOTOS'),
               const SizedBox(height: AppSpacing.sm),
               Wrap(
                 spacing: 8,

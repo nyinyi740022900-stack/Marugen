@@ -13,13 +13,16 @@ import '../../../core/notifications/app_icon_badge.dart';
 import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/app_user.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/image_upload.dart';
 
 /// Wraps Supabase Auth + the `profiles` table (which stores the app-level
 /// role used to decide customer vs admin UI). See
 /// `supabase/migrations/0001_init.sql` for the `profiles` table + RLS.
 class AuthRepository {
-  final SupabaseClient _client = SupabaseService.client;
+  final SupabaseClient _client;
+  AuthRepository({SupabaseClient? client})
+    : _client = client ?? SupabaseService.client;
 
   bool _googleInitialized = false;
 
@@ -306,13 +309,16 @@ class AuthRepository {
   /// Permanently deletes the signed-in auth account and personal profile.
   /// Necessary order records remain, detached from the deleted profile.
   Future<void> deleteAccount() async {
-    final res = await _client.functions.invoke('delete-account');
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not delete your account';
-      throw Exception(message);
+    try {
+      await _client.functions.invoke('delete-account');
+    } on FunctionException catch (e) {
+      // invoke() throws on every non-2xx response, so nothing below runs
+      // and the account stays signed in.
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback:
+            'Your account was not deleted. Try again, or contact support.',
+      );
     }
     // The server already deleted this account. Clear the local session without
     // requiring a global revocation request against the now-missing user.

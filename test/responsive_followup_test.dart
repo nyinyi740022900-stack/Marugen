@@ -4,9 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
 import 'package:marugen_app/features/admin/products/admin_products_screen.dart';
 import 'package:marugen_app/features/admin/dashboard/admin_dashboard_screen.dart';
-import 'package:marugen_app/features/admin/payments/admin_payments_screen.dart';
 import 'package:marugen_app/features/notifications/presentation/notification_providers.dart';
 import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
+import 'package:marugen_app/features/orders/data/order_repository.dart';
 import 'package:marugen_app/features/orders/presentation/order_success_screen.dart';
 import 'package:marugen_app/features/orders/presentation/orders_providers.dart';
 import 'package:marugen_app/features/reviews/presentation/review_providers.dart';
@@ -166,14 +166,12 @@ void main() {
         },
       );
     }
-    for (final screen in [
-      const AdminDashboardScreen(),
-      const Scaffold(body: AdminPaymentsPane()),
-    ]) {
+    {
+      const screen = AdminDashboardScreen();
       testWidgets(
-        '${screen is Scaffold ? 'AdminPaymentsPane' : 'AdminDashboardScreen'} handles large text in $brightness',
+        'AdminDashboardScreen handles large text in $brightness',
         (tester) async {
-          viewport(tester, const Size(360, 800));
+          viewport(tester, const Size(360, 6000));
           final order = Order(
             id: '12345678-abcd',
             userId: 'u',
@@ -190,7 +188,25 @@ void main() {
                   (ref) async => [product],
                 ),
                 adminOrdersProvider.overrideWith((ref) async => [order]),
-                adminAllOrdersProvider.overrideWith((ref) async => [order]),
+                adminRecentOrdersProvider.overrideWith((ref) async => [order]),
+                adminStuckPendingOrdersProvider.overrideWith(
+                  (ref) async => StuckPendingOrders(orders: [order], total: 42),
+                ),
+                adminPaymentsSummaryProvider.overrideWith(
+                  (ref) async => const AdminPaymentsSummary(
+                    transactionCount: 1234,
+                    collected: 1234567.89,
+                  ),
+                ),
+                adminOrderSummaryProvider.overrideWith(
+                  (ref) async => const AdminOrderSummary(
+                    openOrders: 3,
+                    totalRevenue: 1234567.89,
+                    weekRevenue: 12345,
+                  ),
+                ),
+                adminTopProductsProvider.overrideWith((ref) async => []),
+                fulfillmentOrdersProvider.overrideWith((ref) async => [order]),
                 shopSettingsProvider.overrideWith((ref) async => {}),
                 unreadNotificationCountProvider.overrideWith((ref) => 0),
               ],
@@ -198,6 +214,10 @@ void main() {
             ),
           );
           await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+          expect(find.text('Collected through Stripe'), findsOneWidget);
+          expect(find.text('S\$1234567.89'), findsOneWidget);
+          expect(find.text('+41 more in Orders'), findsOneWidget);
           expect(tester.takeException(), isNull);
         },
       );

@@ -129,7 +129,6 @@ void main() {
       ProviderScope(
         overrides: [
           adminOrdersProvider.overrideWith((ref) async => [order]),
-          adminAllOrdersProvider.overrideWith((ref) async => [order]),
           easyParcelConnectedProvider.overrideWith((ref) async => false),
         ],
         child: MaterialApp(

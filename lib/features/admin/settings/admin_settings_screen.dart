@@ -1,12 +1,5 @@
-import '../../../shared/widgets/sized_network_image.dart'
-    show uploadImageMaxSide;
-
-import 'dart:io';
-
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -17,11 +10,13 @@ import '../../../shared/widgets/discard_changes_guard.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../admin_shell.dart' show adminTabIndexProvider, kAdminHomeBannersTab;
 import '../delivery/easyparcel_providers.dart';
 import '../delivery/easyparcel_repository.dart';
 import 'settings_repository.dart';
 import '../../support/support_directory_settings.dart';
 import '../../../shared/utils/error_message.dart';
+import '../../../shared/widgets/section_label.dart';
 
 class AdminSettingsScreen extends ConsumerStatefulWidget {
   const AdminSettingsScreen({super.key});
@@ -40,7 +35,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   final _deliveryMinCtrl = TextEditingController();
   final _deliveryMaxCtrl = TextEditingController();
   final _lowStockThresholdCtrl = TextEditingController();
-  final _bannerLinkCtrl = TextEditingController();
   final _shopPostcodeCtrl = TextEditingController();
   final _shopCityCtrl = TextEditingController();
   final _shopStateCtrl = TextEditingController();
@@ -56,9 +50,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   bool _loadFailed = false;
   bool _saving = false;
   bool _signingOut = false;
-  XFile? _pickedBannerImage;
-  String? _existingBannerImageUrl;
-  bool _bannerActive = false;
   final _easyParcelRepo = EasyParcelRepository();
   bool _checkingEasyParcel = true;
   EasyParcelStatus? _easyParcelStatus;
@@ -113,16 +104,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _pickBannerImage() async {
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-      maxWidth: uploadImageMaxSide,
-      maxHeight: uploadImageMaxSide,
-    );
-    if (picked != null) setState(() => _pickedBannerImage = picked);
-  }
-
   Future<void> _confirmSignOut() async {
     final confirmed = await confirmLogout(context);
     if (!confirmed) return;
@@ -164,7 +145,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _deliveryMinCtrl,
       _deliveryMaxCtrl,
       _lowStockThresholdCtrl,
-      _bannerLinkCtrl,
       _shopPostcodeCtrl,
       _shopCityCtrl,
       _shopStateCtrl,
@@ -193,9 +173,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
       _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
       _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
       _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
-      _existingBannerImageUrl = s['promo_banner_image_url']?.toString();
-      _bannerLinkCtrl.text = s['promo_banner_link_url']?.toString() ?? '';
-      _bannerActive = s['promo_banner_active'] as bool? ?? false;
       _shopPostcodeCtrl.text = s['shop_postcode']?.toString() ?? '';
       _shopCityCtrl.text = s['shop_city']?.toString() ?? '';
       _shopStateCtrl.text = s['shop_state']?.toString() ?? '';
@@ -256,10 +233,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     _deliveryMinCtrl.text,
     _deliveryMaxCtrl.text,
     _lowStockThresholdCtrl.text,
-    _bannerLinkCtrl.text,
-    _bannerActive,
-    _existingBannerImageUrl,
-    _pickedBannerImage?.path,
     _shopPostcodeCtrl.text,
     _shopCityCtrl.text,
     _shopStateCtrl.text,
@@ -292,20 +265,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     }
     setState(() => _saving = true);
     try {
-      var bannerImageUrl = _existingBannerImageUrl;
-      final picked = _pickedBannerImage;
-      if (picked != null) {
-        final bytes = await picked.readAsBytes();
-        final ext = picked.name.split('.').last;
-        bannerImageUrl = await _repo.uploadBannerImage(bytes, ext);
-        // Record the upload immediately, before the settings write below
-        // can fail — otherwise a network error on updateSettings() would
-        // leave _pickedBannerImage still set, and retrying Save would
-        // upload the same picked file a second time under a new path,
-        // orphaning the first upload in storage.
-        _existingBannerImageUrl = bannerImageUrl;
-        _pickedBannerImage = null;
-      }
+      // The retired promo popup's promo_banner_* columns are deliberately
+      // absent: an upsert leaves columns it does not name untouched, so the
+      // stored image, link and switch stay exactly as they were.
       await _repo.updateSettings({
         'shop_name': _shopNameCtrl.text.trim(),
         'shop_phone': _phoneCtrl.text.trim(),
@@ -319,11 +281,6 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
             int.tryParse(_deliveryMaxCtrl.text.trim()) ?? 5,
         'low_stock_threshold':
             int.tryParse(_lowStockThresholdCtrl.text.trim()) ?? 5,
-        'promo_banner_image_url': bannerImageUrl,
-        'promo_banner_link_url': _bannerLinkCtrl.text.trim().isEmpty
-            ? null
-            : _bannerLinkCtrl.text.trim(),
-        'promo_banner_active': _bannerActive,
         'shop_postcode': _shopPostcodeCtrl.text.trim(),
         'shop_city': _shopCityCtrl.text.trim(),
         'shop_state': _shopStateCtrl.text.trim(),
@@ -637,66 +594,19 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('PROMOTION BANNER'),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Shown as a popup once per device per day when a customer '
-              'opens the app.',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            GestureDetector(
-              onTap: _pickBannerImage,
-              child: Container(
-                height: 140,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: AppPalette.of(context).surfaceMuted,
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                  border: Border.all(color: AppPalette.of(context).border),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: _pickedBannerImage != null
-                    ? Image.file(
-                        File(_pickedBannerImage!.path),
-                        fit: BoxFit.cover,
-                      )
-                    : (_existingBannerImageUrl != null &&
-                          _existingBannerImageUrl!.isNotEmpty)
-                    ? CachedNetworkImage(
-                        imageUrl: _existingBannerImageUrl!,
-                        fit: BoxFit.cover,
-                        errorWidget: (_, _, _) => Icon(
-                          Icons.image_not_supported_outlined,
-                          color: AppPalette.of(context).textMuted,
-                        ),
-                      )
-                    : Center(
-                        child: Icon(
-                          Icons.add_photo_alternate_outlined,
-                          color: AppPalette.of(context).textMuted,
-                          size: 32,
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: _bannerLinkCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Link URL (optional)',
-                hintText: 'Opened when a customer taps the banner',
-              ),
-              keyboardType: TextInputType.url,
-            ),
-            SwitchListTile(
+            const _SectionLabel('PROMOTIONS'),
+            ListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('Show banner when app opens'),
-              value: _bannerActive,
-              onChanged: (v) => setState(() => _bannerActive = v),
+              leading: const Icon(Icons.view_carousel_outlined),
+              title: const Text('Promotions now live in Home Banners'),
+              subtitle: const Text(
+                'The once-a-day popup is retired. Add promotion slides to '
+                'the carousel on the shop home page.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () =>
+                  ref.read(adminTabIndexProvider.notifier).state =
+                      kAdminHomeBannersTab,
             ),
             const SizedBox(height: AppSpacing.xl),
             ElevatedButton(
@@ -747,14 +657,6 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontWeight: FontWeight.w700,
-        fontSize: 12,
-        letterSpacing: 0.8,
-        color: AppPalette.of(context).textMuted,
-      ),
-    );
+    return SectionLabel(text);
   }
 }

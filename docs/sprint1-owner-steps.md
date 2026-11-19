@@ -113,6 +113,7 @@ Device ပေါ်မှာ စမ်းရန်:
 ## ၇။ Sprint 3 backend (0077 ပြီးမှ)
 
 - [ ] ၇.၁ `supabase/migrations/0078_sprint3_hardening.sql` ကို SQL editor မှာ run (GST snapshot column၊ index ၉ ခု၊ admin RPC ၂ ခု၊ EasyParcel token lease)
+- [ ] ၇.၁.၁ `supabase/migrations/0079_easyparcel_refresh_lease_release.sql` ကိုလည်း run (0078 ပြီးမှ)
 - [ ] ၇.၂ Edge Function တွေ redeploy
 - [ ] ၇.၃ Test order တစ်ခု ဝယ်ပြီး စစ်
 
@@ -133,6 +134,7 @@ select order_number, total, gst_percent, gst_included_in_price, gst_amount_cents
 ```
 
 - Stripe dashboard → Webhooks မှာ delivery အောင်မြင်နေ/မနေ ကြည့်ပါ။
+- EasyParcel webhook အစစ်တစ်ခု ရောက်ပြီးရင် Dashboard → Edge Functions → `easyparcel-webhook` → Logs မှာ `[easyparcel-webhook] source-ip` လိုင်းကို ကူးပြီး Claude ကို ပြပါ (IP စစ်ဆေးမှုကို အပြီးပြင်ဖို့ လိုပါတယ်)။
 - EasyParcel နဲ့ parcel တစ်ခု book လုပ်ကြည့်ပြီး label (AWB) ပေါ်လာ/မလာ စစ်ပါ။
 
 ## ၈။ Sprint 2 + 3 app ကို device ပေါ်မှာ စမ်းရန် (1.0.28)
@@ -146,6 +148,18 @@ select order_number, total, gst_percent, gst_included_in_price, gst_amount_cents
 - [ ] 0078 တင်ပြီးနောက် order အသစ်ရဲ့ invoice PDF မှာ GST line မှန်/မမှန်၊ order အဟောင်း invoice လည်း အရင်အတိုင်း ဖြစ်ရမယ်။
 - [ ] Admin Payments နဲ့ Top Products ကိန်းဂဏန်း (0078 မတင်ခင်ရော တင်ပြီးရော အလုပ်လုပ်ရမယ်)။
 - [ ] Admin မှာ sold toggle၊ review Hide၊ variety hide/delete ကို မြန်မြန် နှစ်ချက်နှိပ်ကြည့်။
+- [ ] Video ပါတဲ့ live fish page → gallery ရဲ့ ဒုတိယ slide မှာ "Play video" ပေါ်၊ နှိပ်ရင် ဖွင့်၊ swipe လုပ်ရင် ရပ် (YouTube link ရော ဖိုင် link ရော စမ်း)။
+- [ ] Product page၊ product card၊ Services က contact ခလုတ် → WhatsApp / Phone / Email ရွေးစရာပေါ်ပြီး message ကြိုဖြည့်ထားရမယ် (guest ရော login ဝင်ထားသူရော)။
+- [ ] Admin Orders မှာ tab နှစ်ခုပဲ (All / Fulfillment) ရှိရမယ်၊ order card ပေါ်မှာ "Paid S$…" လိုင်း၊ order detail ရဲ့ PAYMENT မှာ Payment ID နှိပ်ရင် copy ဖြစ်ရမယ်။
+- [ ] Admin Home မှာ "Collected through Stripe" card ပေါ်ရမယ်။
+- [ ] Customer app စဖွင့်ရင် promo popup မတက်ရ။
+- [ ] Live fish တစ်ကောင်ကို edit → Age ဖြည့်၊ Certificate photo တင် (iPhone HEIC ပုံနဲ့ပါ စမ်း) → product page မှာ Age နဲ့ "View certificate" ပေါ်ရမယ်။
+
+## ၉။ Content ဖြည့်ရန် (code မလို)
+
+- [ ] အရင် daily promo popup ပုံကို ဆက်ပြချင်ရင် Home Banners မှာ slide အဖြစ် ပြန်ထည့် (popup က ဖြုတ်လိုက်ပြီ၊ ပုံဟောင်းက သိမ်းထားဆဲ)။
+- [ ] လက်ရှိ live fish တွေမှာ Age နဲ့ certificate ပုံ ဖြည့်။
+- [ ] Home Banner slide ၂-၃ ခု ထည့်။
 
 ## သိထားရန်
 

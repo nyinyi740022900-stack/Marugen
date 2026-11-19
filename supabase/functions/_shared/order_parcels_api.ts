@@ -2,11 +2,13 @@ import {
   assertParcelTrackingIdentity,
   parcelRecoveryDetails,
 } from "./order_parcels.ts";
+import { DeliveryValidationError } from "./delivery.ts";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   DeliveryError,
   fetchEasyparcelShipmentDetails,
   fetchEasyparcelTracking,
+  rpcError,
 } from "./delivery_api.ts";
 export async function loadParcels(admin: SupabaseClient, orderId: string) {
   const { data, error } = await admin.from("order_parcels").select("*").eq(
@@ -50,7 +52,10 @@ export async function refreshOrderParcels(
         tracking,
       );
     } catch (error) {
-      throw new DeliveryError((error as Error).message, 409);
+      // Same authored refusal, as a conflict rather than a bad request.
+      throw error instanceof DeliveryValidationError
+        ? new DeliveryError(error.message, 409)
+        : error;
     }
     if (recovered) {
       const { error } = await admin.rpc("recover_order_parcel_identity", {
@@ -59,7 +64,7 @@ export async function refreshOrderParcels(
         p_awb: recovered.number,
         p_awb_url: recovered.awbUrl,
       });
-      if (error) throw error;
+      if (error) throw rpcError(error);
     }
     const { error } = await admin.rpc("apply_order_parcel_tracking", {
       p_parcel_id: parcel.id,
@@ -70,7 +75,7 @@ export async function refreshOrderParcels(
       p_observed_at: tracking.observedAt,
       p_event_at: tracking.eventAt,
     });
-    if (error) throw error;
+    if (error) throw rpcError(error);
   }
   return await loadParcels(admin, orderId);
 }

@@ -1,6 +1,7 @@
 import {
   type EasyParcelConnection,
   EasyParcelNotConnectedError,
+  EasyParcelRefreshError,
   resolveEasyParcelAccessToken,
   type TokenPort,
 } from "./easyparcel_token.ts";
@@ -28,6 +29,8 @@ function fixture(overrides: Partial<EasyParcelConnection> = {}) {
     storeFailures: 0,
     stores: 0,
     exchangeDelayMs: 0,
+    releases: 0,
+    releaseFails: false,
     setRow: (next: typeof row) => {
       row = next;
     },
@@ -63,6 +66,16 @@ function fixture(overrides: Partial<EasyParcelConnection> = {}) {
         expires_in: 3600,
         refresh_token_expires_in: 86_400,
       };
+    },
+    // Same rule as release_easyparcel_token_refresh (migration 0079).
+    release: async (refreshToken) => {
+      state.releases++;
+      if (state.releaseFails) throw new Error("database unavailable");
+      if (
+        row && row.refresh_token === refreshToken &&
+        row.refresh_started_at !== null &&
+        row.refresh_started_at >= clock - 60_000
+      ) row.refresh_started_at = null;
     },
     store: async (previous, connection) => {
       state.stores++;
@@ -165,6 +178,81 @@ Deno.test("waiting for a refresh that never finishes ends with safe copy, not a 
   }
   assert(/being refreshed/.test(message), `unexpected: ${message}`);
   assert(f.state.exchanges.length === 0, "refresh token was spent anyway");
+  assert(f.state.releases === 0, "a waiter released a lease it never held");
+  assert(f.state.row()!.refresh_started_at === T0, "someone else's lease lost");
+});
+async function failure(f: ReturnType<typeof fixture>): Promise<unknown> {
+  try {
+    await resolveEasyParcelAccessToken(f.port);
+  } catch (error) {
+    return error;
+  }
+  return null;
+}
+Deno.test("a failed refresh hands the lease back so the next request can try at once", async () => {
+  const f = fixture();
+  const exchange = f.port.exchange;
+  let down = true;
+  f.port.exchange = async (token) => {
+    if (down) throw new Error("connect ETIMEDOUT 10.0.0.1 secret-detail");
+    return await exchange(token);
+  };
+  const error = await failure(f);
+  assert(error instanceof EasyParcelRefreshError, "untyped refresh failure");
+  assert(
+    !/ETIMEDOUT|secret-detail/.test((error as Error).message),
+    "provider detail reached the caller",
+  );
+  assert(f.state.row()!.refresh_started_at === null, "lease still held");
+  assert(f.state.row()!.refresh_token === "refresh-1", "tokens changed");
+  // No time has passed: under 0078 alone this request waited out the lease.
+  down = false;
+  assert(await resolveEasyParcelAccessToken(f.port) === "access-2", "token");
+  assert(f.state.releases === 1, "expected exactly one release");
+});
+Deno.test("a lease that may no longer be ours is left to expire", async () => {
+  const f = fixture();
+  f.port.exchange = async () => {
+    f.state.advance(50_000); // the provider call somehow outlived its budget
+    throw new Error("slow failure");
+  };
+  assert(await failure(f) instanceof EasyParcelRefreshError, "wrong error");
+  assert(f.state.releases === 0, "released a lease that may be someone else's");
+  assert(f.state.row()!.refresh_started_at === T0, "lease was cleared");
+});
+Deno.test("a failed refresh never releases the lease of a replaced connection", async () => {
+  const f = fixture();
+  f.port.exchange = async () => {
+    // The admin reconnects, and another request starts refreshing that
+    // new connection, while this refresh is failing.
+    f.state.setRow({
+      access_token: "access-reconnected",
+      refresh_token: "refresh-reconnected",
+      access_token_expires_at: iso(T0 - 1),
+      refresh_token_expires_at: iso(T0 + 86_400_000),
+      refresh_started_at: T0,
+    });
+    throw new Error("rejected");
+  };
+  assert(await failure(f) instanceof EasyParcelRefreshError, "wrong error");
+  assert(
+    f.state.row()!.refresh_started_at === T0,
+    "released a lease taken with a different refresh token",
+  );
+});
+Deno.test("a release that fails does not hide the refresh failure", async () => {
+  const f = fixture();
+  f.state.releaseFails = true;
+  f.port.exchange = async () => {
+    throw new EasyParcelRefreshError("authored refresh copy");
+  };
+  const error = await failure(f);
+  assert(
+    error instanceof EasyParcelRefreshError &&
+      error.message === "authored refresh copy",
+    "authored message lost",
+  );
+  assert(f.state.row()!.refresh_started_at === T0, "lease state invented");
 });
 Deno.test("an abandoned lease expires so refreshing can resume", async () => {
   const f = fixture();

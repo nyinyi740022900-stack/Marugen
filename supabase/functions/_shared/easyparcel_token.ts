@@ -11,7 +11,9 @@
 // rotates refresh tokens, the slower request then stored a dead one and the
 // shop had to reconnect. The refresher now takes a short database lease
 // (claim_easyparcel_token_refresh, migration 0078) and everyone else waits
-// for the token it stores.
+// for the token it stores. If the refresh fails, the refresher hands the
+// lease straight back (release_easyparcel_token_refresh, migration 0079)
+// instead of leaving everyone else waiting for it to expire.
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { fetchWithTimeout, TIMEOUT_MS } from './http.ts';
@@ -24,6 +26,14 @@ export class EasyParcelNotConnectedError extends Error {
     super('EasyParcel is not connected. Connect it from Settings first.');
   }
 }
+
+/**
+ * A refresh that did not produce a token. The message is written for staff
+ * and is safe to show; provider and database detail goes to the logs only.
+ */
+export class EasyParcelRefreshError extends Error {}
+const REFRESH_FAILED_MESSAGE =
+  'EasyParcel connection could not be refreshed. Try again, or reconnect it from Settings.';
 
 export type EasyParcelConnection = {
   access_token: string;
@@ -42,6 +52,8 @@ export interface TokenPort {
   /** Atomically take the refresh lease for this exact refresh token. */
   claim(refreshToken: string): Promise<boolean>;
   exchange(refreshToken: string): Promise<RefreshedTokens>;
+  /** Hand back a lease taken with this exact refresh token after a failed refresh. */
+  release(refreshToken: string): Promise<void>;
   /** Store the new tokens and release the lease; false if nothing was written. */
   store(
     previousRefreshToken: string,
@@ -58,6 +70,10 @@ const EXPIRY_MARGIN_MS = 60_000;
 // than that refresh can take (TIMEOUT_MS.token).
 const WAIT_STEP_MS = 500;
 const WAIT_STEPS = Math.ceil((TIMEOUT_MS.token + 3_000) / WAIT_STEP_MS);
+// The database lease lasts 60 s. It is handed back only while it is
+// certainly still this request's own: after that it has expired (or is about
+// to) and may already belong to another request with the same refresh token.
+const RELEASE_WINDOW_MS = 45_000;
 
 function usable(connection: EasyParcelConnection, now: number): boolean {
   return new Date(connection.access_token_expires_at).getTime() -
@@ -71,6 +87,7 @@ export async function resolveEasyParcelAccessToken(
   if (!connection) throw new EasyParcelNotConnectedError();
   if (usable(connection, port.now())) return connection.access_token;
 
+  let claimStartedAt = 0;
   for (let step = 0;; step++) {
     if (
       new Date(connection.refresh_token_expires_at).getTime() <= port.now()
@@ -78,11 +95,13 @@ export async function resolveEasyParcelAccessToken(
       // Refresh token itself is dead — admin has to reconnect from Settings.
       throw new EasyParcelNotConnectedError();
     }
+    // Taken before the claim, so the lease can only be younger than this.
+    claimStartedAt = port.now();
     if (await port.claim(connection.refresh_token)) break;
     // Another request holds the lease (or the tokens just changed). Wait for
     // its result instead of spending the same refresh token a second time.
     if (step >= WAIT_STEPS) {
-      throw new Error(
+      throw new EasyParcelRefreshError(
         'EasyParcel connection is being refreshed. Try again in a moment.',
       );
     }
@@ -92,7 +111,27 @@ export async function resolveEasyParcelAccessToken(
     if (usable(connection, port.now())) return connection.access_token;
   }
 
-  const tokens = await port.exchange(connection.refresh_token);
+  let tokens: RefreshedTokens;
+  try {
+    tokens = await port.exchange(connection.refresh_token);
+  } catch (error) {
+    // Rejected, timed out or unreadable: nobody is refreshing any more, so
+    // do not leave the other requests waiting out the rest of the lease.
+    if (port.now() - claimStartedAt < RELEASE_WINDOW_MS) {
+      try {
+        await port.release(connection.refresh_token);
+      } catch (releaseError) {
+        // Not fatal: the lease expires by itself.
+        console.error(
+          '[easyparcel-token] refresh lease was not released',
+          releaseError,
+        );
+      }
+    }
+    if (error instanceof EasyParcelRefreshError) throw error;
+    console.error('[easyparcel-token] refresh did not complete', error);
+    throw new EasyParcelRefreshError(REFRESH_FAILED_MESSAGE);
+  }
   const now = port.now();
   const next: EasyParcelConnection = {
     access_token: tokens.access_token,
@@ -173,20 +212,22 @@ function tokenPort(admin: SupabaseClient): TokenPort {
           res.status,
           await res.text(),
         );
-        throw new Error(
-          'EasyParcel connection could not be refreshed. Try again, or reconnect it from Settings.',
-        );
+        throw new EasyParcelRefreshError(REFRESH_FAILED_MESSAGE);
       }
       const tokens = await res.json();
       if (
         typeof tokens?.access_token !== 'string' || !tokens.access_token ||
         !Number.isFinite(tokens.expires_in)
       ) {
-        throw new Error(
-          'EasyParcel connection could not be refreshed. Try again, or reconnect it from Settings.',
-        );
+        throw new EasyParcelRefreshError(REFRESH_FAILED_MESSAGE);
       }
       return tokens as RefreshedTokens;
+    },
+    release: async (refreshToken) => {
+      const { error } = await admin.rpc('release_easyparcel_token_refresh', {
+        p_refresh_token: refreshToken,
+      });
+      if (error) throw error;
     },
     store: async (previousRefreshToken, connection) => {
       const { data, error } = await admin

@@ -108,7 +108,10 @@ Deno.serve(async (req) => {
       ).in("status", ["paid", "packing", "shipped"]).select("id").maybeSingle();
     if (error || !data) {
       throw error ??
-        new Error("Tracking registration metadata could not be saved");
+        new DeliveryError(
+          "Tracking registration metadata could not be saved",
+          500,
+        );
     }
     return json({
       ok: true,

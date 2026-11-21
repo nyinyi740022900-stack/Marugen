@@ -8,6 +8,8 @@ import '../../../shared/models/product.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/notification_bell_button.dart';
+import '../../orders/data/order_repository.dart'
+    show AdminPaymentsSummary, StuckPendingOrders, TopProductSales;
 import '../../orders/presentation/orders_providers.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../admin_shell.dart';
@@ -18,15 +20,19 @@ import '../delivery/admin_delivery_screen.dart'
         fulfillmentSegmentProvider;
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/section_label.dart';
 
 class AdminDashboardScreen extends ConsumerWidget {
   const AdminDashboardScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final productsAsync = ref.watch(productListProvider);
-    final ordersAsync = ref.watch(adminAllOrdersProvider);
+    final productsAsync = ref.watch(adminAllProductsProvider);
+    final recentAsync = ref.watch(adminRecentOrdersProvider);
+    final stuckAsync = ref.watch(adminStuckPendingOrdersProvider);
+    final paymentsAsync = ref.watch(adminPaymentsSummaryProvider);
     final summaryAsync = ref.watch(adminOrderSummaryProvider);
+    final topProductsAsync = ref.watch(adminTopProductsProvider);
     final lowStockAsync = ref.watch(lowStockProductsProvider);
     final queueAsync = ref.watch(fulfillmentOrdersProvider);
 
@@ -115,24 +121,22 @@ class AdminDashboardScreen extends ConsumerWidget {
                 ),
               ],
             ),
-            const SizedBox(height: AppSpacing.xl),
-            ordersAsync.maybeWhen(
-              data: (orders) {
-                final stuck = orders
-                    .where(
-                      (o) =>
-                          o.status == OrderStatus.pending &&
-                          DateTime.now().difference(o.createdAt) >
-                              const Duration(minutes: 30),
-                    )
-                    .toList();
-                return stuck.isEmpty
-                    ? const SizedBox.shrink()
-                    : Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-                        child: _StuckPendingSection(orders: stuck),
-                      );
+            const SizedBox(height: AppSpacing.md),
+            _StripeCollectedCard(
+              summaryAsync: paymentsAsync,
+              onRetry: () {
+                ref.invalidate(adminAllOrdersProvider);
+                ref.invalidate(adminPaymentsSummaryProvider);
               },
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            stuckAsync.maybeWhen(
+              data: (stuck) => stuck.orders.isEmpty
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+                      child: _StuckPendingSection(stuck: stuck),
+                    ),
               orElse: () => const SizedBox.shrink(),
             ),
             lowStockAsync.maybeWhen(
@@ -146,19 +150,10 @@ class AdminDashboardScreen extends ConsumerWidget {
             ),
             Row(
               children: [
-                Text(
-                  'TOP PRODUCTS',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                    letterSpacing: 0.8,
-                    color: AppPalette.of(context).textMuted,
-                  ),
-                ),
+                const SectionLabel('TOP PRODUCTS'),
                 const Spacer(),
-                ordersAsync.maybeWhen(
-                  data: (orders) =>
-                      rankTopProducts(orders).length > _TopProductsCard.maxRows
+                topProductsAsync.maybeWhen(
+                  data: (ranked) => ranked.length > _TopProductsCard.maxRows
                       ? TextButton(
                           onPressed: () => context.push('/admin/top-products'),
                           style: TextButton.styleFrom(
@@ -179,8 +174,8 @@ class AdminDashboardScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
-            ordersAsync.when(
-              data: (orders) => _TopProductsCard(orders: orders),
+            topProductsAsync.when(
+              data: (ranked) => _TopProductsCard(ranked: ranked),
               loading: () => const Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Center(child: CircularProgressIndicator()),
@@ -188,26 +183,20 @@ class AdminDashboardScreen extends ConsumerWidget {
               error: (e, _) => InlineErrorState(
                 message: friendlyErrorMessage(
                   e,
-                  fallback: 'Could not load orders.',
+                  fallback: 'Could not load top products.',
                   context: 'admin.dashboard',
                 ),
-                onRetry: () => ref.invalidate(adminAllOrdersProvider),
+                onRetry: () {
+                  ref.invalidate(adminAllOrdersProvider);
+                  ref.invalidate(adminTopProductsProvider);
+                },
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            Text(
-              'RECENT ORDERS',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
+            const SectionLabel('RECENT ORDERS'),
             const SizedBox(height: AppSpacing.sm),
-            ordersAsync.when(
-              data: (orders) {
-                final recent = orders.take(5).toList();
+            recentAsync.when(
+              data: (recent) {
                 if (recent.isEmpty) {
                   return Container(
                     padding: const EdgeInsets.all(AppSpacing.xl),
@@ -250,10 +239,109 @@ class AdminDashboardScreen extends ConsumerWidget {
                   fallback: 'Could not load orders.',
                   context: 'admin.dashboard',
                 ),
-                onRetry: () => ref.invalidate(adminAllOrdersProvider),
+                onRetry: () => ref.invalidate(adminRecentOrdersProvider),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// What Stripe collected after refunds, and from how many orders. Shown
+/// under the revenue cards and labelled as its own figure: Total Revenue
+/// (`admin_order_summary`) also counts orders with no Stripe payment and
+/// does not clamp refunds, so the two numbers can differ.
+class _StripeCollectedCard extends StatelessWidget {
+  final AsyncValue<AdminPaymentsSummary> summaryAsync;
+  final VoidCallback onRetry;
+  const _StripeCollectedCard({
+    required this.summaryAsync,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final failed = summaryAsync.hasError && !summaryAsync.isLoading;
+    final summary = failed ? null : summaryAsync.valueOrNull;
+    final count = summary?.transactionCount;
+    final caption = failed
+        ? 'Could not load. Tap to retry.'
+        : summary == null
+        ? 'After refunds'
+        : 'After refunds · $count Stripe '
+              '${count == 1 ? 'transaction' : 'transactions'}';
+    return Semantics(
+      container: true,
+      button: failed,
+      child: Material(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: InkWell(
+          onTap: failed ? onRetry : null,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          child: Container(
+            constraints: const BoxConstraints(
+              minHeight: kMinInteractiveDimension,
+            ),
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              boxShadow: AppShadows.card,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: palette.accentSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: Icon(
+                    Icons.credit_card_outlined,
+                    color: palette.accent,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Collected through Stripe',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: palette.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        summary == null ? '—' : formatPrice(summary.collected),
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: palette.text,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        caption,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: failed ? palette.error : palette.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (failed)
+                  Icon(Icons.refresh, size: 20, color: palette.textMuted),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -281,15 +369,7 @@ class _LowStockSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text(
-              'LOW STOCK',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
+            const SectionLabel('LOW STOCK'),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -406,11 +486,51 @@ class _LowStockRow extends StatelessWidget {
 /// into that happening, plus a manual "Cancel now" for anything they want
 /// released immediately instead of waiting for the next sweep.
 class _StuckPendingSection extends ConsumerWidget {
-  final List<Order> orders;
-  const _StuckPendingSection({required this.orders});
+  final StuckPendingOrders stuck;
+  const _StuckPendingSection({required this.stuck});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final orders = stuck.orders;
+    final notShown = stuck.total - orders.length;
+    // At large text sizes "Cancel now" no longer fits beside the order
+    // number, so it moves under it instead of squeezing the row.
+    final stacked = MediaQuery.textScalerOf(context).scale(14) / 14 > 1.3;
+    Widget cancelButton(Order order) => TextButton(
+      onPressed: () async {
+        final messenger = ScaffoldMessenger.of(context);
+        final confirmed = await confirmDestructiveAction(
+          context,
+          title: 'Cancel this order?',
+          message:
+              'Order #${order.displayNumber} will be cancelled and any reserved stock released. This cannot be undone.',
+          confirmLabel: 'Cancel Order',
+        );
+        if (!confirmed) return;
+        try {
+          await ref
+              .read(orderRepositoryProvider)
+              .updateOrderStatus(order.id, OrderStatus.cancelled);
+        } catch (_) {
+          // Server refuses while the payment may still complete.
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'The order was not cancelled. Its payment may still be processing; refresh and try again.',
+              ),
+            ),
+          );
+        }
+        if (!context.mounted) return;
+        refreshAdminOrders(ref);
+      },
+      child: const Text('Cancel now'),
+    );
+    Widget age(Order order) => Text(
+      '${formatPrice(order.total)} · created '
+      '${DateTime.now().difference(order.createdAt).inMinutes} min ago',
+      style: const TextStyle(fontSize: 12),
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -422,15 +542,7 @@ class _StuckPendingSection extends ConsumerWidget {
               color: AppPalette.of(context).warning,
             ),
             const SizedBox(width: 6),
-            Text(
-              'STUCK PENDING ORDERS',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
+            const Flexible(child: SectionLabel('STUCK PENDING ORDERS')),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -439,7 +551,7 @@ class _StuckPendingSection extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(AppRadius.pill),
               ),
               child: Text(
-                '${orders.length}',
+                '${stuck.total}',
                 style: TextStyle(
                   fontSize: 10.5,
                   color: AppPalette.of(context).error,
@@ -489,42 +601,38 @@ class _StuckPendingSection extends ConsumerWidget {
                         fontSize: 13.5,
                       ),
                     ),
-                    subtitle: Text(
-                      '${formatPrice(orders[i].total)} · created '
-                      '${DateTime.now().difference(orders[i].createdAt).inMinutes} min ago',
-                      style: const TextStyle(fontSize: 12),
+                    subtitle: stacked
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [age(orders[i]), cancelButton(orders[i])],
+                          )
+                        : age(orders[i]),
+                    trailing: stacked ? null : cancelButton(orders[i]),
+                  ),
+                ],
+                if (notShown > 0) ...[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  ListTile(
+                    dense: true,
+                    // Orders tab, All pane, filtered to Pending.
+                    onTap: () {
+                      ref.read(adminOrderStatusFilterProvider.notifier).state =
+                          OrderStatus.pending;
+                      ref.read(requestedOrdersTabProvider.notifier).state = 0;
+                      ref.read(adminTabIndexProvider.notifier).state = 2;
+                    },
+                    title: Text(
+                      '+$notShown more in Orders',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: AppPalette.of(context).textMuted,
+                      ),
                     ),
-                    trailing: TextButton(
-                      onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final confirmed = await confirmDestructiveAction(
-                          context,
-                          title: 'Cancel this order?',
-                          message:
-                              'Order #${orders[i].displayNumber} will be cancelled and any reserved stock released. This cannot be undone.',
-                          confirmLabel: 'Cancel Order',
-                        );
-                        if (!confirmed) return;
-                        try {
-                          await ref
-                              .read(orderRepositoryProvider)
-                              .updateOrderStatus(
-                                orders[i].id,
-                                OrderStatus.cancelled,
-                              );
-                        } catch (_) {
-                          // Server refuses while the payment may still complete.
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'The order was not cancelled. Its payment may still be processing; refresh and try again.',
-                              ),
-                            ),
-                          );
-                        }
-                        refreshAdminOrders(ref);
-                      },
-                      child: const Text('Cancel now'),
+                    trailing: Icon(
+                      Icons.chevron_right,
+                      size: 18,
+                      color: AppPalette.of(context).textMuted,
                     ),
                   ),
                 ],
@@ -537,7 +645,7 @@ class _StuckPendingSection extends ConsumerWidget {
   }
 }
 
-/// Top products by order-item quantity across all orders. Renders an
+/// Top products by units sold (see [adminTopProductsProvider]). Renders an
 /// empty state rather than nothing when there isn't enough order data yet.
 /// Only shows the top [maxRows] on the dashboard home to avoid the list
 /// growing unbounded as more products sell — "See all" (above) opens the
@@ -545,12 +653,11 @@ class _StuckPendingSection extends ConsumerWidget {
 class _TopProductsCard extends StatelessWidget {
   static const maxRows = 5;
 
-  final List<Order> orders;
-  const _TopProductsCard({required this.orders});
+  final List<TopProductSales> ranked;
+  const _TopProductsCard({required this.ranked});
 
   @override
   Widget build(BuildContext context) {
-    final ranked = rankTopProducts(orders);
     final top = ranked.take(maxRows).toList();
     final hasMore = ranked.length > top.length;
 
@@ -597,7 +704,7 @@ class _TopProductsCard extends StatelessWidget {
                   ),
                 ),
                 title: Text(
-                  top[i].key,
+                  top[i].name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -606,7 +713,7 @@ class _TopProductsCard extends StatelessWidget {
                   ),
                 ),
                 trailing: Text(
-                  '${top[i].value} sold',
+                  '${top[i].units} sold',
                   style: TextStyle(
                     fontSize: 12.5,
                     color: AppPalette.of(context).textMuted,
@@ -639,23 +746,6 @@ class _TopProductsCard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Product name → total quantity sold across non-cancelled orders,
-/// ranked highest-first. Shared by the dashboard's capped preview and the
-/// full "See all" page so both agree on the same ranking.
-List<MapEntry<String, int>> rankTopProducts(List<Order> orders) {
-  final qtyByName = <String, int>{};
-  for (final order in orders) {
-    if (order.status == OrderStatus.cancelled) continue;
-    for (final item in order.items) {
-      qtyByName[item.productName] =
-          (qtyByName[item.productName] ?? 0) + item.quantity;
-    }
-  }
-  final ranked = qtyByName.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  return ranked;
 }
 
 class _StatCard extends StatelessWidget {

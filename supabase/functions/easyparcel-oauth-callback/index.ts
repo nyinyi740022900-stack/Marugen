@@ -22,6 +22,7 @@
 // Secrets: supabase secrets set EASYPARCEL_CLIENT_ID=xxx EASYPARCEL_CLIENT_SECRET=xxx
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { escapeHtml, fetchWithTimeout, TIMEOUT_MS } from '../_shared/http.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 const serviceRoleKey =
@@ -54,7 +55,12 @@ Deno.serve(async (req) => {
     const error = url.searchParams.get('error');
     const state = url.searchParams.get('state');
     if (error) {
-      return htmlResponse(`<h2>EasyParcel connection failed</h2><p>${error}</p>`, 400);
+      // `error` comes straight from the query string: anyone can craft the
+      // link, so it is escaped (and bounded) before it reaches the page.
+      return htmlResponse(
+        `<h2>EasyParcel connection failed</h2><p>${escapeHtml(error.slice(0, 200))}</p>`,
+        400,
+      );
     }
     if (!code) {
       return htmlResponse('<h2>Missing authorization code</h2>', 400);
@@ -86,7 +92,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const tokenRes = await fetch('https://api.easyparcel.com/oauth/token', {
+    const tokenRes = await fetchWithTimeout('https://api.easyparcel.com/oauth/token', {
       method: 'POST',
       headers: {
         Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
@@ -97,7 +103,7 @@ Deno.serve(async (req) => {
         code,
         redirect_uri: redirectUri,
       }),
-    });
+    }, TIMEOUT_MS.token);
     if (!tokenRes.ok) {
       const detail = await tokenRes.text();
       console.error('[easyparcel-oauth-callback] token exchange failed', tokenRes.status, detail);

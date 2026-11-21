@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/notifications/push_permission_prompt.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/models/app_user.dart';
 import '../../../shared/models/app_notification.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/undo_snack_bar.dart';
@@ -27,6 +29,23 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   bool _selecting = false;
   bool _busy = false;
   final _selected = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    // Opening notifications is the other moment a customer has a reason to
+    // allow them. Staff are asked by the admin shell.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        final user = await ref.read(currentAppUserProvider.future);
+        if (user == null || user.role.isAdmin || !mounted) return;
+        await PushPermissionPrompt.maybeAsk(context);
+      } catch (_) {
+        // The profile could not be loaded: ask another time.
+      }
+    });
+  }
 
   void _cancelSelection() => setState(() {
     _selecting = false;

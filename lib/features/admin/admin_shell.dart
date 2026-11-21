@@ -22,6 +22,9 @@ import 'settings/admin_settings_screen.dart';
 /// callbacks down through every nested widget.
 final adminTabIndexProvider = StateProvider<int>((ref) => 0);
 
+/// Index of the Home Banners screen in the shell's tabs.
+const int kAdminHomeBannersTab = 8;
+
 class _MoreItem {
   final IconData icon;
   final String label;
@@ -35,8 +38,8 @@ class _MoreItem {
 
 /// Bottom-nav shell for staff/owner.
 ///
-/// Primary: Home / Products / Orders. Delivery + Payments live under Orders
-/// tabs. More sheet: Knowledge, Promo, Reviews, Analytics, Settings.
+/// Primary: Home / Products / Orders. Delivery lives under an Orders tab;
+/// payment state is on each order. More sheet: Knowledge, Promo, Reviews, Analytics, Settings.
 class AdminShell extends ConsumerWidget {
   const AdminShell({super.key});
 
@@ -72,7 +75,7 @@ class AdminShell extends ConsumerWidget {
     _MoreItem(
       icon: Icons.view_carousel_outlined,
       label: 'Home Banners',
-      index: 8,
+      index: kAdminHomeBannersTab,
     ),
     _MoreItem(icon: Icons.rate_review_outlined, label: 'Reviews', index: 5),
     _MoreItem(icon: Icons.query_stats_outlined, label: 'Analytics', index: 7),

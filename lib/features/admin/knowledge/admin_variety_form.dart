@@ -13,6 +13,7 @@ import '../../knowledge/presentation/knowledge_providers.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/sheet_header.dart';
 import '../../../shared/widgets/discard_changes_guard.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// One editable stage row (existing photo URL and/or a newly picked image
 /// not yet uploaded).
@@ -311,15 +312,7 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 spacing: 8,
                 children: [
-                  Text(
-                    'GROWTH STAGES',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 0.8,
-                      color: AppPalette.of(context).textMuted,
-                    ),
-                  ),
+                  const SectionLabel('GROWTH STAGES'),
                   TextButton.icon(
                     onPressed: _addStage,
                     icon: const Icon(Icons.add, size: 18),

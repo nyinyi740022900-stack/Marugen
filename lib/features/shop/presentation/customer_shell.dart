@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
@@ -6,10 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/widgets/back_to_first_tab.dart';
 
-import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/view_tracker.dart';
-import '../../../shared/widgets/promo_banner_dialog.dart';
 import '../../auth/presentation/profile_screen.dart';
 import '../../knowledge/presentation/knowledge_screen.dart';
 import '../../orders/presentation/orders_screen.dart';
@@ -56,15 +53,13 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     // Once per app session — this shell is only built once (kept alive by
     // its IndexedStack tabs) after auth/role resolves to "customer".
     ViewTracker.logAppVisit();
-    // Post-frame so the promo popup appears after this shell's first
-    // paint, not mid-build; PromoBannerDialog itself enforces the
-    // once-per-device-per-day gate.
-    // The notification-permission prompt waits until the promo popup is
-    // closed (or skipped) so the two never stack on first launch.
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (mounted) await PromoBannerDialog.maybeShow(context, ref);
-      unawaited(PushNotificationService.requestPermission());
-    });
+    // Nothing pops up on launch: promotions are the Home Banners carousel
+    // on the Shop tab (the old once-a-day promo popup is retired).
+    // Notification permission is not asked here either: a first launch
+    // gives no reason to allow it. PushPermissionPrompt asks after the
+    // first order is placed (or when notifications are first opened).
+    // Someone who has already allowed notifications gets their token
+    // registered at startup by PushNotificationService.initialize().
   }
 
   @override

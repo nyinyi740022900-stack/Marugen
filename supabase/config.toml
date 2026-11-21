@@ -1,0 +1,90 @@
+# Gateway JWT verification for every Edge Function, so a deploy no longer
+# depends on remembering --no-verify-jwt. Nothing else is configured here on
+# purpose: do NOT run `supabase config push` with this file, it would push the
+# CLI defaults for auth/api/storage over the live project settings.
+#
+# verify_jwt = false is only for endpoints called by something that cannot
+# hold a Supabase JWT. Each of them authenticates the caller itself; never
+# remove that check.
+
+# --- Called by a provider or by cron: verified inside the function ---------
+
+# Stripe signature (STRIPE_WEBHOOK_SECRET, constructEventAsync).
+[functions.stripe-webhook]
+verify_jwt = false
+
+# 17TRACK `sign` header, constant-time compare.
+[functions.track-webhook]
+verify_jwt = false
+
+# EasyParcel has no signed webhook: source IP allowlist, payload treated as a
+# hint, status re-read from the authenticated provider API.
+[functions.easyparcel-webhook]
+verify_jwt = false
+
+# Browser redirect from EasyParcel: single-use `state` row plus code exchange
+# with the client secret.
+[functions.easyparcel-oauth-callback]
+verify_jwt = false
+
+# pg_cron via pg_net (migration 0049): exact match on the service key.
+[functions.reconcile-pending-orders]
+verify_jwt = false
+
+# --- Called by the app with the user's session -----------------------------
+
+[functions.cancel-order]
+verify_jwt = true
+
+[functions.checkout-shipping-quote]
+verify_jwt = true
+
+[functions.create-payment-intent]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true
+
+[functions.easyparcel-book-shipment]
+verify_jwt = true
+
+[functions.easyparcel-get-rates]
+verify_jwt = true
+
+[functions.easyparcel-oauth-start]
+verify_jwt = true
+
+[functions.easyparcel-pickup-diagnostics]
+verify_jwt = true
+
+[functions.easyparcel-reconcile-shipment]
+verify_jwt = true
+
+[functions.easyparcel-refresh-status]
+verify_jwt = true
+
+[functions.easyparcel-status]
+verify_jwt = true
+
+[functions.order-cancellation]
+verify_jwt = true
+
+[functions.order-parcels]
+verify_jwt = true
+
+[functions.resume-order-payment]
+verify_jwt = true
+
+# Also called server-to-server by stripe-webhook, track-webhook and the
+# delivery functions with the service key as the bearer token.
+[functions.send-order-notification]
+verify_jwt = true
+
+[functions.stripe-refund]
+verify_jwt = true
+
+[functions.track-register]
+verify_jwt = true
+
+[functions.track-status]
+verify_jwt = true

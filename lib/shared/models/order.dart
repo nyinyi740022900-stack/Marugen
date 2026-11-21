@@ -250,6 +250,18 @@ class Order {
   final String? shippingCostPolicy;
   final Map<String, dynamic>? shippingParcel;
 
+  /// GST snapshot written once by the payment backend at checkout
+  /// (migration 0078). All three are set together, or all are null for
+  /// orders placed before the snapshot existed.
+  final double? gstPercent;
+  final bool? gstIncludedInPrice;
+  final int? gstAmountCents;
+
+  /// True when this order carries its own GST figures, so an invoice
+  /// must not be recomputed from the shop's current GST setting.
+  bool get hasGstSnapshot =>
+      gstPercent != null && gstIncludedInPrice != null && gstAmountCents != null;
+
   bool get hasParcelPlan => parcels.isNotEmpty;
   bool get canSplitIntoParcels =>
       !hasCancellationHold &&
@@ -376,6 +388,9 @@ class Order {
     this.shippingCarrierName,
     this.shippingCostPolicy,
     this.shippingParcel,
+    this.gstPercent,
+    this.gstIncludedInPrice,
+    this.gstAmountCents,
     this.trackingStatusCode,
     this.trackingProgress = 0,
   });
@@ -434,6 +449,9 @@ class Order {
       shippingCarrierName: map['shipping_carrier_name'] as String?,
       shippingCostPolicy: map['shipping_cost_policy'] as String?,
       shippingParcel: (map['shipping_parcel'] as Map?)?.cast<String, dynamic>(),
+      gstPercent: (map['gst_percent'] as num?)?.toDouble(),
+      gstIncludedInPrice: map['gst_included_in_price'] as bool?,
+      gstAmountCents: (map['gst_amount_cents'] as num?)?.toInt(),
       easyparcelBookingState: map['easyparcel_booking_state'] as String?,
       easyparcelShipmentId: map['easyparcel_shipment_id'] as String?,
       easyparcelBookingStartedAt: tryParseServerTime(

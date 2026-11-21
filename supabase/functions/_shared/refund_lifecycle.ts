@@ -38,6 +38,14 @@ export interface RefundPort {
   ): Promise<RefundResult>;
   notify(orderId: string): Promise<void>;
 }
+// Raised with copy written for staff. Anything else thrown from this flow
+// (Stripe, Postgres) is internal detail and must not reach a client.
+export class RefundError extends Error {}
+export const REFUND_FAILED_MESSAGE =
+  "The refund could not be completed. Check Stripe before trying again.";
+export function refundErrorMessage(error: unknown): string {
+  return error instanceof RefundError ? error.message : REFUND_FAILED_MESSAGE;
+}
 const REFUNDABLE = new Set([
   "paid",
   "packing",
@@ -62,7 +70,7 @@ function verifyPayment(order: PaymentOrder, intent: PaymentIntentSnapshot) {
     (order.user_id !== null && intent.metadata.user_id !== order.user_id) ||
     !REFUNDABLE.has(order.status)
   ) {
-    throw new Error(
+    throw new RefundError(
       "Refund payment/order identity, amount, currency or status mismatch",
     );
   }
@@ -86,14 +94,14 @@ async function record(
       refund.amount <= 0 || refund.amount > intent.amount ||
       !Number.isSafeInteger(refund.created) || refund.created < 0 ||
       !REFUND_STATES.has(refund.status ?? "")
-    ) throw new Error("Invalid Stripe refund snapshot");
+    ) throw new RefundError("Invalid Stripe refund snapshot");
     seen.add(refund.id);
     if (
       refund.status === "succeeded" || refund.status === "pending" ||
       refund.status === "requires_action"
     ) total += refund.amount;
   }
-  if (total > intent.amount) throw new Error("Refund total exceeds payment");
+  if (total > intent.amount) throw new RefundError("Refund total exceeds payment");
   let result: RefundResult | null = null;
   // Stripe lists newest first. Release terminal failures before recording
   // a successful replacement, otherwise the old pending reservation counts twice.
@@ -115,7 +123,7 @@ export async function requestOrderRefund(
 ): Promise<RefundResult> {
   const order = await port.getOrder(orderId);
   if (!order?.stripe_payment_intent_id) {
-    throw new Error("Order has no Stripe payment to refund");
+    throw new RefundError("Order has no Stripe payment to refund");
   }
   const intent = await port.getIntent(order.stripe_payment_intent_id);
   verifyPayment(order, intent);
@@ -125,19 +133,19 @@ export async function requestOrderRefund(
   let refunds = await port.listRefunds(intent.id);
   if (refunds.length === 0) {
     if (refreshOnly) {
-      throw new Error(
+      throw new RefundError(
         "No Stripe refund found. Check Stripe before taking further action",
       );
     }
     if (order.status === "refunded") {
-      throw new Error("Refunded order requires manual reconciliation");
+      throw new RefundError("Refunded order requires manual reconciliation");
     }
     refunds = [await port.createRefund(intent.id, order.id, reason)];
   }
   // Existing failed/partial refunds require deliberate Dashboard handling.
   // A retry of this endpoint only refreshes them, never moves money again.
   const result = await record(order, intent, refunds, port, observedAt);
-  if (!result) throw new Error("No Stripe refund returned");
+  if (!result) throw new RefundError("No Stripe refund returned");
   return result;
 }
 export async function syncOrderRefunds(

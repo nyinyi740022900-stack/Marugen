@@ -48,7 +48,8 @@ Deno.serve(async (req) => {
       webhookSecret,
     );
   } catch (err) {
-    return new Response(`Webhook signature verification failed: ${err}`, {
+    console.error("Stripe webhook signature rejected", err);
+    return new Response("Webhook signature verification failed", {
       status: 400,
     });
   }

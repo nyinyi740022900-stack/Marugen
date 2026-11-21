@@ -117,29 +117,12 @@ void main() {
     expect(find.text('Login /login?redirect=%2Fproduct%2Fkoi'), findsOneWidget);
   });
 
-  testWidgets('contacting the shop offers WhatsApp or a phone call', (
-    tester,
-  ) async {
+  // The customer contact sheet this used to cover is gone: every customer
+  // entry now opens the support picker (test/support/contact_route_test.dart).
+  test('staff contact links carry the country code', () {
     expect(internationalDigits('9123 4567'), '6591234567');
     expect(internationalDigits('+65 6222-3333'), '6562223333');
     expect(internationalDigits('+60 12 345 6789'), '60123456789');
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => TextButton(
-              onPressed: () => contactShop(context, '6222 3333'),
-              child: const Text('Contact shop'),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('Contact shop'));
-    await tester.pumpAndSettle();
-    expect(find.text('WhatsApp'), findsOneWidget);
-    expect(find.text('Call'), findsOneWidget);
-    expect(find.text('+6562223333'), findsOneWidget);
   });
 
   test('auth errors explain themselves; only a rejected token is an expired '

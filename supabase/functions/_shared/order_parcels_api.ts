@@ -1,10 +1,15 @@
-import { getEasyParcelAccessToken } from "./easyparcel_token.ts";
 import {
   assertParcelTrackingIdentity,
   parcelRecoveryDetails,
 } from "./order_parcels.ts";
+import { DeliveryValidationError } from "./delivery.ts";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { DeliveryError, fetchEasyparcelTracking } from "./delivery_api.ts";
+import {
+  DeliveryError,
+  fetchEasyparcelShipmentDetails,
+  fetchEasyparcelTracking,
+  rpcError,
+} from "./delivery_api.ts";
 export async function loadParcels(admin: SupabaseClient, orderId: string) {
   const { data, error } = await admin.from("order_parcels").select("*").eq(
     "order_id",
@@ -29,23 +34,10 @@ export async function refreshOrderParcels(
     let number = parcel.tracking_number;
     let recovered: { number: string; awbUrl: string | null } | null = null;
     if (!number || !parcel.awb_url || parcel.state === "payment_required") {
-      const token = await getEasyParcelAccessToken(admin);
-      const response = await fetch(
-        "https://api.easyparcel.com/open_api/2026-09/shipment/details",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          signal: AbortSignal.timeout(12000),
-          body: JSON.stringify({ shipment_number: parcel.shipment_number }),
-        },
+      recovered = parcelRecoveryDetails(
+        parcel,
+        await fetchEasyparcelShipmentDetails(admin, parcel.shipment_number),
       );
-      const body = await response.json();
-      if (response.ok && body.status_code === 200) {
-        recovered = parcelRecoveryDetails(parcel, body.data);
-      }
       if (recovered) number = recovered.number;
     }
     if (!number) continue;
@@ -60,7 +52,10 @@ export async function refreshOrderParcels(
         tracking,
       );
     } catch (error) {
-      throw new DeliveryError((error as Error).message, 409);
+      // Same authored refusal, as a conflict rather than a bad request.
+      throw error instanceof DeliveryValidationError
+        ? new DeliveryError(error.message, 409)
+        : error;
     }
     if (recovered) {
       const { error } = await admin.rpc("recover_order_parcel_identity", {
@@ -69,7 +64,7 @@ export async function refreshOrderParcels(
         p_awb: recovered.number,
         p_awb_url: recovered.awbUrl,
       });
-      if (error) throw error;
+      if (error) throw rpcError(error);
     }
     const { error } = await admin.rpc("apply_order_parcel_tracking", {
       p_parcel_id: parcel.id,
@@ -80,7 +75,7 @@ export async function refreshOrderParcels(
       p_observed_at: tracking.observedAt,
       p_event_at: tracking.eventAt,
     });
-    if (error) throw error;
+    if (error) throw rpcError(error);
   }
   return await loadParcels(admin, orderId);
 }

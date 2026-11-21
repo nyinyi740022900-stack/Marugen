@@ -7,6 +7,7 @@ import 'analytics_providers.dart';
 import 'analytics_repository.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/section_label.dart';
 
 enum _Period { daily, weekly, monthly }
 
@@ -141,15 +142,7 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            Text(
-              'APP VISITS',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
+            const SectionLabel('APP VISITS'),
             const SizedBox(height: AppSpacing.sm),
             visitsAsync.when(
               data: (visits) {
@@ -192,15 +185,7 @@ class _AdminAnalyticsScreenState extends ConsumerState<AdminAnalyticsScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            Text(
-              'TOP VIEWED PRODUCTS',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 0.8,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
+            const SectionLabel('TOP VIEWED PRODUCTS'),
             const SizedBox(height: AppSpacing.sm),
             viewsAsync.when(
               data: (views) {

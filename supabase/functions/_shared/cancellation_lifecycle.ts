@@ -1,4 +1,5 @@
 import {
+  refundErrorMessage,
   type RefundPort,
   type RefundResult,
   requestOrderRefund,
@@ -49,9 +50,9 @@ export async function handleCancellation(
   } catch (error) {
     // The approval and fulfillment hold already committed. Keep them while staff
     // reconcile Stripe; retrying approval uses the shared verified refund flow.
-    return {
-      ...result,
-      refund_error: error instanceof Error ? error.message : String(error),
-    };
+    // The app only checks that refund_error is present; Stripe and database
+    // text stays in the logs.
+    console.error("Cancellation refund needs attention", orderId, error);
+    return { ...result, refund_error: refundErrorMessage(error) };
   }
 }

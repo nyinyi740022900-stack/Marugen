@@ -1,4 +1,5 @@
 import type { PaymentPort } from "./payment_lifecycle.ts";
+import { fetchWithTimeout, TIMEOUT_MS } from "./http.ts";
 // Adapters remain at the edge; lifecycle tests use isolated ports.
 export function createPaymentPort(
   admin: any,
@@ -35,14 +36,20 @@ export function createPaymentPort(
     },
     notify: async (orderId, status) => {
       try {
-        const r = await fetch(`${url}/functions/v1/send-order-notification`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${key}`,
-            "Content-Type": "application/json",
+        // Best effort: a slow notification must not hold the Stripe webhook
+        // open after the order is already recorded as paid.
+        const r = await fetchWithTimeout(
+          `${url}/functions/v1/send-order-notification`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ order_id: orderId, status }),
           },
-          body: JSON.stringify({ order_id: orderId, status }),
-        });
+          TIMEOUT_MS.notify,
+        );
         if (!r.ok) {
           console.error("Payment notification failed", orderId, r.status);
         }

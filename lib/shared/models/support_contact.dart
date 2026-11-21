@@ -120,23 +120,30 @@ List<SupportContact> supportDirectoryFromSettings(
     contacts.add(contact);
   }
   if (contacts.isEmpty && legacyFallback) {
-    final rawPhone = settings['shop_phone'];
-    if (rawPhone is String && rawPhone.trim().isNotEmpty) {
-      final phone = rawPhone.replaceAll(RegExp(r'[ ()-]'), '');
-      // Preserve only usable legacy international shop numbers.
-      if (RegExp(r'^\+?[1-9][0-9]{6,14}$').hasMatch(phone)) {
-        final international = phone.startsWith('+') ? phone : '+$phone';
-        contacts.add(
-          SupportContact.fromMap({
-            'id': 'shop',
-            'name': 'Shop support',
-            'category': 'General enquiries',
-            'phone': international,
-            'whatsapp': international,
-          }),
-        );
-      }
-    }
+    final shop = legacyShopContact(settings);
+    if (shop != null) contacts.add(shop);
   }
   return List.unmodifiable(contacts);
+}
+
+/// The shop's own number (`shop_phone`) as a support contact, for a shop
+/// that has not set up a support directory. Null when the number is missing
+/// or unusable.
+SupportContact? legacyShopContact(Map<String, dynamic> settings) {
+  final rawPhone = settings['shop_phone'];
+  if (rawPhone is! String || rawPhone.trim().isEmpty) return null;
+  var phone = rawPhone.replaceAll(RegExp(r'[ ()-]'), '');
+  // Singapore numbers are usually saved as just their 8 digits; wa.me and
+  // tel: links need the country code.
+  if (RegExp(r'^[3689][0-9]{7}$').hasMatch(phone)) phone = '+65$phone';
+  // Preserve only usable legacy international shop numbers.
+  if (!RegExp(r'^\+?[1-9][0-9]{6,14}$').hasMatch(phone)) return null;
+  final international = phone.startsWith('+') ? phone : '+$phone';
+  return SupportContact.fromMap({
+    'id': 'shop',
+    'name': 'Shop support',
+    'category': 'General enquiries',
+    'phone': international,
+    'whatsapp': international,
+  });
 }

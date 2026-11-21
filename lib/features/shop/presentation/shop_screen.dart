@@ -12,6 +12,7 @@ import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/notification_bell_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../banners/presentation/hero_banner_carousel.dart';
+import '../../banners/presentation/home_banner_providers.dart';
 import '../../cart/presentation/cart_providers.dart';
 import 'shop_providers.dart';
 
@@ -122,7 +123,15 @@ class ShopScreen extends ConsumerWidget {
                 // Pull down for stock and prices changed since opening the
                 // app (e.g. a koi sold to someone else).
                 return RefreshIndicator.adaptive(
-                  onRefresh: () => ref.refresh(productListProvider.future),
+                  onRefresh: () => Future.wait([
+                    ref.refresh(productListProvider.future),
+                    // Banners too, so a slide the owner just changed shows
+                    // up. They fail soft: a banner outage must not turn a
+                    // good catalogue refresh into an error.
+                    ref
+                        .refresh(liveHomeBannersProvider.future)
+                        .then<void>((_) {}, onError: (_) {}),
+                  ]),
                   child: ProductGrid(
                     header: const HeroBannerCarousel(),
                     itemCount: products.length,

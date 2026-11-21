@@ -405,3 +405,27 @@ export function checkoutMerchandiseCents(
   }
   return total;
 }
+// GST on merchandise in cents, from the same integer-cent net as
+// checkoutMerchandiseCents: the tax added on top, or the portion already
+// inside a GST-inclusive price. Stored once on the order at checkout.
+export function merchandiseGstCents(
+  subtotal: number,
+  discount: number,
+  gstPercent: number,
+  gstIncluded: boolean,
+): number {
+  const total = checkoutMerchandiseCents(
+    subtotal,
+    discount,
+    gstPercent,
+    gstIncluded,
+  );
+  if (!gstIncluded) {
+    return total - checkoutMerchandiseCents(subtotal, discount, 0, false);
+  }
+  const gst = total - Math.round(total / (1 + gstPercent / 100));
+  if (!Number.isSafeInteger(gst) || gst < 0) {
+    throw new DeliveryValidationError("Invalid merchandise GST");
+  }
+  return gst;
+}

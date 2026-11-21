@@ -5,11 +5,12 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
 import '../../../shared/providers/paged_notifier.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/guarded_write.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/product_grid.dart';
 import '../../../shared/widgets/undo_snack_bar.dart';
-import '../../shop/data/product_repository.dart';
 import '../../shop/presentation/shop_providers.dart';
 
 /// Free-text query for the admin Products search bar — kept separate from
@@ -103,14 +104,9 @@ class _AdminProductsScreenState extends ConsumerState<AdminProductsScreen> {
                       .watch(productListProvider)
                       .when(
                         data: (products) {
-                          final filtered = products.where((p) {
-                            if (p.name.toLowerCase().contains(query)) {
-                              return true;
-                            }
-                            final variety = p.fishDetails?.variety;
-                            return variety != null &&
-                                variety.toLowerCase().contains(query);
-                          }).toList();
+                          final filtered = products
+                              .where((p) => productMatchesSearch(p, query))
+                              .toList();
 
                           if (filtered.isEmpty) {
                             return const EmptyState(
@@ -322,6 +318,7 @@ class _AdminSearchFieldState extends ConsumerState<_AdminSearchField> {
         suffixIcon: query.isEmpty
             ? null
             : IconButton(
+                tooltip: 'Clear search',
                 icon: const Icon(Icons.close, size: 18),
                 onPressed: () =>
                     ref.read(adminProductSearchQueryProvider.notifier).state =
@@ -351,24 +348,30 @@ class _AvailabilityToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final available = !product.isOutOfStock;
-    return Tooltip(
-      message: available ? 'Mark as sold' : 'Mark as available',
-      child: Material(
-        // Red once sold — a "SOLD" tag reads at a glance, unlike a
-        // same-color eye icon that just says "something toggled".
-        color: available
-            ? AppColors.black.withValues(alpha: 0.55)
-            : AppColors.red,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => _toggle(context, available),
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Icon(
-              available ? Icons.sell_outlined : Icons.sell,
-              size: 16,
-              color: AppColors.white,
+    return GuardedWrite(
+      errorFallback: 'Could not update this fish. Please try again.',
+      errorContext: 'admin.products',
+      builder: (context, busy, run) => Tooltip(
+        message: available ? 'Mark as sold' : 'Mark as available',
+        child: Material(
+          // Red once sold — a "SOLD" tag reads at a glance, unlike a
+          // same-color eye icon that just says "something toggled".
+          color: available
+              ? AppColors.black.withValues(alpha: 0.55)
+              : AppColors.red,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            // One write at a time: a second tap while the first is still
+            // saving would flip the fish straight back.
+            onTap: busy ? null : () => run(() => _toggle(context, available)),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Icon(
+                available ? Icons.sell_outlined : Icons.sell,
+                size: 16,
+                color: AppColors.white.withValues(alpha: busy ? 0.5 : 1),
+              ),
             ),
           ),
         ),
@@ -378,20 +381,36 @@ class _AvailabilityToggle extends StatelessWidget {
 
   Future<void> _toggle(BuildContext context, bool wasAvailable) async {
     final newStock = wasAvailable ? 0 : 1;
-    final repo = ProductRepository();
+    final repo = ref.read(productRepositoryProvider);
+    final messenger = ScaffoldMessenger.of(context);
     await repo.updateProduct(product.id, {'stock_quantity': newStock});
     refreshAdminProducts(ref);
     if (!context.mounted) return;
     showUndoSnackBar(
-      ScaffoldMessenger.of(context),
+      messenger,
       message: wasAvailable
           ? '${product.name} marked sold'
           : '${product.name} marked available',
       onAction: () async {
-        await repo.updateProduct(product.id, {
-          'stock_quantity': wasAvailable ? 1 : 0,
-        });
-        refreshAdminProducts(ref);
+        try {
+          await repo.updateProduct(product.id, {
+            'stock_quantity': wasAvailable ? 1 : 0,
+          });
+          refreshAdminProducts(ref);
+        } catch (e, st) {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                friendlyErrorMessage(
+                  e,
+                  fallback: 'Could not undo. Please try again.',
+                  context: 'admin.products',
+                  stackTrace: st,
+                ),
+              ),
+            ),
+          );
+        }
       },
     );
   }

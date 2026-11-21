@@ -114,8 +114,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       }
 
       // Route to the right shell once we know the user's role.
-      final appUser = appUserAsync.valueOrNull;
-      if (appUserAsync.isLoading) {
+      //
+      // currentAppUserProvider re-runs on every auth event (token refresh,
+      // userUpdated) and reports AsyncLoading while still holding the last
+      // profile. Sending that to /splash collapsed the whole stack — a
+      // customer mid-payment lost the checkout screen. A cached profile is
+      // good enough to keep routing, but only when it belongs to the session
+      // that is signed in *now*: after sign-out and sign-in as someone else
+      // the previous account's role must never decide where they land.
+      final sessionUserId = authState.valueOrNull?.session?.user.id;
+      final cachedUser = appUserAsync.valueOrNull;
+      final appUser = cachedUser?.id == sessionUserId ? cachedUser : null;
+      // No profile for this session yet: wait on splash while it loads, and
+      // stay there (it offers Retry) when the fetch failed — guessing
+      // "customer" would lock an owner out of the admin app.
+      if (appUser == null &&
+          (appUserAsync.isLoading || appUserAsync.hasError)) {
         return state.matchedLocation == '/splash'
             ? null
             : authRouteWithRedirect(

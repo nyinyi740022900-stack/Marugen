@@ -37,6 +37,14 @@ final productListProvider = FutureProvider<List<Product>>((ref) async {
   return repo.fetchProducts(category: category);
 });
 
+/// Every product regardless of the Products / Shop category chip — for the
+/// admin Home "Products" count and Low Stock, which must never quietly change
+/// because staff tapped "Koi" in another tab (same reasoning as
+/// `adminAllOrdersProvider` for orders).
+final adminAllProductsProvider = FutureProvider<List<Product>>((ref) {
+  return ref.watch(productRepositoryProvider).fetchProducts();
+});
+
 /// Paged (infinite-scroll) admin Products list — the default no-search
 /// view; see PagedNotifier and AdminOrdersPagedNotifier (orders_
 /// providers.dart) for the same pattern. `build()` watches
@@ -64,7 +72,17 @@ final adminProductsPagedProvider =
 /// admin list in sync after an edit/delete/stock-toggle.
 void refreshAdminProducts(WidgetRef ref) {
   ref.invalidate(productListProvider);
+  ref.invalidate(adminAllProductsProvider);
   ref.read(adminProductsPagedProvider.notifier).refresh();
+}
+
+/// The one search rule for product lists (shop, admin products, the banner
+/// product picker): the name or, for koi/arowana, the variety contains
+/// [query], which must already be trimmed and lower-cased.
+bool productMatchesSearch(Product product, String query) {
+  if (product.name.toLowerCase().contains(query)) return true;
+  final variety = product.fishDetails?.variety;
+  return variety != null && variety.toLowerCase().contains(query);
 }
 
 /// [productListProvider] filtered by [searchQueryProvider] (matching name
@@ -77,11 +95,7 @@ final visibleProductListProvider = Provider<AsyncValue<List<Product>>>((ref) {
   return productsAsync.whenData((products) {
     var result = products;
     if (query.isNotEmpty) {
-      result = result.where((p) {
-        if (p.name.toLowerCase().contains(query)) return true;
-        final variety = p.fishDetails?.variety;
-        return variety != null && variety.toLowerCase().contains(query);
-      }).toList();
+      result = result.where((p) => productMatchesSearch(p, query)).toList();
     } else {
       result = List.of(result);
     }
@@ -138,9 +152,11 @@ final lowStockThresholdProvider = Provider<int>((ref) {
 });
 
 /// Non-live-fish products at or below [lowStockThresholdProvider] — backs
-/// the admin dashboard's "Low Stock" card.
+/// the admin dashboard's "Low Stock" card. Derived from the unfiltered
+/// [adminAllProductsProvider]; to reload it, invalidate that source (this
+/// provider only re-derives from whatever the source last held).
 final lowStockProductsProvider = Provider<AsyncValue<List<Product>>>((ref) {
-  final productsAsync = ref.watch(productListProvider);
+  final productsAsync = ref.watch(adminAllProductsProvider);
   final threshold = ref.watch(lowStockThresholdProvider);
   return productsAsync.whenData((products) => products
       .where((p) => !p.isLiveFish && p.availableStock <= threshold)

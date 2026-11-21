@@ -15,6 +15,48 @@ const _brandRed = PdfColor.fromInt(0xFFD31F16);
 const _grey = PdfColor.fromInt(0xFF6B6B6B);
 const _lightGrey = PdfColor.fromInt(0xFFE3E1DC);
 
+/// The GST line of an invoice.
+typedef InvoiceGst = ({double percent, double amount, bool included});
+
+extension InvoiceGstLabel on InvoiceGst {
+  String get label => included
+      ? 'GST included in items (${_percentText(percent)}%)'
+      : 'GST added to items (${_percentText(percent)}%)';
+}
+
+/// 9 -> "9", 8.5 -> "8.5": a stored rate is never rounded on the invoice.
+String _percentText(double percent) {
+  final text = percent.toStringAsFixed(2);
+  return text.replaceFirst(RegExp(r'\.?0+$'), '');
+}
+
+/// GST for [order]'s invoice. An order placed after migration 0078 carries
+/// the rate, the included flag and the amount the server computed at
+/// checkout: those are printed as they are, so changing the shop's GST
+/// setting later never restates a past invoice. Older orders have no
+/// snapshot and keep the previous calculation from the current setting.
+InvoiceGst invoiceGst({
+  required Order order,
+  required Map<String, dynamic> settings,
+}) {
+  if (order.hasGstSnapshot) {
+    return (
+      percent: order.gstPercent!,
+      amount: order.gstAmountCents! / 100,
+      included: order.gstIncludedInPrice!,
+    );
+  }
+  final percent = (settings['gst_percent'] as num?)?.toDouble() ?? 0;
+  final merchandiseTotal = order.total - (order.buyerShippingCents ?? 0) / 100;
+  return (
+    percent: percent,
+    amount: percent > 0
+        ? merchandiseTotal - merchandiseTotal / (1 + percent / 100)
+        : 0.0,
+    included: true,
+  );
+}
+
 /// Builds a proper tax-invoice PDF for [order] — shop letterhead, bill-to /
 /// order-info columns, an itemised table, and a totals block (subtotal,
 /// promo discount, GST, grand total). Used for both "Print Invoice" (admin)
@@ -27,16 +69,12 @@ Future<Uint8List> buildInvoicePdf({
   final shopName = settings['shop_name'] as String? ?? 'Marugen Fish Farm';
   final shopPhone = settings['shop_phone'] as String?;
   final shopAddress = settings['shop_address'] as String?;
-  final gstPercent = (settings['gst_percent'] as num?)?.toDouble() ?? 0;
-
   final discount = order.discountAmount ?? 0;
   // orders.total is the amount charged by the server, including merchandise
   // tax and only the buyer's shipping share. Never tax shipping a second time.
   final buyerShipping = (order.buyerShippingCents ?? 0) / 100;
   final merchandiseTotal = order.total - buyerShipping;
-  final gstAmount = gstPercent > 0
-      ? merchandiseTotal - merchandiseTotal / (1 + gstPercent / 100)
-      : 0.0;
+  final gst = invoiceGst(order: order, settings: settings);
   final grandTotal = order.total;
 
   final shipping = order.shippingAddress;
@@ -302,10 +340,7 @@ Future<Uint8List> buildInvoicePdf({
                           '-${_money(discount)}',
                           color: _brandRed,
                         ),
-                      _totalRow(
-                        'GST included in items (${gstPercent.toStringAsFixed(0)}%)',
-                        _money(gstAmount),
-                      ),
+                      _totalRow(gst.label, _money(gst.amount)),
                       if (order.shippingQuoteId != null)
                         _totalRow(
                           order.shippingCostPolicy == 'seller_100'

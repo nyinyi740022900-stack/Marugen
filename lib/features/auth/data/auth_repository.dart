@@ -13,12 +13,16 @@ import '../../../core/notifications/app_icon_badge.dart';
 import '../../../core/notifications/push_notification_service.dart';
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/app_user.dart';
+import '../../../shared/utils/error_message.dart';
+import '../../../shared/utils/image_upload.dart';
 
 /// Wraps Supabase Auth + the `profiles` table (which stores the app-level
 /// role used to decide customer vs admin UI). See
 /// `supabase/migrations/0001_init.sql` for the `profiles` table + RLS.
 class AuthRepository {
-  final SupabaseClient _client = SupabaseService.client;
+  final SupabaseClient _client;
+  AuthRepository({SupabaseClient? client})
+    : _client = client ?? SupabaseService.client;
 
   bool _googleInitialized = false;
 
@@ -42,12 +46,14 @@ class AuthRepository {
     return user.emailConfirmedAt != null;
   }
 
-  /// Re-sends the signup confirmation email for the current session's
-  /// address. No-op (throws) if nobody is signed in.
-  Future<void> resendVerificationEmail() async {
-    final email = currentUser?.email;
-    if (email == null) throw Exception('Not signed in');
-    await _client.auth.resend(type: OtpType.signup, email: email);
+  /// Re-sends the signup confirmation email to [email], or to the current
+  /// session's address when omitted. Right after sign-up there is no
+  /// session yet, so the sign-up screen passes the address it just used.
+  /// Throws if there is no address to send to.
+  Future<void> resendVerificationEmail({String? email}) async {
+    final address = email ?? currentUser?.email;
+    if (address == null) throw Exception('Not signed in');
+    await _client.auth.resend(type: OtpType.signup, email: address);
   }
 
   Future<AppUser?> fetchCurrentAppUser() async {
@@ -95,14 +101,15 @@ class AuthRepository {
   Future<String> uploadAvatar(Uint8List bytes, String ext) async {
     final user = currentUser;
     if (user == null) throw Exception('Not logged in');
+    final upload = prepareImageUpload(bytes, ext, upsert: true);
     final path =
-        'avatars/${user.id}/${DateTime.now().millisecondsSinceEpoch}.$ext';
+        'avatars/${user.id}/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
     await _client.storage
         .from('product-images')
         .uploadBinary(
           path,
           bytes,
-          fileOptions: const FileOptions(upsert: true),
+          fileOptions: upload.fileOptions,
         );
     final url = _client.storage.from('product-images').getPublicUrl(path);
     await _client
@@ -134,16 +141,20 @@ class AuthRepository {
     await _client.auth.signInWithPassword(email: email, password: password);
   }
 
-  Future<void> signUpWithEmail(
+  /// Creates the account. Returns true when the email must be confirmed
+  /// before logging in (Supabase returned no session); false when the
+  /// customer is already signed in and the router takes over.
+  Future<bool> signUpWithEmail(
     String email,
     String password, {
     String? fullName,
   }) async {
-    await _client.auth.signUp(
+    final response = await _client.auth.signUp(
       email: email,
       password: password,
       data: fullName != null ? {'full_name': fullName} : null,
     );
+    return response.session == null;
   }
 
   /// Deep link used for browser OAuth fallback (Android Apple / missing native config).
@@ -298,13 +309,16 @@ class AuthRepository {
   /// Permanently deletes the signed-in auth account and personal profile.
   /// Necessary order records remain, detached from the deleted profile.
   Future<void> deleteAccount() async {
-    final res = await _client.functions.invoke('delete-account');
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not delete your account';
-      throw Exception(message);
+    try {
+      await _client.functions.invoke('delete-account');
+    } on FunctionException catch (e) {
+      // invoke() throws on every non-2xx response, so nothing below runs
+      // and the account stays signed in.
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback:
+            'Your account was not deleted. Try again, or contact support.',
+      );
     }
     // The server already deleted this account. Clear the local session without
     // requiring a global revocation request against the now-missing user.

@@ -9,7 +9,12 @@ import {
   type Shipment,
   validateSingaporeAddress,
 } from "./delivery.ts";
-import { getEasyParcelAccessToken } from "./easyparcel_token.ts";
+import {
+  EasyParcelNotConnectedError,
+  EasyParcelRefreshError,
+  getEasyParcelAccessToken,
+} from "./easyparcel_token.ts";
+import { fetchWithTimeout, TIMEOUT_MS } from "./http.ts";
 export const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 export const serviceRoleKey = Deno.env.get("SB_SERVICE_KEY") ??
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -20,10 +25,57 @@ export const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
+/**
+ * A delivery failure whose message was written for the person using the app
+ * (staff, or the customer at checkout-shipping-quote). Only this class and
+ * the other authored classes listed in deliveryFailure() reach the response.
+ * Never build one from a caught error's message, a database error or a
+ * provider body: use rpcError() for RPC failures and fixed copy otherwise.
+ */
 export class DeliveryError extends Error {
   constructor(message: string, public status = 400) {
     super(message);
   }
+}
+export const DELIVERY_FAILED_MESSAGE =
+  "Delivery request failed. Refresh and try again; if it keeps failing, contact support.";
+/**
+ * What the caller may be told about a failure. Authored messages pass with
+ * their status; anything else (database errors, provider and network
+ * errors, bugs) becomes fixed copy with status 500 and is left to the logs.
+ */
+export function deliveryFailure(
+  error: unknown,
+): { message: string; status: number; authored: boolean } {
+  if (error instanceof DeliveryError) {
+    return { message: error.message, status: error.status, authored: true };
+  }
+  if (error instanceof DeliveryValidationError) {
+    return { message: error.message, status: 400, authored: true };
+  }
+  if (error instanceof EasyParcelNotConnectedError) {
+    return { message: error.message, status: 409, authored: true };
+  }
+  if (error instanceof EasyParcelRefreshError) {
+    return { message: error.message, status: 503, authored: true };
+  }
+  return { message: DELIVERY_FAILED_MESSAGE, status: 500, authored: false };
+}
+/**
+ * Error to throw for a failed RPC. A plain `raise exception` in our own
+ * functions (SQLSTATE P0001) is a business rule written for staff, e.g.
+ * "Fresh quote and exact owner approval required", and is passed on. Every
+ * other database error (constraint names, casts, permissions, timeouts) is
+ * returned untouched so the handler replaces it with fixed copy.
+ */
+export function rpcError(
+  error: { code?: string; message?: string },
+  status = 409,
+): unknown {
+  return error?.code === "P0001" && typeof error.message === "string" &&
+      error.message
+    ? new DeliveryError(error.message, status)
+    : error;
 }
 export function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -31,18 +83,12 @@ export function json(data: unknown, status = 200) {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
-export function failure(error: unknown) {
-  console.error("[delivery]", error);
-  return json(
-    {
-      error: error instanceof Error ? error.message : "Delivery request failed",
-    },
-    error instanceof DeliveryError
-      ? error.status
-      : error instanceof DeliveryValidationError
-      ? 400
-      : 500,
-  );
+export function failure(error: unknown, tag = "[delivery]") {
+  const { message, status, authored } = deliveryFailure(error);
+  // Authored refusals are expected and carry no detail worth a stack trace.
+  if (authored) console.error(tag, status, message);
+  else console.error(tag, "unexpected failure", error);
+  return json({ error: message }, status);
 }
 export async function authenticated(req: Request, adminOnly = true) {
   if (req.method !== "POST") throw new DeliveryError("POST required", 405);
@@ -118,7 +164,7 @@ export async function claimShipment(
     p_tracking_number: number,
     p_carrier_code: carrier,
   });
-  if (error) throw error;
+  if (error) throw rpcError(error);
   return data === true;
 }
 export async function saveBooking(
@@ -155,8 +201,9 @@ export async function saveBooking(
   ).is("qxpress_tracking_no", null).select("id").maybeSingle();
   if (error || !data) {
     throw error ??
-      new Error(
+      new DeliveryError(
         "Booking metadata could not be saved; reconcile the existing shipment",
+        502,
       );
   }
 }
@@ -182,18 +229,30 @@ export async function fetchEasyparcelTracking(
   }
   const observedAt = new Date().toISOString();
   const token = await getEasyParcelAccessToken(admin);
-  const response = await fetch(
-    "https://api.easyparcel.com/open_api/2026-06/shipment/tracking_status",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
+  let response: Response;
+  let body;
+  try {
+    response = await fetchWithTimeout(
+      "https://api.easyparcel.com/open_api/2026-06/shipment/tracking_status",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ awb_numbers: [number] }),
       },
-      body: JSON.stringify({ awb_numbers: [number] }),
-    },
-  );
-  const body = await response.json();
+      TIMEOUT_MS.provider,
+    );
+    body = await response.json();
+  } catch (error) {
+    // Timeout, dropped connection or a non-JSON body: nothing was verified.
+    console.error("[delivery] tracking_status did not complete", error);
+    throw new DeliveryError(
+      "EasyParcel tracking could not be verified; try again later",
+      502,
+    );
+  }
   if (!response.ok || (body.status_code && body.status_code !== 200)) {
     throw new DeliveryError(
       "EasyParcel tracking could not be verified; try again later",
@@ -209,12 +268,46 @@ export async function fetchEasyparcelTracking(
     );
   }
 }
+// Authenticated read of one shipment from EasyParcel. Returns the provider's
+// `data` array, or null when EasyParcel answered but refused the request.
+// Callers must still match the shipment number (and AWB) inside it before
+// trusting any field.
+export async function fetchEasyparcelShipmentDetails(
+  admin: SupabaseClient,
+  shipmentNumber: string,
+): Promise<unknown> {
+  const token = await getEasyParcelAccessToken(admin);
+  let response: Response;
+  let body;
+  try {
+    response = await fetchWithTimeout(
+      "https://api.easyparcel.com/open_api/2026-09/shipment/details",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ shipment_number: shipmentNumber }),
+      },
+      TIMEOUT_MS.provider,
+    );
+    body = await response.json();
+  } catch (error) {
+    console.error("[delivery] shipment details did not complete", error);
+    throw new DeliveryError(
+      "EasyParcel shipment details could not be read; try again later",
+      502,
+    );
+  }
+  return response.ok && body.status_code === 200 ? body.data : null;
+}
 export async function notifyOrder(
   orderId: string,
   payload: { status?: string; event?: string },
 ) {
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${supabaseUrl}/functions/v1/send-order-notification`,
       {
         method: "POST",
@@ -224,6 +317,7 @@ export async function notifyOrder(
         },
         body: JSON.stringify({ order_id: orderId, ...payload }),
       },
+      TIMEOUT_MS.notify,
     );
     if (!res.ok) console.error("[delivery] notification failed", res.status);
   } catch (error) {
@@ -245,7 +339,7 @@ export async function applyEasyparcelTracking(
     p_observed_at: tracking.observedAt,
     p_event_at: tracking.eventAt,
   });
-  if (error) throw error;
+  if (error) throw rpcError(error);
   if (data?.status_changed) {
     await notifyOrder(order.id, { status: data.order_status });
   }

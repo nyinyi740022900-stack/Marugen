@@ -48,6 +48,10 @@ class HomeBanner {
 
   bool get hasText => title != null || subtitle != null;
 
+  /// The button pill is drawn only when it leads somewhere: a label with
+  /// no link would be a button that does nothing.
+  bool get showsCta => ctaLabel != null && linkUrl != null;
+
   /// An in-app path (`/product/<id>`, `/faq`) rather than a web address.
   bool get linksInsideApp => linkUrl != null && linkUrl!.startsWith('/');
 

@@ -14,6 +14,7 @@ import '../../../shared/widgets/simple_markdown.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../services/presentation/services_tab.dart';
 import 'knowledge_providers.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// `Image.network` with a fallback icon instead of the framework's default
 /// red error box when a stale/broken URL (deleted storage object, bad
@@ -255,15 +256,7 @@ class _VarietiesTabState extends ConsumerState<_VarietiesTab> {
                           ),
                           if (v.stages.isNotEmpty) ...[
                             const SizedBox(height: AppSpacing.lg),
-                            Text(
-                              'GROWTH STAGES',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12,
-                                letterSpacing: 0.8,
-                                color: AppPalette.of(context).textMuted,
-                              ),
-                            ),
+                            const SectionLabel('GROWTH STAGES'),
                             const SizedBox(height: AppSpacing.sm),
                             SizedBox(
                               height: 190,

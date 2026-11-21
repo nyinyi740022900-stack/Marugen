@@ -37,6 +37,7 @@
 // webhook to react to for them.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { fetchWithTimeout, TIMEOUT_MS } from '../_shared/http.ts';
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
 // Prefer the new secret key (set explicitly via `supabase secrets set`)
@@ -76,14 +77,14 @@ async function isValidSignature(rawBody: string, signature: string | null): Prom
 // otherwise retries indefinitely on a non-200).
 async function notifyOrder(orderId: string, payload: { status?: string; event?: string }) {
   try {
-    await fetch(`${supabaseUrl}/functions/v1/send-order-notification`, {
+    await fetchWithTimeout(`${supabaseUrl}/functions/v1/send-order-notification`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${serviceRoleKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ order_id: orderId, ...payload }),
-    });
+    }, TIMEOUT_MS.notify);
   } catch (err) {
     console.error('[track-webhook] notifyOrder failed', err);
   }
@@ -176,7 +177,7 @@ Deno.serve(async (req) => {
   } catch (err) {
     // Still 200 — a malformed payload shouldn't make 17TRACK hammer retries.
     console.error('[track-webhook] error', err);
-    return new Response(JSON.stringify({ received: true, error: `${err}` }), {
+    return new Response(JSON.stringify({ received: true, error: 'not processed' }), {
       headers: { 'Content-Type': 'application/json' },
     });
   }

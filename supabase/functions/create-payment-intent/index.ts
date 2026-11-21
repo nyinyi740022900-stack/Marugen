@@ -1,7 +1,15 @@
 import {
   checkoutAmountCents,
   checkoutMerchandiseCents,
+  merchandiseGstCents,
 } from "../_shared/shipping_finance.ts";
+import {
+  CHECKOUT_FAILED_MESSAGE,
+  IDEMPOTENCY_KEY_REQUIRED_MESSAGE,
+  parseIdempotencyKey,
+  PAYMENT_START_FAILED_MESSAGE,
+  paymentIntentIdempotencyKey,
+} from "./checkout_request.ts";
 // Supabase Edge Function: create-payment-intent
 //
 // Validates cart against DB prices/stock, creates a pending order (stock
@@ -17,6 +25,7 @@ import {
   applyPaymentEvent,
   cleanupUnlinkedPayment,
   completedCheckoutResponse,
+  repeatCheckoutAction,
 } from "../_shared/payment_lifecycle.ts";
 import { createPaymentPort } from "../_shared/payment_port.ts";
 import {
@@ -131,8 +140,13 @@ Deno.serve(async (req) => {
       | Record<string, unknown>
       | undefined;
     const promoCodeRaw = (body.promo_code as string | undefined)?.trim();
-    const idempotencyKey =
-      (body.idempotency_key as string | undefined)?.trim() || null;
+    // Required: every released app version sends one per checkout attempt
+    // (checkout_screen.dart). Without it a retry after a dropped response
+    // would reserve stock and open a second PaymentIntent.
+    const idempotencyKey = parseIdempotencyKey(body.idempotency_key);
+    if (!idempotencyKey) {
+      return jsonResponse({ error: IDEMPOTENCY_KEY_REQUIRED_MESSAGE }, 400);
+    }
     let customerRemarks: string | null;
     let customerRemarksRevision: number;
     try {
@@ -184,9 +198,16 @@ Deno.serve(async (req) => {
     // whether this request is a genuine retry after a dropped response, or
     // it's racing a concurrent one — return that instead of reserving stock
     // and creating a Stripe PaymentIntent a second time.
+    //
+    // One exception, handled where this is first called: when that order is
+    // still unpaid and today's server total for this request is no longer
+    // the order's total, the order is retired through the verified
+    // cancellation path and replaced (see "Repeat key, changed total").
     const userId: string = user.id;
-    async function findExistingCheckout() {
-      if (!idempotencyKey) return null;
+    type ExistingCheckout = NonNullable<
+      Awaited<ReturnType<typeof lookupExistingCheckout>>
+    >;
+    async function lookupExistingCheckout() {
       const { data: existing, error: lookupError } = await admin
         .from("orders")
         .select(
@@ -197,7 +218,9 @@ Deno.serve(async (req) => {
         .neq("status", "cancelled")
         .maybeSingle();
       if (lookupError) throw lookupError;
-      if (!existing) return null;
+      return existing;
+    }
+    async function existingCheckoutResponse(existing: ExistingCheckout) {
       const completed = completedCheckoutResponse(existing);
       if (completed) return jsonResponse(completed);
 
@@ -282,326 +305,417 @@ Deno.serve(async (req) => {
       });
     }
 
-    const existingResponse = await findExistingCheckout();
-    if (existingResponse) return existingResponse;
-
-    // Every order requires a Singapore delivery address. Live fish and
-    // mixed baskets use seller-covered shop delivery; dry goods use TracX.
-    if (!shippingIn) {
-      return jsonResponse({ error: "Shipping address required" }, 400);
-    }
-    let shippingAddress: Record<string, unknown>;
-    try {
-      shippingAddress = validateSingaporeAddress(shippingIn);
-    } catch (error) {
-      return jsonResponse({
-        error: error instanceof Error
-          ? error.message
-          : "Invalid shipping address",
-      }, 400);
-    }
-
-    const builtLines: BuiltLine[] = [];
-    let subtotal = 0;
-
-    for (const line of itemsIn) {
-      const productId = line.product_id;
-      const qty = Math.floor(Number(line.quantity) || 0);
-      if (!productId || qty < 1) {
-        return jsonResponse({ error: "Invalid cart line" }, 400);
+    // Validates the cart and prices it from the database: current prices,
+    // promo, GST and the buyer's share of the shipping quote. Returns the
+    // response to send when the request cannot be priced.
+    //
+    // `ownOrderId` is set only for the comparison pass of a repeated key. The
+    // stock and the promo redemption that order itself holds must not make
+    // its own retry look sold out or "already used", so stock levels are not
+    // checked and its redemption is not counted. Nothing is reserved here in
+    // either mode: the inserts below (and their triggers) do that, and the
+    // real pass after a retirement always runs with every check on.
+    async function priceCheckout(ownOrderId: string | null) {
+      const enforceStock = ownOrderId === null;
+      // Every order requires a Singapore delivery address. Live fish and
+      // mixed baskets use seller-covered shop delivery; dry goods use TracX.
+      if (!shippingIn) {
+        return jsonResponse({ error: "Shipping address required" }, 400);
       }
-
-      const { data: product, error: productError } = await admin
-        .from("products")
-        .select(
-          "id, name, category, price, sale_price, show_price, stock_quantity, is_sold, size_options, image_urls",
-        )
-        .eq("id", productId)
-        .maybeSingle();
-
-      if (productError || !product) {
+      let shippingAddress: Record<string, unknown>;
+      try {
+        shippingAddress = validateSingaporeAddress(shippingIn);
+      } catch (error) {
         return jsonResponse({
-          error:
-            "An item in your cart is no longer available. Remove it and try again.",
+          error: error instanceof Error
+            ? error.message
+            : "Invalid shipping address",
         }, 400);
       }
 
-      const isLiveFish = product.category === "koi" ||
-        product.category === "arowana";
-      // Snapshot the product's cover photo onto the order line — the
-      // product itself (and its images) can be edited or deleted later,
-      // but the order's item photo should stay as it was at purchase time.
-      const imageUrl: string | null =
-        Array.isArray(product.image_urls) && product.image_urls.length > 0
-          ? product.image_urls[0]
-          : null;
-      const sizeOptions: string[] = Array.isArray(product.size_options)
-        ? product.size_options.filter((s: unknown) =>
-          typeof s === "string" && s.trim().length > 0
-        )
-        : [];
-      const sizeLabelRaw = typeof line.size_label === "string"
-        ? line.size_label.trim()
-        : "";
-      let sizeLabel: string | undefined;
-      if (!isLiveFish && sizeOptions.length > 0) {
-        if (!sizeLabelRaw || !sizeOptions.includes(sizeLabelRaw)) {
-          return jsonResponse(
-            { error: `${product.name} requires a valid size` },
-            400,
-          );
-        }
-        sizeLabel = sizeLabelRaw;
-      } else if (sizeLabelRaw) {
-        // Ignore stale client size when the product no longer has sizes.
-        sizeLabel = undefined;
-      }
+      const builtLines: BuiltLine[] = [];
+      let subtotal = 0;
 
-      if (line.variant_id) {
-        // A live-fish batch listing (e.g. "Japan Imported Koi Selection")
-        // uses variants as individual fish/variety picks — each is still
-        // one specific animal, so quantity must be 1 just like the
-        // no-variant live-fish path below.
-        if (isLiveFish && qty !== 1) {
-          return jsonResponse({ error: "Live fish quantity must be 1" }, 400);
+      for (const line of itemsIn) {
+        const productId = line.product_id;
+        const qty = Math.floor(Number(line.quantity) || 0);
+        if (!productId || qty < 1) {
+          return jsonResponse({ error: "Invalid cart line" }, 400);
         }
 
-        const { data: variant, error: variantError } = await admin
-          .from("product_variants")
-          .select("id, product_id, label, price, stock_quantity")
-          .eq("id", line.variant_id)
-          .eq("product_id", productId)
+        const { data: product, error: productError } = await admin
+          .from("products")
+          .select(
+            "id, name, category, price, sale_price, show_price, stock_quantity, is_sold, size_options, image_urls",
+          )
+          .eq("id", productId)
           .maybeSingle();
 
-        if (variantError || !variant) {
+        if (productError || !product) {
           return jsonResponse({
             error:
-              "An option you chose is no longer available. Choose it again and retry.",
+              "An item in your cart is no longer available. Remove it and try again.",
           }, 400);
         }
-        if (!product.show_price) {
-          return jsonResponse(
-            { error: `${product.name} is contact-for-price` },
-            400,
-          );
-        }
 
-        if (sizeLabel) {
-          const { data: sizeStock, error: sizeStockError } = await admin
-            .from("product_variant_size_stocks")
-            .select("stock_quantity")
-            .eq("variant_id", variant.id)
-            .eq("size_label", sizeLabel)
-            .maybeSingle();
-          if (sizeStockError) {
-            return jsonResponse({ error: "Could not check size stock" }, 500);
-          }
-          const available = Number(sizeStock?.stock_quantity ?? 0);
-          if (available < qty) {
+        const isLiveFish = product.category === "koi" ||
+          product.category === "arowana";
+        // Snapshot the product's cover photo onto the order line — the
+        // product itself (and its images) can be edited or deleted later,
+        // but the order's item photo should stay as it was at purchase time.
+        const imageUrl: string | null =
+          Array.isArray(product.image_urls) && product.image_urls.length > 0
+            ? product.image_urls[0]
+            : null;
+        const sizeOptions: string[] = Array.isArray(product.size_options)
+          ? product.size_options.filter((s: unknown) =>
+            typeof s === "string" && s.trim().length > 0
+          )
+          : [];
+        const sizeLabelRaw = typeof line.size_label === "string"
+          ? line.size_label.trim()
+          : "";
+        let sizeLabel: string | undefined;
+        if (!isLiveFish && sizeOptions.length > 0) {
+          if (!sizeLabelRaw || !sizeOptions.includes(sizeLabelRaw)) {
             return jsonResponse(
-              {
-                error:
-                  `${product.name} (${variant.label} · ${sizeLabel}) is out of stock`,
-              },
+              { error: `${product.name} requires a valid size` },
               400,
             );
           }
-        } else if (variant.stock_quantity < qty) {
-          return jsonResponse(
-            { error: `${product.name} (${variant.label}) is out of stock` },
-            400,
-          );
+          sizeLabel = sizeLabelRaw;
+        } else if (sizeLabelRaw) {
+          // Ignore stale client size when the product no longer has sizes.
+          sizeLabel = undefined;
         }
 
-        const unit = Number(variant.price);
-        builtLines.push({
-          product_id: product.id,
-          product_name: product.name,
-          product_category: product.category,
-          quantity: qty,
-          unit_price: unit,
-          variant_id: variant.id,
-          variant_label: variant.label,
-          size_label: sizeLabel,
-          image_url: imageUrl,
-        });
-        subtotal += unit * qty;
-      } else {
-        if (!product.show_price || product.price == null) {
-          return jsonResponse(
-            { error: `${product.name} is contact-for-price` },
-            400,
-          );
-        }
-        // Variant products (weight options, or a live-fish batch listing's
-        // fish/variety picks) must choose one on the client — checked
-        // before the base price/stock fields below, which are unused once
-        // variants exist and may be stale.
-        const { count } = await admin
-          .from("product_variants")
-          .select("id", { count: "exact", head: true })
-          .eq("product_id", productId);
-        if ((count ?? 0) > 0) {
-          return jsonResponse(
-            { error: `${product.name} requires a variant` },
-            400,
-          );
-        }
-
-        if (isLiveFish) {
-          if (qty !== 1) {
+        if (line.variant_id) {
+          // A live-fish batch listing (e.g. "Japan Imported Koi Selection")
+          // uses variants as individual fish/variety picks — each is still
+          // one specific animal, so quantity must be 1 just like the
+          // no-variant live-fish path below.
+          if (isLiveFish && qty !== 1) {
             return jsonResponse({ error: "Live fish quantity must be 1" }, 400);
           }
-          if (product.is_sold || product.stock_quantity < 1) {
+
+          const { data: variant, error: variantError } = await admin
+            .from("product_variants")
+            .select("id, product_id, label, price, stock_quantity")
+            .eq("id", line.variant_id)
+            .eq("product_id", productId)
+            .maybeSingle();
+
+          if (variantError || !variant) {
+            return jsonResponse({
+              error:
+                "An option you chose is no longer available. Choose it again and retry.",
+            }, 400);
+          }
+          if (!product.show_price) {
             return jsonResponse(
-              { error: `${product.name} is already sold` },
+              { error: `${product.name} is contact-for-price` },
               400,
             );
           }
-        } else if (product.stock_quantity < qty) {
+
+          if (!enforceStock) {
+            // Comparison pass: this checkout's own pending order holds stock.
+          } else if (sizeLabel) {
+            const { data: sizeStock, error: sizeStockError } = await admin
+              .from("product_variant_size_stocks")
+              .select("stock_quantity")
+              .eq("variant_id", variant.id)
+              .eq("size_label", sizeLabel)
+              .maybeSingle();
+            if (sizeStockError) {
+              return jsonResponse({ error: "Could not check size stock" }, 500);
+            }
+            const available = Number(sizeStock?.stock_quantity ?? 0);
+            if (available < qty) {
+              return jsonResponse(
+                {
+                  error:
+                    `${product.name} (${variant.label} · ${sizeLabel}) is out of stock`,
+                },
+                400,
+              );
+            }
+          } else if (variant.stock_quantity < qty) {
+            return jsonResponse(
+              { error: `${product.name} (${variant.label}) is out of stock` },
+              400,
+            );
+          }
+
+          const unit = Number(variant.price);
+          builtLines.push({
+            product_id: product.id,
+            product_name: product.name,
+            product_category: product.category,
+            quantity: qty,
+            unit_price: unit,
+            variant_id: variant.id,
+            variant_label: variant.label,
+            size_label: sizeLabel,
+            image_url: imageUrl,
+          });
+          subtotal += unit * qty;
+        } else {
+          if (!product.show_price || product.price == null) {
+            return jsonResponse(
+              { error: `${product.name} is contact-for-price` },
+              400,
+            );
+          }
+          // Variant products (weight options, or a live-fish batch listing's
+          // fish/variety picks) must choose one on the client — checked
+          // before the base price/stock fields below, which are unused once
+          // variants exist and may be stale.
+          const { count } = await admin
+            .from("product_variants")
+            .select("id", { count: "exact", head: true })
+            .eq("product_id", productId);
+          if ((count ?? 0) > 0) {
+            return jsonResponse(
+              { error: `${product.name} requires a variant` },
+              400,
+            );
+          }
+
+          if (isLiveFish) {
+            if (qty !== 1) {
+              return jsonResponse(
+                { error: "Live fish quantity must be 1" },
+                400,
+              );
+            }
+            if (
+              enforceStock && (product.is_sold || product.stock_quantity < 1)
+            ) {
+              return jsonResponse(
+                { error: `${product.name} is already sold` },
+                400,
+              );
+            }
+          } else if (enforceStock && product.stock_quantity < qty) {
+            return jsonResponse(
+              { error: `${product.name} is out of stock` },
+              400,
+            );
+          }
+
+          // Sale price wins only when it's actually a discount — never
+          // trust it blindly (e.g. a stale/bad value >= price).
+          const salePrice = Number(product.sale_price);
+          const unit =
+            product.sale_price != null && salePrice < Number(product.price)
+              ? salePrice
+              : Number(product.price);
+          builtLines.push({
+            product_id: product.id,
+            product_name: product.name,
+            product_category: product.category,
+            quantity: qty,
+            unit_price: unit,
+            size_label: sizeLabel,
+            image_url: imageUrl,
+          });
+          subtotal += unit * qty;
+        }
+      }
+
+      subtotal = roundMoney(subtotal);
+
+      let discountAmount = 0;
+      let promoCode: string | null = null;
+      let promoId: string | null = null;
+      if (promoCodeRaw) {
+        // Exact, case-insensitive match (0071_private_promo_codes.sql) — an
+        // ILIKE lookup let `%`/`*` apply a code the customer never knew.
+        const { data: promoRows, error: promoError } = await admin
+          .rpc("find_promo_code", { p_code: promoCodeRaw })
+          .select(
+            "id, code, discount_type, discount_value, active, expires_at, max_redemptions, times_redeemed",
+          );
+        if (promoError) {
+          console.error("Promo lookup failed", promoError);
+          return jsonResponse({ error: "Could not check promo code" }, 500);
+        }
+        const promo = (Array.isArray(promoRows) ? promoRows[0] : promoRows) ??
+          null;
+
+        if (!promo || !promo.active) {
+          return jsonResponse({ error: "Invalid promo code" }, 400);
+        }
+        if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
+          return jsonResponse({ error: "Promo code expired" }, 400);
+        }
+        const { data: redemption } = await admin
+          .from("promo_code_redemptions")
+          .select("id, order_id")
+          .eq("promo_code_id", promo.id)
+          .eq("user_id", userId)
+          .maybeSingle();
+        // The redemption held by this checkout's own pending order is released
+        // with that order, so it neither uses up the cap nor counts as "used".
+        const ownRedemption = ownOrderId !== null &&
+          redemption?.order_id === ownOrderId;
+        const alreadyUsed = redemption && !ownRedemption;
+        if (
+          promo.max_redemptions != null &&
+          promo.times_redeemed - (ownRedemption ? 1 : 0) >=
+            promo.max_redemptions
+        ) {
+          return jsonResponse({
+            error: "This promo code has reached its usage limit",
+          }, 400);
+        }
+        if (alreadyUsed) {
           return jsonResponse(
-            { error: `${product.name} is out of stock` },
+            { error: "You have already used this promo code" },
             400,
           );
         }
 
-        // Sale price wins only when it's actually a discount — never
-        // trust it blindly (e.g. a stale/bad value >= price).
-        const salePrice = Number(product.sale_price);
-        const unit =
-          product.sale_price != null && salePrice < Number(product.price)
-            ? salePrice
-            : Number(product.price);
-        builtLines.push({
-          product_id: product.id,
-          product_name: product.name,
-          product_category: product.category,
-          quantity: qty,
-          unit_price: unit,
-          size_label: sizeLabel,
-          image_url: imageUrl,
-        });
-        subtotal += unit * qty;
+        const raw = promo.discount_type === "percent"
+          ? subtotal * Number(promo.discount_value) / 100
+          : Number(promo.discount_value);
+        discountAmount = roundMoney(Math.min(Math.max(raw, 0), subtotal));
+        promoCode = promo.code;
+        promoId = promo.id;
       }
-    }
 
-    subtotal = roundMoney(subtotal);
-
-    let discountAmount = 0;
-    let promoCode: string | null = null;
-    let promoId: string | null = null;
-    if (promoCodeRaw) {
-      // Exact, case-insensitive match (0071_private_promo_codes.sql) — an
-      // ILIKE lookup let `%`/`*` apply a code the customer never knew.
-      const { data: promoRows, error: promoError } = await admin
-        .rpc("find_promo_code", { p_code: promoCodeRaw })
-        .select(
-          "id, code, discount_type, discount_value, active, expires_at, max_redemptions, times_redeemed",
-        );
-      if (promoError) {
-        console.error("Promo lookup failed", promoError);
-        return jsonResponse({ error: "Could not check promo code" }, 500);
-      }
-      const promo = (Array.isArray(promoRows) ? promoRows[0] : promoRows) ??
-        null;
-
-      if (!promo || !promo.active) {
-        return jsonResponse({ error: "Invalid promo code" }, 400);
-      }
-      if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
-        return jsonResponse({ error: "Promo code expired" }, 400);
-      }
-      if (
-        promo.max_redemptions != null &&
-        promo.times_redeemed >= promo.max_redemptions
-      ) {
-        return jsonResponse({
-          error: "This promo code has reached its usage limit",
-        }, 400);
-      }
-      const { data: alreadyUsed } = await admin
-        .from("promo_code_redemptions")
-        .select("id")
-        .eq("promo_code_id", promo.id)
-        .eq("user_id", user.id)
+      const { data: settings } = await admin
+        .from("settings")
+        .select("gst_percent, gst_included_in_price")
+        .eq("id", 1)
         .maybeSingle();
-      if (alreadyUsed) {
-        return jsonResponse(
-          { error: "You have already used this promo code" },
-          400,
+
+      const gstPercent = Number(settings?.gst_percent ?? 9);
+      const gstIncluded = settings?.gst_included_in_price !== false;
+
+      let payableTotal = checkoutMerchandiseCents(
+        subtotal,
+        discountAmount,
+        gstPercent,
+        gstIncluded,
+      ) / 100;
+      // Snapshot the GST this order was charged (migration 0078) so a later
+      // change to the shop's rate cannot restate its invoice.
+      const gstAmountCents = merchandiseGstCents(
+        subtotal,
+        discountAmount,
+        gstPercent,
+        gstIncluded,
+      );
+
+      let shippingFields: Record<string, unknown>;
+      try {
+        const binding = await checkoutBinding(
+          admin,
+          itemsIn,
+          shippingIn,
+          promoCodeRaw,
         );
+        if (binding.fulfillment === "courier" && !shippingQuote) {
+          throw new Error("Refresh delivery pricing before payment");
+        }
+        if (shippingQuote) {
+          requireQuote(
+            shippingQuote,
+            userId,
+            checkoutSignature,
+            binding.pricing_signature,
+          );
+          if (
+            shippingQuote.fulfillment_method !== classifyFulfillment(builtLines)
+          ) {
+            throw new Error(
+              "Delivery method changed. Refresh delivery pricing",
+            );
+          }
+        }
+        shippingFields = orderShippingFields(
+          shippingQuote,
+          checkoutSignature,
+          binding.fulfillment,
+        );
+        // Provider total includes its taxes. Add only the buyer's share, once,
+        // after the existing merchandise GST computation above.
+        payableTotal = checkoutAmountCents(
+          payableTotal,
+          Number(shippingFields.buyer_shipping_cents),
+        ) / 100;
+      } catch (error) {
+        return jsonResponse({
+          error: error instanceof Error
+            ? error.message
+            : "Shipping quote invalid",
+        }, 409);
       }
 
-      const raw = promo.discount_type === "percent"
-        ? subtotal * Number(promo.discount_value) / 100
-        : Number(promo.discount_value);
-      discountAmount = roundMoney(Math.min(Math.max(raw, 0), subtotal));
-      promoCode = promo.code;
-      promoId = promo.id;
+      if (payableTotal <= 0) {
+        return jsonResponse({ error: "Invalid total" }, 400);
+      }
+
+      const amountCents = Math.round(payableTotal * 100);
+      return {
+        shippingAddress,
+        builtLines,
+        discountAmount,
+        promoCode,
+        promoId,
+        gstPercent,
+        gstIncluded,
+        gstAmountCents,
+        shippingFields,
+        payableTotal,
+        amountCents,
+      };
     }
 
-    const { data: settings } = await admin
-      .from("settings")
-      .select("gst_percent, gst_included_in_price")
-      .eq("id", 1)
-      .maybeSingle();
+    const existing = await lookupExistingCheckout();
+    if (existing) {
+      // Repeat key, changed total. The app keeps one key for the whole
+      // checkout screen (a new key could reserve a 1-of-1 fish twice), so
+      // after a "checkout total changed" mismatch whose release did not go
+      // through, every retry got this same order and the same mismatch until
+      // the 30-minute cleanup. If the order is unpaid and today's total for
+      // this request differs from it, retire it and fall through to create a
+      // fresh order. The old order is cancelled (stock and promo released by
+      // its triggers) before anything new is reserved, and only after Stripe
+      // confirmed its PaymentIntent canceled, so the same fish is never held
+      // by two live orders and a payment in flight is never abandoned.
+      // In every other case the existing order is answered exactly as before:
+      // paid, still being prepared, total unchanged, the request cannot be
+      // priced right now, or the PaymentIntent could not be confirmed canceled.
+      const action = await repeatCheckoutAction(
+        existing,
+        userId,
+        async () => {
+          const fresh = await priceCheckout(existing.id);
+          return fresh instanceof Response ? null : fresh.amountCents;
+        },
+        paymentPort,
+      );
+      if (action === "reuse") return await existingCheckoutResponse(existing);
+    }
 
-    const gstPercent = Number(settings?.gst_percent ?? 9);
-    const gstIncluded = settings?.gst_included_in_price !== false;
-
-    let payableTotal = checkoutMerchandiseCents(
-      subtotal,
+    const priced = await priceCheckout(null);
+    if (priced instanceof Response) return priced;
+    const {
+      shippingAddress,
+      builtLines,
       discountAmount,
+      promoCode,
+      promoId,
       gstPercent,
       gstIncluded,
-    ) / 100;
-
-    let shippingFields: Record<string, unknown>;
-    try {
-      const binding = await checkoutBinding(
-        admin,
-        itemsIn,
-        shippingIn,
-        promoCodeRaw,
-      );
-      if (binding.fulfillment === "courier" && !shippingQuote) {
-        throw new Error("Refresh delivery pricing before payment");
-      }
-      if (shippingQuote) {
-        requireQuote(
-          shippingQuote,
-          user.id,
-          checkoutSignature,
-          binding.pricing_signature,
-        );
-        if (
-          shippingQuote.fulfillment_method !== classifyFulfillment(builtLines)
-        ) throw new Error("Delivery method changed. Refresh delivery pricing");
-      }
-      shippingFields = orderShippingFields(
-        shippingQuote,
-        checkoutSignature,
-        binding.fulfillment,
-      );
-      // Provider total includes its taxes. Add only the buyer's share, once,
-      // after the existing merchandise GST computation above.
-      payableTotal = checkoutAmountCents(
-        payableTotal,
-        Number(shippingFields.buyer_shipping_cents),
-      ) / 100;
-    } catch (error) {
-      return jsonResponse({
-        error: error instanceof Error
-          ? error.message
-          : "Shipping quote invalid",
-      }, 409);
-    }
-
-    if (payableTotal <= 0) {
-      return jsonResponse({ error: "Invalid total" }, 400);
-    }
-
-    const amountCents = Math.round(payableTotal * 100);
+      gstAmountCents,
+      shippingFields,
+      payableTotal,
+      amountCents,
+    } = priced;
 
     const { data: order, error: orderError } = await admin
       .from("orders")
@@ -617,6 +731,9 @@ Deno.serve(async (req) => {
         promo_code: promoCode,
         discount_amount: discountAmount > 0 ? discountAmount : null,
         idempotency_key: idempotencyKey,
+        gst_percent: gstPercent,
+        gst_included_in_price: gstIncluded,
+        gst_amount_cents: gstAmountCents,
       })
       .select("id")
       .single();
@@ -627,8 +744,8 @@ Deno.serve(async (req) => {
       // and inserted its pending order first. Return that one instead of
       // failing the request outright.
       if (orderError?.code === "23505") {
-        const raced = await findExistingCheckout();
-        if (raced) return raced;
+        const raced = await lookupExistingCheckout();
+        if (raced) return await existingCheckoutResponse(raced);
       }
       // The database message is for us, not the customer.
       console.error("Order insert failed", orderError);
@@ -721,6 +838,9 @@ Deno.serve(async (req) => {
 
     let paymentIntent: Stripe.PaymentIntent;
     try {
+      // One order, one PaymentIntent: if the request is repeated (the Stripe
+      // client retries a dropped connection) Stripe returns the first intent
+      // instead of opening another for the same order.
       paymentIntent = await stripe.paymentIntents.create({
         amount: amountCents,
         currency,
@@ -729,13 +849,15 @@ Deno.serve(async (req) => {
           order_id: orderId,
           user_id: user.id,
         },
-      });
+      }, { idempotencyKey: paymentIntentIdempotencyKey(orderId) });
     } catch (stripeErr) {
       await admin.from("orders").update({ status: "cancelled" }).eq(
         "id",
         orderId,
       );
-      return jsonResponse({ error: `Stripe error: ${stripeErr}` }, 500);
+      // Stripe's message can name keys, request ids and account settings.
+      console.error("PaymentIntent creation failed", orderId, stripeErr);
+      return jsonResponse({ error: PAYMENT_START_FAILED_MESSAGE }, 500);
     }
 
     const { data: linkedOrder, error: linkError } = await admin
@@ -773,6 +895,7 @@ Deno.serve(async (req) => {
       currency,
     });
   } catch (err) {
-    return jsonResponse({ error: `${err}` }, 500);
+    console.error("create-payment-intent failed", err);
+    return jsonResponse({ error: CHECKOUT_FAILED_MESSAGE }, 500);
   }
 });

@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase/supabase_client.dart';
+import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/order_remarks.dart';
 
 final paymentRepositoryProvider = Provider<PaymentRepository>(
@@ -39,25 +40,30 @@ class PaymentRepository {
     if (customerRemarksRevision < 0 || customerRemarksRevision > 2147483647) {
       throw const FormatException('Invalid order requests revision.');
     }
-    final res = await _client.functions.invoke(
-      'create-payment-intent',
-      body: {
-        'currency': currency,
-        'shipping_quote_id': ?shippingQuoteId,
-        'items': items,
-        'shipping_address': ?shippingAddress,
-        if (promoCode != null && promoCode.isNotEmpty) 'promo_code': promoCode,
-        'idempotency_key': ?idempotencyKey,
-        'customer_remarks': remarks,
-        'customer_remarks_revision': customerRemarksRevision,
-      },
-    );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Payment setup failed (${res.status})';
-      throw Exception(message);
+    final FunctionResponse res;
+    try {
+      res = await _client.functions.invoke(
+        'create-payment-intent',
+        body: {
+          'currency': currency,
+          'shipping_quote_id': ?shippingQuoteId,
+          'items': items,
+          'shipping_address': ?shippingAddress,
+          if (promoCode != null && promoCode.isNotEmpty)
+            'promo_code': promoCode,
+          'idempotency_key': ?idempotencyKey,
+          'customer_remarks': remarks,
+          'customer_remarks_revision': customerRemarksRevision,
+        },
+      );
+    } on FunctionException catch (e) {
+      // invoke() throws on every non-2xx response. The function's `error`
+      // field is fixed copy written for the customer ("This item just sold
+      // out", "Shipping quote expired...").
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback: 'Payment could not be set up. Please try again.',
+      );
     }
     return Map<String, dynamic>.from(res.data as Map);
   }

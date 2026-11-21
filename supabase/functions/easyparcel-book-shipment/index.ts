@@ -25,6 +25,7 @@ import {
   loadSender,
   saveBooking,
 } from "../_shared/delivery_api.ts";
+import { fetchWithTimeout, TIMEOUT_MS } from "../_shared/http.ts";
 import {
   EasyParcelNotConnectedError,
   getEasyParcelAccessToken,
@@ -77,7 +78,13 @@ Deno.serve(async (req) => {
           width: parcel.width_cm,
           height: parcel.height_cm,
         };
-        const response = await fetch(
+        // Paid call. A timeout is NOT a refusal: EasyParcel may have accepted
+        // and charged the booking. The error is thrown out of submit(), so
+        // runBooking keeps the claim (claim_courier_shipment already set
+        // tracking_registered, which blocks any second booking), marks the
+        // order needs_attention and staff settle it with
+        // easyparcel-reconcile-shipment. Never retry this call here.
+        const response = await fetchWithTimeout(
           "https://api.easyparcel.com/open_api/2026-06/shipment/submit_orders",
           {
             method: "POST",
@@ -122,6 +129,7 @@ Deno.serve(async (req) => {
               }],
             }),
           },
+          TIMEOUT_MS.booking,
         );
         const body = await response.json();
         const shipment = body?.data?.[0]?.shipments?.[0];

@@ -245,3 +245,33 @@ Deno.test("refresh-only requests cannot create a refund even if no Stripe refund
     "Refreshing status must never move money",
   );
 });
+Deno.test("refund rules reach staff; Stripe and database text does not", async () => {
+  const { RefundError, REFUND_FAILED_MESSAGE, refundErrorMessage } =
+    await import("./refund_lifecycle.ts");
+  const f = fixture();
+  f.order.stripe_payment_intent_id = null as unknown as string;
+  let rule: unknown;
+  try {
+    await requestOrderRefund("o", undefined, f.port);
+  } catch (error) {
+    rule = error;
+  }
+  assert(rule instanceof RefundError, "authored rule lost its type");
+  assert(
+    refundErrorMessage(rule) === "Order has no Stripe payment to refund",
+    "authored rule hidden from staff",
+  );
+  for (
+    const internal of [
+      new Error("No such payment_intent: 'pi_123'; request id req_abc"),
+      { code: "23514", message: 'violates check constraint "orders_total"' },
+      "raw string",
+      null,
+    ]
+  ) {
+    assert(
+      refundErrorMessage(internal) === REFUND_FAILED_MESSAGE,
+      "internal detail leaked",
+    );
+  }
+});

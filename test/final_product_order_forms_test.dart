@@ -280,7 +280,6 @@ void main() {
         overrides: [
           orderRepositoryProvider.overrideWithValue(repository),
           adminOrdersProvider.overrideWith((ref) async => [order]),
-          adminAllOrdersProvider.overrideWith((ref) async => [order]),
           easyParcelConnectedProvider.overrideWith((ref) async => false),
         ],
       );
@@ -568,20 +567,19 @@ void main() {
         overrides: [
           orderRepositoryProvider.overrideWithValue(DeliveryOrders([])),
           adminOrdersProvider.overrideWith((ref) async => []),
-          adminAllOrdersProvider.overrideWith((ref) async => []),
           easyParcelConnectedProvider.overrideWith((ref) async => false),
         ],
       );
       final bar = tester.widget<TabBar>(find.byType(TabBar));
       expect(bar.isScrollable, isFalse);
       expect(bar.tabAlignment, TabAlignment.fill);
-      final centers = ['All', 'Fulfillment', 'Payments']
+      expect(find.text('Payments'), findsNothing);
+      final centers = ['All', 'Fulfillment']
           .map((label) => tester.getCenter(find.widgetWithText(Tab, label)).dx)
           .toList();
       final width = capture ? 390.0 : 600.0;
-      expect(centers[0], closeTo(width / 6, 1));
-      expect(centers[1], closeTo(width / 2, 1));
-      expect(centers[2], closeTo(width * 5 / 6, 1));
+      expect(centers[0], closeTo(width / 4, 1));
+      expect(centers[1], closeTo(width * 3 / 4, 1));
       expect(tester.takeException(), isNull);
       await shot(tester, 'order-tabs-spaced-$brightness');
     });
@@ -616,7 +614,6 @@ void main() {
           overrides: [
             orderRepositoryProvider.overrideWithValue(repository),
             adminOrdersProvider.overrideWith((ref) async => [order]),
-            adminAllOrdersProvider.overrideWith((ref) async => [order]),
             easyParcelConnectedProvider.overrideWith((ref) async => false),
           ],
         );

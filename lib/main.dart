@@ -27,12 +27,10 @@ Future<void> main() async {
   // `runApp` is reached regardless of which specific call misbehaves; a
   // missing crash-reporting hookup is far better than an app stuck on the
   // native launch splash forever (observed on a fresh Android emulator).
-  debugPrint('[BOOT] before CrashReporting.initialize');
   await CrashReporting.initialize().timeout(
     const Duration(seconds: 10),
     onTimeout: () {},
   );
-  debugPrint('[BOOT] after CrashReporting.initialize');
 
   // Uncaught async errors reach Crashlytics through
   // PlatformDispatcher.onError (set in CrashReporting.initialize), so no
@@ -45,14 +43,12 @@ Future<void> _runApp() async {
   // `.env` is optional at this stage — the app still boots without it so
   // the UI is browsable before Supabase/Stripe keys are wired up. See
   // `.env.example` for what to fill in.
-  debugPrint('[BOOT] before dotenv.load');
   try {
     await dotenv.load(fileName: '.env');
   } catch (_) {
     // No .env yet — Env.isConfigured will be false and screens show
     // friendly "not configured" states instead of crashing.
   }
-  debugPrint('[BOOT] after dotenv.load, isConfigured=${Env.isConfigured}');
 
   if (!Env.isConfigured) {
     // No Supabase credentials yet — show setup instructions instead of
@@ -61,9 +57,7 @@ Future<void> _runApp() async {
     return;
   }
 
-  debugPrint('[BOOT] before SupabaseService.init');
   await SupabaseService.init();
-  debugPrint('[BOOT] after SupabaseService.init');
   if (Env.stripePublishableKey.isNotEmpty) {
     Stripe.publishableKey = Env.stripePublishableKey;
     // Apple Pay is intentionally NOT configured here: it needs a real
@@ -83,7 +77,6 @@ Future<void> _runApp() async {
     // the app on the native launch splash forever with no recovery.
     unawaited(Stripe.instance.applySettings());
   }
-  debugPrint('[BOOT] about to call runApp');
 
   // Push notifications: fire-and-forget, NOT awaited. Without a
   // GoogleService-Info.plist / google-services.json in place, native FCM

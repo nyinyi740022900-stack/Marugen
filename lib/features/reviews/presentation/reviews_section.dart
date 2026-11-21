@@ -13,6 +13,7 @@ import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/reviewer_identity.dart';
 import '../../auth/presentation/auth_providers.dart';
 import 'review_providers.dart';
+import '../../../shared/widgets/section_label.dart';
 
 /// "REVIEWS" section on the product detail screen: average rating + count,
 /// the current user's write/edit affordance, and the list of everyone
@@ -28,15 +29,7 @@ class ReviewsSection extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'REVIEWS',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 0.8,
-            color: AppPalette.of(context).textMuted,
-          ),
-        ),
+        const SectionLabel('REVIEWS'),
         const SizedBox(height: AppSpacing.sm),
         _MyReviewCard(productId: productId),
         const SizedBox(height: AppSpacing.md),
@@ -247,6 +240,7 @@ class _MyReviewCard extends ConsumerWidget {
                   ),
                   const Spacer(),
                   IconButton(
+                    tooltip: 'Edit your review',
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     onPressed: () => openReviewForm(
@@ -257,6 +251,7 @@ class _MyReviewCard extends ConsumerWidget {
                     ),
                   ),
                   IconButton(
+                    tooltip: 'Delete your review',
                     visualDensity: VisualDensity.compact,
                     icon: Icon(
                       Icons.delete_outline,

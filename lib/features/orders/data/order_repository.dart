@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/supabase/supabase_client.dart';
 import '../../../shared/models/order.dart';
+import '../../../shared/utils/error_message.dart';
 
 class CancellationRefundNeedsAttention implements Exception {
   const CancellationRefundNeedsAttention();
@@ -24,6 +25,45 @@ class OrderRepository {
       totalRevenue: (row['total_revenue'] as num).toDouble(),
       weekRevenue: (row['week_revenue'] as num).toDouble(),
     );
+  }
+
+  /// Dashboard "collected through Stripe" figure (`admin_payments_summary`,
+  /// migration 0078).
+  /// Null when the database does not have the function yet, so the caller
+  /// can fall back to adding up the orders it already loaded.
+  Future<AdminPaymentsSummary?> fetchAdminPaymentsSummary() async {
+    final dynamic result;
+    try {
+      result = await _client.rpc('admin_payments_summary');
+    } catch (error) {
+      if (isMissingRpc(error)) return null;
+      rethrow;
+    }
+    final row = (result is List ? result.single : result) as Map;
+    return AdminPaymentsSummary(
+      transactionCount: (row['transaction_count'] as num).toInt(),
+      collected: (row['collected'] as num).toDouble(),
+    );
+  }
+
+  /// Product sales ranking (`admin_top_products`, migration 0078), most
+  /// units first. Null when the database does not have the function yet.
+  Future<List<TopProductSales>?> fetchAdminTopProducts({
+    required int limit,
+  }) async {
+    final dynamic result;
+    try {
+      result = await _client.rpc(
+        'admin_top_products',
+        params: {'p_limit': limit},
+      );
+    } catch (error) {
+      if (isMissingRpc(error)) return null;
+      rethrow;
+    }
+    return (result as List)
+        .map((row) => TopProductSales.fromMap((row as Map).cast()))
+        .toList();
   }
 
   Future<List<Order>> fetchMyOrders() async {
@@ -121,6 +161,31 @@ class OrderRepository {
         .toList();
   }
 
+  /// Admin: orders still `pending` that were created before [createdBefore]
+  /// (the dashboard's "stuck pending" list), newest first. At most [limit]
+  /// rows come back; [StuckPendingOrders.total] is how many match in all.
+  /// The rows carry no items: the dashboard shows number, total and age.
+  Future<StuckPendingOrders> fetchStuckPendingOrders({
+    required DateTime createdBefore,
+    int limit = kStuckPendingLimit,
+  }) async {
+    final response = await _client
+        .from('orders')
+        .select('*')
+        .eq('status', OrderStatus.pending.name)
+        .lt('created_at', createdBefore.toUtc().toIso8601String())
+        .order('created_at', ascending: false)
+        .order('id')
+        .limit(limit)
+        .count(CountOption.exact);
+    final orders = response.data.map(Order.fromMap).toList();
+    return StuckPendingOrders(
+      orders: orders,
+      // Never report fewer than the rows actually shown.
+      total: response.count < orders.length ? orders.length : response.count,
+    );
+  }
+
   Future<void> confirmShopDelivery(String orderId) async {
     final confirmed = await _client.rpc(
       'confirm_shop_delivery',
@@ -182,20 +247,22 @@ class OrderRepository {
     String? reason,
     bool refreshOnly = false,
   }) async {
-    final res = await _client.functions.invoke(
-      'stripe-refund',
-      body: {
-        'order_id': orderId,
-        'reason': ?reason,
-        'refresh_only': refreshOnly,
-      },
-    );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not process the refund';
-      throw Exception(message);
+    try {
+      await _client.functions.invoke(
+        'stripe-refund',
+        body: {
+          'order_id': orderId,
+          'reason': ?reason,
+          'refresh_only': refreshOnly,
+        },
+      );
+    } on FunctionException catch (e) {
+      // invoke() throws on every non-2xx response; the function's `error`
+      // field is fixed copy written for staff.
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback: 'Could not process the refund. Check Stripe and try again.',
+      );
     }
   }
 
@@ -205,15 +272,19 @@ class OrderRepository {
     String action, {
     String? reason,
   }) async {
-    final response = await _client.functions
-        .invoke(
-          'order-cancellation',
-          body: {'order_id': orderId, 'action': action, 'reason': ?reason},
-        )
-        .timeout(const Duration(seconds: 45));
-    if (response.status >= 400) {
-      throw StateError(
-        'Cancellation could not be confirmed. Refresh the order or contact support.',
+    final FunctionResponse response;
+    try {
+      response = await _client.functions
+          .invoke(
+            'order-cancellation',
+            body: {'order_id': orderId, 'action': action, 'reason': ?reason},
+          )
+          .timeout(const Duration(seconds: 45));
+    } on FunctionException catch (e) {
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback:
+            'Cancellation could not be confirmed. Refresh the order or contact support.',
       );
     }
     final data = response.data;
@@ -238,13 +309,13 @@ class OrderRepository {
   /// Customer/admin cancellation is verified by the payment backend before
   /// pending stock can be released. Paid orders require the refund endpoint.
   Future<void> cancelMyOrder(String orderId) async {
-    final response = await _client.functions.invoke(
-      'cancel-order',
-      body: {'order_id': orderId},
-    );
-    if (response.status >= 400) {
-      throw StateError(
-        'Cancellation was not confirmed. Refresh the order or contact the shop.',
+    try {
+      await _client.functions.invoke('cancel-order', body: {'order_id': orderId});
+    } on FunctionException catch (e) {
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback:
+            'Cancellation was not confirmed. Refresh the order or contact the shop.',
       );
     }
   }
@@ -263,6 +334,109 @@ class OrderRepository {
     if (data == null) return null;
     return Order.fromMap(data);
   }
+}
+
+/// True when PostgREST could not find the function that was called: the
+/// migration that adds it has not been applied to this database yet.
+/// Anything else (permission, network, a failing function) is a real error.
+bool isMissingRpc(Object error) =>
+    error is PostgrestException &&
+    const {'PGRST202', '42883', '404'}.contains(error.code);
+
+/// Payments made through Stripe: how many orders reached Stripe (whatever
+/// became of them), and what was collected from them after refunds.
+class AdminPaymentsSummary {
+  final int transactionCount;
+  final double collected;
+
+  const AdminPaymentsSummary({
+    required this.transactionCount,
+    required this.collected,
+  });
+
+  /// The app's copy of `admin_payments_summary`, used until migration 0078
+  /// is applied: the same figures added up from every order.
+  factory AdminPaymentsSummary.fromOrders(Iterable<Order> orders) {
+    var count = 0;
+    var collected = 0.0;
+    for (final order in orders) {
+      if (order.stripePaymentIntentId?.isEmpty ?? true) continue;
+      count++;
+      collected += order.netPaidAmount;
+    }
+    return AdminPaymentsSummary(transactionCount: count, collected: collected);
+  }
+}
+
+/// Most stuck pending orders the dashboard lists at once.
+const int kStuckPendingLimit = 20;
+
+/// How long an order may stay `pending` before the dashboard calls it stuck.
+const Duration kStuckPendingAge = Duration(minutes: 30);
+
+/// The newest stuck pending orders, and how many there are in all.
+class StuckPendingOrders {
+  final List<Order> orders;
+  final int total;
+
+  const StuckPendingOrders({required this.orders, required this.total});
+}
+
+/// One row of the Top Products ranking.
+class TopProductSales {
+  final String name;
+
+  /// Null once the product has been deleted.
+  final String? productId;
+  final int units;
+
+  /// Quantity x unit price of the lines sold, before any order-level promo
+  /// discount, delivery or refund.
+  final double revenue;
+
+  const TopProductSales({
+    required this.name,
+    this.productId,
+    required this.units,
+    this.revenue = 0,
+  });
+
+  factory TopProductSales.fromMap(Map<String, dynamic> map) => TopProductSales(
+    name: map['product_name'] as String? ?? '',
+    productId: map['product_id'] as String?,
+    units: (map['units'] as num?)?.toInt() ?? 0,
+    revenue: (map['revenue'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+/// The app's copy of `admin_top_products`, used until migration 0078 is
+/// applied: units per product name over every order that is not cancelled,
+/// most units first, ties by name. [orders] must be newest first.
+List<TopProductSales> rankTopProductSales(List<Order> orders) {
+  final units = <String, int>{};
+  final revenue = <String, double>{};
+  final productIds = <String, String>{};
+  for (final order in orders) {
+    if (order.status == OrderStatus.cancelled) continue;
+    for (final item in order.items) {
+      final name = item.productName;
+      units[name] = (units[name] ?? 0) + item.quantity;
+      revenue[name] = (revenue[name] ?? 0) + item.subtotal;
+      if (item.productId.isNotEmpty) productIds.putIfAbsent(name, () => item.productId);
+    }
+  }
+  return [
+    for (final entry in units.entries)
+      TopProductSales(
+        name: entry.key,
+        productId: productIds[entry.key],
+        units: entry.value,
+        revenue: revenue[entry.key] ?? 0,
+      ),
+  ]..sort((a, b) {
+    final byUnits = b.units.compareTo(a.units);
+    return byUnits != 0 ? byUnits : a.name.compareTo(b.name);
+  });
 }
 
 /// Orders waiting to be paid or packed, and revenue: paid orders and later

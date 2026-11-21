@@ -1,4 +1,7 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../../core/supabase/supabase_client.dart';
+import '../../../shared/utils/error_message.dart';
 
 /// Talks to the `track-*` Supabase Edge Functions.
 ///
@@ -13,7 +16,9 @@ import '../../../core/supabase/supabase_client.dart';
 /// pane, use the "Delivered by shop" action for those orders instead; it
 /// advances the order's status without a courier tracking number.
 class DeliveryRepository {
-  final _client = SupabaseService.client;
+  final SupabaseClient _client;
+  DeliveryRepository({SupabaseClient? client})
+    : _client = client ?? SupabaseService.client;
 
   /// Registers a tracking number (typed in by admin after shipping with
   /// any courier) with 17TRACK so status updates start flowing in.
@@ -23,21 +28,24 @@ class DeliveryRepository {
     required String trackingNumber,
     int? carrierCode,
   }) async {
-    final res = await _client.functions.invoke(
-      'track-register',
-      body: {
-        'order_id': orderId,
-        'tracking_number': trackingNumber,
-        'confirmed_handover': true,
-        'carrier_code': ?carrierCode,
-      },
-    );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Tracking registration failed';
-      throw Exception(message);
+    try {
+      await _client.functions.invoke(
+        'track-register',
+        body: {
+          'order_id': orderId,
+          'tracking_number': trackingNumber,
+          'confirmed_handover': true,
+          'carrier_code': ?carrierCode,
+        },
+      );
+    } on FunctionException catch (e) {
+      // invoke() throws on every non-2xx response; the function's `error`
+      // field is fixed copy written for staff.
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback:
+            'Tracking registration failed. Check the tracking number and try again.',
+      );
     }
   }
 
@@ -45,16 +53,16 @@ class DeliveryRepository {
   /// (rather than waiting for the next webhook push). Works for the order's
   /// own customer or any admin.
   Future<void> refreshTrackingStatus(String orderId) async {
-    final res = await _client.functions.invoke(
-      'track-status',
-      body: {'order_id': orderId},
-    );
-    if (res.status >= 400) {
-      final data = res.data;
-      final message = data is Map && data['error'] != null
-          ? data['error'].toString()
-          : 'Could not refresh tracking';
-      throw Exception(message);
+    try {
+      await _client.functions.invoke(
+        'track-status',
+        body: {'order_id': orderId},
+      );
+    } on FunctionException catch (e) {
+      throw ServerMessageException.fromFunction(
+        e,
+        fallback: 'Could not refresh tracking. Try again shortly.',
+      );
     }
   }
 }

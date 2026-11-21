@@ -10,6 +10,7 @@ import {
   loadOrder,
   notifyOrder,
 } from "../_shared/delivery_api.ts";
+import { fetchWithTimeout, TIMEOUT_MS } from "../_shared/http.ts";
 const track17ApiKey = Deno.env.get("TRACK17_API_KEY") ?? "";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -54,21 +55,34 @@ Deno.serve(async (req) => {
     if (!retry && order.status !== "shipped") {
       await notifyOrder(order.id, { status: "shipped" });
     }
-    const response = await fetch(
-      "https://api.17track.net/track/v2.4/register",
-      {
-        method: "POST",
-        headers: {
-          "17token": track17ApiKey,
-          "Content-Type": "application/json",
+    let response: Response;
+    let body;
+    try {
+      response = await fetchWithTimeout(
+        "https://api.17track.net/track/v2.4/register",
+        {
+          method: "POST",
+          headers: {
+            "17token": track17ApiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify([{
+            number,
+            ...(carrier ? { carrier } : {}),
+          }]),
         },
-        body: JSON.stringify([{
-          number,
-          ...(carrier ? { carrier } : {}),
-        }]),
-      },
-    );
-    const body = await response.json();
+        TIMEOUT_MS.provider,
+      );
+      body = await response.json();
+    } catch (error) {
+      // The handover is already saved. Registering the same number again is
+      // safe (17TRACK answers "already registered"), so staff can retry.
+      console.error("[track-register] 17TRACK did not respond", error);
+      throw new DeliveryError(
+        "Handover saved, but 17TRACK registration needs attention. Do not book another shipment.",
+        502,
+      );
+    }
     const accepted = body?.data?.accepted?.[0],
       rejected = body?.data?.rejected?.[0];
     if (
@@ -94,7 +108,10 @@ Deno.serve(async (req) => {
       ).in("status", ["paid", "packing", "shipped"]).select("id").maybeSingle();
     if (error || !data) {
       throw error ??
-        new Error("Tracking registration metadata could not be saved");
+        new DeliveryError(
+          "Tracking registration metadata could not be saved",
+          500,
+        );
     }
     return json({
       ok: true,

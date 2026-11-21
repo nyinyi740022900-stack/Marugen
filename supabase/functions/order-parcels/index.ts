@@ -2,11 +2,16 @@ import {
   authenticated,
   corsHeaders,
   DeliveryError,
+  failure,
   json,
   loadOrder,
   loadSender,
+  rpcError,
 } from "../_shared/delivery_api.ts";
-import { validateSingaporeAddress } from "../_shared/delivery.ts";
+import {
+  DeliveryValidationError,
+  validateSingaporeAddress,
+} from "../_shared/delivery.ts";
 import { getEasyParcelAccessToken } from "../_shared/easyparcel_token.ts";
 import { fetchRates, officialFx } from "../_shared/shipping_api.ts";
 import { signature } from "../_shared/shipping_finance.ts";
@@ -72,7 +77,7 @@ Deno.serve(async (req) => {
         p_order_id: order.id,
         p_parcels: plan,
       });
-      if (error) throw new DeliveryError(error.message, 409);
+      if (error) throw rpcError(error);
       return json({ parcels: data });
     }
     if (body.action === "refresh") {
@@ -84,7 +89,7 @@ Deno.serve(async (req) => {
       const { error } = await admin.rpc("discard_order_parcel_plan", {
         p_order_id: order.id,
       });
-      if (error) throw new DeliveryError(error.message, 409);
+      if (error) throw rpcError(error);
       return json({ parcels: [] });
     }
     if (body.action === "reset") {
@@ -99,7 +104,7 @@ Deno.serve(async (req) => {
       const { data, error } = await admin.rpc("reset_unsubmitted_parcel_plan", {
         p_order_id: order.id,
       });
-      if (error) throw new DeliveryError(error.message, 409);
+      if (error) throw rpcError(error);
       return json({ parcels: data });
     }
     if (!["quote", "book"].includes(body.action)) {
@@ -168,7 +173,7 @@ Deno.serve(async (req) => {
         p_signature: quoteSignature,
         p_expires_at: expires,
       });
-      if (error) throw new DeliveryError(error.message, 409);
+      if (error) throw rpcError(error);
       return json({
         parcels: await loadParcels(admin, order.id),
         ...totals(total),
@@ -185,7 +190,10 @@ Deno.serve(async (req) => {
         body.approved_quote_signature,
       );
     } catch (error) {
-      throw new DeliveryError((error as Error).message, 409);
+      // Same authored refusal, as a conflict rather than a bad request.
+      throw error instanceof DeliveryValidationError
+        ? new DeliveryError(error.message, 409)
+        : error;
     }
     // Validate local prerequisites before claiming, then claim every box in one
     // transaction before the first external submission. There is no retry path.
@@ -199,9 +207,7 @@ Deno.serve(async (req) => {
           p_signature: quoteSignature,
           p_approved_total_cents: body.approved_total_cents,
         });
-        if (error) {
-          throw new DeliveryError(error.message, 409);
-        }
+        if (error) throw rpcError(error);
         return data === true;
       },
       submit: async (p) => {
@@ -331,11 +337,10 @@ Deno.serve(async (req) => {
       ...totals(total),
     });
   } catch (error) {
-    // Provider bodies, PII and credentials never leave this endpoint or logs.
-    const status = error instanceof DeliveryError ? error.status : 400;
-    const message = error instanceof Error
-      ? error.message
-      : "Parcel request failed";
-    return json({ error: message }, status);
+    // Only messages authored for staff leave this endpoint (see
+    // deliveryFailure); database, provider and network errors are logged and
+    // answered with fixed copy. Provider bodies, PII and credentials are not
+    // logged: submit() logs only the provider's short status line.
+    return failure(error, "[order-parcels]");
   }
 });

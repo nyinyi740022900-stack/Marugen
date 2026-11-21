@@ -95,6 +95,43 @@ class AppRadius {
   static const double pill = 100;
 }
 
+/// Named text roles for the sizes screens keep writing out by hand. Each
+/// carries size, weight and tracking only; colour comes from [AppPalette]
+/// at the place of use (`AppTextStyles.caption.copyWith(color: ...)`), the
+/// same way spacing and radii are plain constants.
+///
+/// Sizes are the ones already most used for each role, so adopting a role
+/// in place of an equal literal does not move a pixel.
+class AppTextStyles {
+  AppTextStyles._();
+
+  /// Uppercase heading over a section. Small capitals need the positive
+  /// tracking; see the SectionLabel widget, which adds the muted colour.
+  static const TextStyle sectionLabel = TextStyle(
+    fontWeight: FontWeight.w700,
+    fontSize: 12,
+    letterSpacing: 0.8,
+  );
+
+  /// Secondary detail under a title: dates, counts, hints.
+  static const TextStyle caption = TextStyle(fontSize: 12);
+
+  /// Supporting copy inside cards and rows.
+  static const TextStyle bodySmall = TextStyle(fontSize: 13);
+
+  /// The name on a card or list row.
+  static const TextStyle cardTitle = TextStyle(
+    fontWeight: FontWeight.w600,
+    fontSize: 13.5,
+  );
+
+  /// A price shown beside or under a card title.
+  static const TextStyle price = TextStyle(
+    fontWeight: FontWeight.w700,
+    fontSize: 15,
+  );
+}
+
 /// Soft, low-opacity shadows in place of flat Material elevation — reads
 /// as considered "product photography" depth rather than a generic app.
 class AppShadows {

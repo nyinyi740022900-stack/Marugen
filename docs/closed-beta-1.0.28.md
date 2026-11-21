@@ -1,6 +1,6 @@
 # Closed beta 1.0.28 (33)
 
-Built 2026-11-19 from `codex/whole-app-audit-fixes` at 4d76192 plus the version bump, for Closed testing — Alpha. Not uploaded yet: the owner drags the bundle into Play Console (too large for the Chrome extension).
+Built 2026-11-19 from `codex/whole-app-audit-fixes` at 4d76192 plus the version bump, for Closed testing — Alpha. Not uploaded yet (as of 2026-11-21): the owner drags the bundle into Play Console (too large for the Chrome extension).
 
 - Release name: `1.0.28 (33) – Safer checkout, feedback and home banners`.
 - Release notes (en-US): "Checkout no longer resets while you pay, clearer payment confirmation, Send feedback and app version in Profile, help for guests, email confirmation with resend, home banners, fish video in the photo gallery, and many fixes."
@@ -19,13 +19,21 @@ Everything since 1.0.27 (commits c65bec4, a035205, 4d76192), from the 18 Nov thr
 
 ## Production backend
 
-NOT rolled out at build time. The Supabase CLI was signed in to a non-Marugen account on 2026-11-19, so nothing was applied. Order: migrations 0077 → 0078 → 0079, then Edge Functions (see `docs/sprint1-owner-steps.md`). The app works before and after the rollout: new RPCs fall back to client calculation, GST snapshot falls back to the current setting.
+Rolled out to production (gexgcwdkbeythrnqmihe) on 2026-11-21 by Claude, after the owner re-logged the Supabase CLI:
+
+- Backup first: `supabase db dump --linked` (schema + data) to `output/backups/2026-11-21-pre-0077/`. Restore drill passed: repo schema 0001–0076 on a throwaway local Postgres, production public data loaded (6 profiles, 20 products, 48 variants, 5 orders, 7 order items, 4 refunds), then 0077–0080 each applied twice on that data without error.
+- Pre-flight clean: tables/functions owned by postgres, cron jobs run as postgres, both Vault secrets present, pg_net answers all 200, bucket holds 139 JPEGs (largest 2.5 MB), and every production function body matches the repo except `handle_new_user()` (not replaced by these migrations). `order_number_counters` already had RLS on in production.
+- Migrations 0077, 0078, 0079, 0080 applied in order with `supabase db query --linked -f`. Verified: RLS on `order_number_counters` and `order_stock_restorations`; anon/authenticated cannot execute the four server-only RPCs; bucket limit 10 MB; 3 GST columns; 9 indexes; `admin_payments_summary`, `admin_top_products`, `release_easyparcel_token_refresh`, `admin_ops_health` exist; cron job `ops-monitor` every 15 minutes; `ops_monitor_findings()` returns nothing.
+- All 23 live `verify_jwt` values matched `supabase/config.toml` before deploying. 22 Edge Functions deployed with `--use-api` (all except `easyparcel-status`): create-payment-intent v32, stripe-webhook v21, easyparcel-webhook v14 and the rest; all ACTIVE, the same five still have JWT off.
+- After deploy: unauthenticated POST returns 401 (create-payment-intent, order-parcels), 400 (stripe-webhook, no signature), 403 (easyparcel-webhook, reconcile-pending-orders); the 14:20 UTC reconcile cron run answered 200 and its request id was recorded.
+- Not exercised end to end: a real checkout through the new create-payment-intent (live Stripe), a refund restoring stock, an EasyParcel booking, and the EasyParcel webhook source-IP log (needs one real delivery).
 
 ## Verification
 
 - `flutter analyze`: no issues. `flutter test`: 754 passed, 4 skipped.
 - `deno test supabase/functions`: 151 passed. SQL suites `run_sprint1_security_fixes.sh`, `run_sprint3_hardening.sh`, `run_sprint4_leftovers.sh`: all pass on a local Postgres with 0001–0079.
-- Not checked on a device or emulator yet. Payment cannot be exercised by Claude: the build uses the live Stripe key.
+- Pixel 7 emulator, release APK of the same commit, production backend after the rollout: cold start shows the catalogue with no popup, no permission prompt and no banner gap; guest Profile shows FAQ & Support, Send feedback, Terms, Privacy and "Version 1.0.28 (33)"; a product page opens with options. No Flutter or runtime errors in logcat.
+- Not checked: sign-in, checkout and payment (live Stripe key), admin screens, iOS, a real device.
 
 ## Release artifact
 

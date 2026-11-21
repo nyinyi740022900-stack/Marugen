@@ -1,13 +1,15 @@
 # Sprint 1 — Owner လုပ်ရမယ့်အဆင့်များ (19 Nov 2026)
 
+> **21 Nov 2026 update:** အဆင့် ၁၊ ၂၊ ၃၊ ၅၊ ၇ (0077–0080 နဲ့ function redeploy) ကို Claude က production မှာ လုပ်ပြီး စစ်ဆေးပြီးပါပြီ (အသေးစိတ် `docs/closed-beta-1.0.28.md`)။ ကျန်တာ: ၄ (refund order stock)၊ ၆/၈ (Play Console upload နဲ့ device စမ်း)၊ ၉ (content)၊ EasyParcel webhook log။
+
 Sprint 1 code က ရေးပြီး test pass ပြီးသားပါ။ အောက်ကအဆင့်တွေက owner ကိုယ်တိုင် လုပ်ရမယ့်အရာတွေပါ။
 အစီအစဉ်အတိုင်း လုပ်ပါ: **၁ → ၂ → ၃ → ၄ → ၅**။
 
-- [ ] ၁။ Production မှာ pre-flight query တွေ run
-- [ ] ၂။ Migration 0077 တင်
-- [ ] ၃။ တင်ပြီးနောက် စစ်ဆေး
+- [x] ၁။ Production မှာ pre-flight query တွေ run
+- [x] ၂။ Migration 0077 တင်
+- [x] ၃။ တင်ပြီးနောက် စစ်ဆေး
 - [ ] ၄။ အရင် refund လုပ်ပြီးသား order တွေရဲ့ stock ကို လက်နဲ့စစ်
-- [ ] ၅။ `config.toml` ထဲက ခန့်မှန်းထားတဲ့ function ၆ ခုကို dashboard နဲ့ တိုက်စစ်
+- [x] ၅။ `config.toml` ထဲက ခန့်မှန်းထားတဲ့ function ၆ ခုကို dashboard နဲ့ တိုက်စစ်
 - [ ] ၆။ App 1.0.28 ထုတ်ပြီး device ပေါ်မှာ စမ်း
 
 ---

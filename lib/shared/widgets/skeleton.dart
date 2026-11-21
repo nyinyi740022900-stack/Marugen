@@ -82,12 +82,17 @@ class ProductCardSkeleton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final radius = BorderRadius.circular(AppRadius.md);
+    // Flat with a light-mode hairline, the same as the card it stands for.
     return Container(
-      decoration: BoxDecoration(
-        color: AppPalette.of(context).surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: AppShadows.card,
-      ),
+      decoration: BoxDecoration(color: palette.surface, borderRadius: radius),
+      foregroundDecoration: Theme.of(context).brightness == Brightness.dark
+          ? null
+          : BoxDecoration(
+              borderRadius: radius,
+              border: Border.all(color: palette.border),
+            ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -97,12 +102,7 @@ class ProductCardSkeleton extends StatelessWidget {
             child: Skeleton(borderRadius: BorderRadius.zero),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              AppSpacing.sm,
-              AppSpacing.md,
-              AppSpacing.md,
-            ),
+            padding: const EdgeInsets.fromLTRB(10, AppSpacing.sm, 10, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

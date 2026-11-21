@@ -114,7 +114,7 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
             return EmptyState(
               icon: Icons.favorite_border,
               title: 'Your wishlist is empty',
-              subtitle: 'Tap the heart on any product to save it here.',
+              subtitle: 'Open a product and tap the heart to save it here.',
               actionLabel: 'Browse the shop',
               onAction: () => context.go('/'),
             );
@@ -129,7 +129,6 @@ class _WishlistScreenState extends ConsumerState<WishlistScreen> {
                 children: [
                   ProductCard(
                     product: product,
-                    showFavoriteToggle: false,
                     onTap: () => context.push('/product/${product.id}'),
                   ),
                   Positioned(

@@ -13,7 +13,6 @@ import 'package:marugen_app/shared/models/product.dart';
 import 'package:marugen_app/shared/models/service.dart';
 import 'package:marugen_app/shared/models/support_contact.dart';
 import 'package:marugen_app/shared/providers/settings_providers.dart';
-import 'package:marugen_app/shared/widgets/product_card.dart';
 import 'package:marugen_app/shared/widgets/support_contact_picker.dart';
 
 const directory = {
@@ -178,32 +177,6 @@ void main() {
     expect(
       uri.queryParameters['text'],
       'Hi, I\'d like to ask about "Pond boarding".',
-    );
-  });
-
-  testWidgets('a product card opens the support picker about that product', (
-    tester,
-  ) async {
-    await show(
-      tester,
-      Scaffold(
-        body: Center(
-          child: SizedBox(
-            width: 220,
-            height: 420,
-            child: ProductCard(product: koi, onTap: () {}),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.byTooltip('Contact shop about Kohaku 45cm'));
-    await tester.pumpAndSettle();
-    expect(find.text('Sales desk'), findsOneWidget);
-    await tester.tap(find.text('WhatsApp'));
-    await tester.pumpAndSettle();
-    expect(
-      Uri.parse(launched.single).queryParameters['text'],
-      "Hi, I'm interested in Kohaku 45cm",
     );
   });
 

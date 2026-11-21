@@ -1,22 +1,11 @@
-import 'heart_icon.dart';
 import 'press_scale.dart';
 import 'sized_network_image.dart';
-import 'support_contact_picker.dart';
+import 'skeleton.dart';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../features/auth/presentation/auth_providers.dart';
-import '../../features/cart/presentation/cart_providers.dart';
-import '../../features/cart/domain/cart_item.dart';
-import '../../features/orders/presentation/purchase_intent.dart';
-import '../../features/wishlist/presentation/wishlist_providers.dart';
 import '../models/product.dart';
-import '../providers/settings_providers.dart';
-import '../utils/delivery_estimate.dart';
 import '../utils/price_format.dart';
 
 /// At or below this many units a card shows an "Only N left" tag. Kept
@@ -24,251 +13,136 @@ import '../utils/price_format.dart';
 /// customer-facing urgency independently.
 const lowStockCardThreshold = 3;
 
-class ProductCard extends ConsumerWidget {
+/// A marketplace-style listing card: photo, name, price and one line of
+/// proof. It carries no buttons — the whole card is one tap target that
+/// opens the product page, where cart, buy now, wishlist and contact live.
+class ProductCard extends StatelessWidget {
   final Product product;
   final VoidCallback? onTap;
 
-  /// Whether the heart/favorite toggle is shown. Off by default for
-  /// places like the wishlist screen itself where a remove button already
-  /// does that job.
-  final bool showFavoriteToggle;
+  const ProductCard({super.key, required this.product, this.onTap});
 
-  const ProductCard({
-    super.key,
-    required this.product,
-    this.onTap,
-    this.showFavoriteToggle = true,
-  });
+  // Body geometry. Every row has a fixed height derived from the text
+  // scale, so cards in a row are the same height whatever each one has to
+  // show, and [bodyHeight] is exact rather than an estimate.
+  static const _sidePadding = 10.0;
+  static const _topPadding = AppSpacing.sm;
+  static const _bottomPadding = 10.0;
+  static const _nameToPrice = AppSpacing.xs;
+  static const _priceToProof = 3.0;
+  static const _nameLeading = 1.2;
+  static const _priceLeading = 1.2;
+  static const _proofLeading = 1.3;
+
+  static double _nameHeight(TextScaler scaler) =>
+      (scaler.scale(AppTextStyles.cardTitle.fontSize!) * _nameLeading * 2)
+          .ceilToDouble();
+
+  static double _priceHeight(TextScaler scaler) =>
+      (scaler.scale(AppTextStyles.price.fontSize!) * _priceLeading)
+          .ceilToDouble();
+
+  static double _proofHeight(TextScaler scaler) =>
+      (scaler.scale(AppTextStyles.caption.fontSize!) * _proofLeading)
+          .ceilToDouble();
+
+  /// Height of everything under the square photo, for grids and carousels
+  /// that size their cells to the card (see `productCardExtent`).
+  static double bodyHeight(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    return _topPadding +
+        _nameHeight(scaler) +
+        _nameToPrice +
+        _priceHeight(scaler) +
+        _priceToProof +
+        _proofHeight(scaler) +
+        _bottomPadding;
+  }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return PressScale(
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppPalette.of(context).surface,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          boxShadow: AppShadows.card,
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 1,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      product.imageUrls.isNotEmpty
-                          ? SizedNetworkImage(
-                              imageUrl: product.imageUrls.first,
-                              fit: BoxFit.cover,
-                              placeholder: (_, _) => Container(
-                                color: AppPalette.of(context).surfaceMuted,
-                              ),
-                              errorWidget: (_, _, _) => Container(
-                                color: AppPalette.of(context).surfaceMuted,
-                                child: Icon(
-                                  Icons.image_not_supported_outlined,
-                                  color: AppPalette.of(context).textMuted,
-                                ),
-                              ),
-                            )
-                          : Container(
-                              color: AppPalette.of(context).surfaceMuted,
-                              child: Icon(
-                                Icons.water,
-                                color: AppPalette.of(context).textMuted,
-                                size: 40,
-                              ),
-                            ),
-                      // Variety and discount stack: a koi on sale shows both.
-                      if (product.fishDetails?.variety != null ||
-                          product.hasActiveSale)
-                        Positioned(
-                          left: 8,
-                          top: 8,
-                          right: 60,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (product.fishDetails?.variety != null)
-                                _Tag(label: product.fishDetails!.variety!),
-                              if (product.fishDetails?.variety != null &&
-                                  product.hasActiveSale)
-                                const SizedBox(height: 4),
-                              if (product.hasActiveSale)
-                                _Tag(
-                                  label: '-${product.discountPercent}%',
-                                  color: AppColors.red,
-                                ),
-                            ],
-                          ),
-                        ),
-                      if (showFavoriteToggle)
-                        Positioned(
-                          right: 6,
-                          top: 6,
-                          child: _FavoriteButton(
-                            productId: product.id,
-                            name: product.name,
-                          ),
-                        ),
-                      // Stock signal: a sold fish gets the stamped SOLD
-                      // overlay; a restockable item at 0 gets a clear
-                      // "Out of Stock" overlay so nobody taps into a dead end.
-                      if (product.isPurchasable && product.isOutOfStock)
-                        IgnorePointer(
-                          child: Container(
-                            color: AppColors.black.withValues(alpha: 0.55),
-                            alignment: Alignment.center,
-                            child: Transform.rotate(
-                              angle: product.isLiveFish ? -0.12 : 0,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: AppColors.white,
-                                    width: 1.5,
-                                  ),
-                                ),
-                                child: Text(
-                                  product.unavailableLabel.toUpperCase(),
-                                  style: TextStyle(
-                                    color: AppColors.white,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: product.isLiveFish ? 13 : 11,
-                                    letterSpacing: product.isLiveFish ? 3 : 1.2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        )
-                      else if (!product.isLiveFish &&
-                          product.isPurchasable &&
-                          product.availableStock <= lowStockCardThreshold)
-                        Positioned(
-                          left: 8,
-                          bottom: 8,
-                          child: _Tag(
-                            label: 'Only ${product.availableStock} left',
-                            color: AppColors.red,
-                          ),
-                        ),
-                    ],
-                  ),
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(AppRadius.md);
+    final unavailable = product.isPurchasable && product.isOutOfStock;
+
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: onTap != null,
+      label: productCardSemanticsLabel(product),
+      onTap: onTap,
+      excludeSemantics: true,
+      child: PressScale(
+        child: Container(
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: radius,
+          ),
+          // Flat on the grid: a hairline separates the white card from the
+          // ivory page in light mode; in dark the surface step is enough.
+          // Painted over the content so it never changes the layout.
+          foregroundDecoration: isDark
+              ? null
+              : BoxDecoration(
+                  borderRadius: radius,
+                  border: Border.all(color: palette.border),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.sm,
-                    AppSpacing.md,
-                    AppSpacing.md,
+          clipBehavior: Clip.antiAlias,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: _Photo(product: product, unavailable: unavailable),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minHeight:
-                              (MediaQuery.textScalerOf(context).scale(14) *
-                                      1.2 *
-                                      2)
-                                  .ceilToDouble(),
-                        ),
-                        child: Text(
-                          product.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            height: 1.2,
-                          ),
-                        ),
-                      ),
-                      // Always reserve this line's height (even with nothing
-                      // to show) so the price/cart-button row lands at the
-                      // same Y across every card in a grid row, whether or
-                      // not that particular card has options/reviews/sold count.
-                      const SizedBox(height: 3),
-                      _StatsRow(product: product),
-                      const SizedBox(height: 4),
-                      // Price gets the full content width. A touch target must
-                      // never take space away from the amount being purchased.
-                      // The price may wrap (it must never be cut short); on
-                      // sale the original sits struck through beside it at
-                      // normal text sizes — at large sizes the -N% tag on
-                      // the photo already says it, so the body stays one
-                      // height for every card.
-                      Builder(
-                        builder: (context) {
-                          final priceText = Text(
-                            product.hasActiveSale
-                                ? formatPrice(product.salePrice!)
-                                : _priceLabel(product),
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: product.isPurchasable
-                                  ? AppPalette.of(context).accent
-                                  : AppPalette.of(context).textMuted,
-                              fontSize: 14,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      _sidePadding,
+                      _topPadding,
+                      _sidePadding,
+                      _bottomPadding,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Two lines are always reserved so prices line up
+                        // across a row of one- and two-line names.
+                        SizedBox(
+                          height: _nameHeight(scaler),
+                          child: Text(
+                            product.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyles.cardTitle.copyWith(
+                              height: _nameLeading,
                             ),
-                          );
-                          final showOriginal =
-                              product.hasActiveSale &&
-                              MediaQuery.textScalerOf(context).scale(14) <=
-                                  14 * 1.3;
-                          if (!showOriginal) return priceText;
-                          return Wrap(
-                            spacing: 6,
-                            crossAxisAlignment: WrapCrossAlignment.end,
-                            children: [
-                              priceText,
-                              Text(
-                                formatPrice(product.price!),
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppPalette.of(context).textMuted,
-                                  decoration: TextDecoration.lineThrough,
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Expanded(
-                            child:
-                                !product.isPurchasable || product.isOutOfStock
-                                ? const SizedBox.shrink()
-                                : product.isLiveFish
-                                // A fish is hand-delivered; its size is the
-                                // fact a koi buyer scans for, not a courier
-                                // window that does not apply.
-                                ? _FishFactsLabel(product: product)
-                                : const _DeliveryEstimateLabel(),
                           ),
-                          _CardActionButtons(
+                        ),
+                        const SizedBox(height: _nameToPrice),
+                        SizedBox(
+                          height: _priceHeight(scaler),
+                          child: _PriceRow(
                             product: product,
-                            onOpenDetail: onTap,
+                            unavailable: unavailable,
                           ),
-                        ],
-                      ),
-                    ],
+                        ),
+                        const SizedBox(height: _priceToProof),
+                        // Reserved even when there is nothing to say.
+                        SizedBox(
+                          height: _proofHeight(scaler),
+                          child: _ProofLine(product: product),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -276,6 +150,47 @@ class ProductCard extends ConsumerWidget {
     );
   }
 }
+
+/// What a screen reader announces for a card, in one sentence: name, fish
+/// facts, price (with the sale), rating, units sold, then stock state.
+@visibleForTesting
+String productCardSemanticsLabel(Product product) {
+  final parts = <String>[product.name, ..._fishFacts(product)];
+  if (!product.isPurchasable) {
+    parts.add('Contact for price');
+  } else if (product.hasActiveSale) {
+    parts.add(
+      'on sale ${formatPrice(product.salePrice!)}, '
+      'was ${formatPrice(product.price!)}, ${product.discountPercent}% off',
+    );
+  } else {
+    parts.add(_priceLabel(product));
+  }
+  if (product.avgRating != null) {
+    final rating = 'rating ${product.avgRating!.toStringAsFixed(1)} of 5';
+    final reviews = product.reviewCount;
+    parts.add(
+      reviews > 0
+          ? '$rating from $reviews review${reviews == 1 ? '' : 's'}'
+          : rating,
+    );
+  }
+  if (product.soldCount > 0) parts.add('${product.soldCount} sold');
+  if (product.isPurchasable) {
+    if (product.isOutOfStock) {
+      parts.add(product.isLiveFish ? 'sold' : 'out of stock');
+    } else if (_showsLowStock(product)) {
+      parts.add('only ${product.availableStock} left');
+    }
+  }
+  return parts.join(', ');
+}
+
+bool _showsLowStock(Product product) =>
+    !product.isLiveFish &&
+    product.isPurchasable &&
+    !product.isOutOfStock &&
+    product.availableStock <= lowStockCardThreshold;
 
 String _priceLabel(Product product) {
   if (!product.isPurchasable) return 'Contact for price';
@@ -288,311 +203,274 @@ String _priceLabel(Product product) {
   return formatPrice(product.price!);
 }
 
-/// CTA in the card footer:
-/// - restockable + priced → quick-add cart (variant products open PDP)
-/// - live fish + priced + in stock → Buy Now (cart + checkout)
-/// - contact-for-price → Chat with shop
-class _CardActionButtons extends ConsumerWidget {
-  final Product product;
-  final VoidCallback? onOpenDetail;
-  const _CardActionButtons({required this.product, this.onOpenDetail});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (!product.isPurchasable) {
-      return _RoundIconButton(
-        icon: Icons.chat_bubble_outline,
-        tooltip: 'Contact shop about ${product.name}',
-        onTap: () => _chatAbout(context, product),
-      );
-    }
-
-    if (product.isOutOfStock) {
-      return const SizedBox.shrink();
-    }
-
-    if (product.isLiveFish && !product.hasVariants) {
-      // One fish, straight to checkout: a cart icon here suggested it would
-      // only be added to the cart.
-      // The highest-value tap on the card says what it does.
-      return _BuyPill(
-        tooltip: 'Buy ${product.name} now',
-        onTap: () => beginCheckout(
-          context,
-          ref,
-          buyNowItems: [CartItem(product: product)],
-        ),
-      );
-    }
-
-    return _QuickAddButton(product: product, onOpenDetail: onOpenDetail);
-  }
-
-  /// The same support picker as the product page, FAQ and order help.
-  Future<void> _chatAbout(BuildContext context, Product product) =>
-      showSupportContactPicker(
-        context,
-        message: "Hi, I'm interested in ${product.name}",
-        messageIsPersonal: false,
-      );
+/// "45 cm", "Male" for one specific fish. A batch listing is several fish,
+/// so a single size or gender would not be true of it.
+List<String> _fishFacts(Product product) {
+  if (!product.isSingleFish) return const [];
+  final f = product.fishDetails;
+  return [
+    if (f?.sizeCm != null)
+      '${f!.sizeCm! % 1 == 0 ? f.sizeCm!.toInt() : f.sizeCm} cm',
+    if (f?.gender != null && f!.gender!.trim().isNotEmpty) f.gender!.trim(),
+  ];
 }
 
-class _RoundIconButton extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _RoundIconButton({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
+class _Photo extends StatelessWidget {
+  final Product product;
+  final bool unavailable;
+  const _Photo({required this.product, required this.unavailable});
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: SizedBox.square(
-        dimension: 48,
-        child: Material(
-          color: Colors.transparent,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Center(
-              child: Ink(
-                width: 32,
-                height: 32,
-                decoration: const BoxDecoration(
-                  color: AppColors.black,
-                  shape: BoxShape.circle,
+    final palette = AppPalette.of(context);
+    final variety = product.fishDetails?.variety;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        product.imageUrls.isNotEmpty
+            ? SizedNetworkImage(
+                imageUrl: product.imageUrls.first,
+                fit: BoxFit.cover,
+                // Soft shimmer while loading; still under reduced motion.
+                placeholder: (_, _) => const Skeleton(
+                  height: double.infinity,
+                  borderRadius: BorderRadius.zero,
                 ),
-                child: Icon(icon, size: 20, color: AppColors.white),
+                errorWidget: (_, _, _) => ColoredBox(
+                  color: palette.surfaceMuted,
+                  child: Icon(
+                    Icons.image_not_supported_outlined,
+                    color: palette.textMuted,
+                  ),
+                ),
+              )
+            : ColoredBox(
+                color: palette.surfaceMuted,
+                child: Icon(Icons.water, color: palette.textMuted, size: 40),
+              ),
+        // Sold / out of stock dims the photo. Above the photo, under the
+        // tags, so the tags stay fully legible.
+        if (unavailable)
+          ColoredBox(color: AppColors.black.withValues(alpha: 0.55)),
+        // Variety and discount stack: a koi on sale shows both. The right
+        // inset leaves the corner free for the control the wishlist and the
+        // admin Products screen lay over the card.
+        if (variety != null || product.hasActiveSale)
+          Positioned(
+            left: 8,
+            top: 8,
+            right: 60,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (variety != null) _Tag(label: variety),
+                if (variety != null && product.hasActiveSale)
+                  const SizedBox(height: 4),
+                if (product.hasActiveSale)
+                  _Tag(
+                    label: '-${product.discountPercent}%',
+                    color: AppColors.red,
+                  ),
+              ],
+            ),
+          ),
+        // A sold fish keeps its stamp (one animal, gone for good); a
+        // restockable item at 0 gets a quiet tag where "Only N left" sits.
+        if (unavailable && product.isLiveFish)
+          Center(
+            child: Transform.rotate(
+              angle: -0.12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.white, width: 1.5),
+                ),
+                child: Text(
+                  product.unavailableLabel.toUpperCase(),
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: AppColors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    letterSpacing: 3,
+                  ),
+                ),
+              ),
+            ),
+          )
+        else if (unavailable)
+          const Positioned(
+            left: 8,
+            bottom: 8,
+            right: 8,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _Tag(
+                label: 'Out of stock',
+                color: AppColors.white,
+                textColor: AppColors.black,
+              ),
+            ),
+          )
+        else if (_showsLowStock(product))
+          Positioned(
+            left: 8,
+            bottom: 8,
+            right: 8,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: _Tag(
+                label: 'Only ${product.availableStock} left',
+                color: AppColors.red,
               ),
             ),
           ),
-        ),
-      ),
+      ],
     );
   }
 }
 
-/// Compact cart icon in the card footer. Plain products go straight
-/// into the cart with a snackbar; variant products bounce to the detail
-/// page (via [onOpenDetail]) because a size has to be chosen first.
-class _QuickAddButton extends ConsumerWidget {
+/// One line, never truncated and never wrapped: the price takes the full
+/// content width and only shrinks if a very large amount would not fit.
+/// On sale the struck original sits beside it when there is room and the
+/// text is not enlarged past 1.3× — the -N% tag on the photo says it
+/// otherwise.
+class _PriceRow extends StatelessWidget {
   final Product product;
-  final VoidCallback? onOpenDetail;
-  const _QuickAddButton({required this.product, this.onOpenDetail});
+  final bool unavailable;
+  const _PriceRow({required this.product, required this.unavailable});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return _RoundIconButton(
-      icon: Icons.add_shopping_cart,
-      tooltip: product.supportsQuickAdd
-          ? 'Add ${product.name} to cart'
-          : 'Choose options for ${product.name}',
-      onTap: () {
-        if (!product.supportsQuickAdd) {
-          onOpenDetail?.call();
-          return;
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    // "Contact for price" is a note, not an amount: the quieter supporting
+    // role, so it also fits a narrow card at larger text sizes.
+    final priceStyle = DefaultTextStyle.of(context).style.merge(
+      product.isPurchasable
+          ? AppTextStyles.price.copyWith(
+              height: ProductCard._priceLeading,
+              color: unavailable ? palette.textMuted : palette.accent,
+            )
+          : AppTextStyles.bodySmall.copyWith(
+              fontWeight: FontWeight.w600,
+              height: ProductCard._priceLeading,
+              color: palette.textMuted,
+            ),
+    );
+    final label = product.hasActiveSale
+        ? formatPrice(product.salePrice!)
+        : _priceLabel(product);
+    final price = FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Text(label, maxLines: 1, softWrap: false, style: priceStyle),
+    );
+    if (!product.hasActiveSale || scaler.scale(14) > 14 * 1.3) {
+      return Align(alignment: Alignment.centerLeft, child: price);
+    }
+    final original = formatPrice(product.price!);
+    final originalStyle = DefaultTextStyle.of(context).style.merge(
+      AppTextStyles.caption.copyWith(
+        height: ProductCard._priceLeading,
+        color: palette.textMuted,
+        decoration: TextDecoration.lineThrough,
+      ),
+    );
+    const gap = 6.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        double width(String text, TextStyle style) {
+          final painter = TextPainter(
+            text: TextSpan(text: text, style: style),
+            textDirection: Directionality.of(context),
+            textScaler: scaler,
+            maxLines: 1,
+          )..layout();
+          final w = painter.width;
+          painter.dispose();
+          return w;
         }
-        showCartSnackBar(context, ref.read(cartProvider.notifier).add(product));
+
+        final fits =
+            width(label, priceStyle) + gap + width(original, originalStyle) <=
+            constraints.maxWidth;
+        if (!fits) return Align(alignment: Alignment.centerLeft, child: price);
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Flexible(child: price),
+            const SizedBox(width: gap),
+            Text(original, maxLines: 1, softWrap: false, style: originalStyle),
+          ],
+        );
       },
     );
   }
 }
 
-/// Heart toggle shown on product cards. Guests get prompted to log in
-/// instead of the toggle silently failing (same gating pattern checkout
-/// uses via the router's `_authRequiredRoutes`).
-class _FavoriteButton extends ConsumerWidget {
-  final String productId;
-  final String name;
-  const _FavoriteButton({required this.productId, required this.name});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isLoggedIn = ref.watch(isLoggedInProvider);
-    final idsAsync = ref.watch(wishlistProductIdsProvider);
-    final isFavorited = idsAsync.valueOrNull?.contains(productId) ?? false;
-    // Still tappable while a save is in flight, so a mis-tap can be
-    // reversed at once (the notifier sends only the final choice).
-    final busy = idsAsync.isLoading;
-
-    return Semantics(
-      button: true,
-      toggled: isFavorited,
-      enabled: !isLoggedIn || !busy,
-      child: Tooltip(
-        message: isFavorited
-            ? 'Remove $name from wishlist'
-            : 'Save $name to wishlist',
-        child: Material(
-          color: Colors.transparent,
-          shape: const CircleBorder(),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: isLoggedIn && busy
-                ? null
-                : () async {
-                    if (!isLoggedIn) {
-                      context.push(
-                        authRouteWithRedirect('/login', '/product/$productId'),
-                      );
-                      return;
-                    }
-                    if (idsAsync.hasError) {
-                      ref.invalidate(wishlistProductIdsProvider);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Reloading your wishlist. Please try again.',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-                    HapticFeedback.lightImpact();
-                    try {
-                      await ref
-                          .read(wishlistControllerProvider)
-                          .toggle(productId, isFavorited);
-                    } catch (_) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Could not update your wishlist. Please try again.',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  },
-            child: SizedBox.square(
-              dimension: 48,
-              child: Center(
-                child: Ink(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppColors.black.withValues(alpha: 0.45),
-                    shape: BoxShape.circle,
-                  ),
-                  child: HeartIcon(
-                    filled: isFavorited,
-                    size: 20,
-                    color: isFavorited
-                        ? AppPalette.of(context).accent
-                        : AppColors.white,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// "★4.8 (191) · 500 sold" line, matching the marketplace-style social
-/// proof shoppers expect (Lazada/Shopee) — only shown when there's
-/// something real to say (see the call site's guard).
-class _StatsRow extends StatelessWidget {
+/// "45 cm · Male · ★ 4.8 (152) · 991 sold": the social proof shoppers
+/// expect from a marketplace card, on one muted line. The facts of a single
+/// fish lead, because size is what a koi buyer scans for and the end of the
+/// line is what a narrow card cuts off.
+class _ProofLine extends StatelessWidget {
   final Product product;
-  const _StatsRow({required this.product});
+  const _ProofLine({required this.product});
 
   @override
   Widget build(BuildContext context) {
-    final parts = <String>[];
-    if (product.reviewCount > 0) {
-      parts.add('(${product.reviewCount})');
-    }
-    if (product.soldCount > 0) {
-      parts.add('${product.soldCount} sold');
-    }
-    if (product.hasVariants) {
-      parts.add(
-        '${product.variantCount} option${product.variantCount == 1 ? '' : 's'}',
-      );
-    }
-    // Nothing to say — still reserve the line's height so cards without
-    // stats don't pull their price/cart row up relative to cards that do.
-    if (product.avgRating == null && parts.isEmpty) {
-      return SizedBox(height: MediaQuery.textScalerOf(context).scale(11) * 1.2);
-    }
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (product.avgRating != null) ...[
-          const Icon(Icons.star_rounded, size: 13, color: Color(0xFFFFA726)),
-          const SizedBox(width: 2),
-          Text(
-            product.avgRating!.toStringAsFixed(1),
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppPalette.of(context).textMuted,
-            ),
-          ),
-        ],
-        if (parts.isNotEmpty) ...[
-          if (product.avgRating != null) const SizedBox(width: 3),
-          Flexible(
-            child: Text(
-              parts.join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                color: AppPalette.of(context).textMuted,
+    final facts = _fishFacts(product);
+    final rating = product.avgRating;
+    final after = <String>[
+      if (rating != null)
+        product.reviewCount > 0
+            ? '${rating.toStringAsFixed(1)} (${product.reviewCount})'
+            : rating.toStringAsFixed(1),
+      if (product.soldCount > 0) '${product.soldCount} sold',
+    ];
+    if (facts.isEmpty && after.isEmpty) return const SizedBox.shrink();
+
+    final style = AppTextStyles.caption.copyWith(
+      color: AppPalette.of(context).textMuted,
+      height: ProductCard._proofLeading,
+    );
+    const separator = ' · ';
+    return Align(
+      alignment: Alignment.centerLeft,
+      // One paragraph, so a narrow card trims the end of the line instead of
+      // squeezing each part.
+      child: Text.rich(
+        TextSpan(
+          children: [
+            if (facts.isNotEmpty) TextSpan(text: facts.join(separator)),
+            if (facts.isNotEmpty && after.isNotEmpty)
+              const TextSpan(text: separator),
+            if (rating != null)
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 2),
+                  child: Icon(
+                    Icons.star_rounded,
+                    size: MediaQuery.textScalerOf(context)
+                        .scale(style.fontSize!),
+                    color: const Color(0xFFFFA726),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// Estimated delivery window computed from the shop's configured lead
-/// time (`settings.delivery_lead_days_min/max`, migration 0013).
-class _DeliveryEstimateLabel extends ConsumerWidget {
-  const _DeliveryEstimateLabel();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final settingsAsync = ref.watch(shopSettingsProvider);
-    final settings = settingsAsync.valueOrNull;
-    if (settings == null) return const SizedBox.shrink();
-    final label = formatDeliveryEstimate(
-      minDays: settings['delivery_lead_days_min'] as int? ?? 2,
-      maxDays: settings['delivery_lead_days_max'] as int? ?? 5,
-    );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.local_shipping_outlined,
-          size: 12,
-          color: AppPalette.of(context).textMuted,
+            if (after.isNotEmpty) TextSpan(text: after.join(separator)),
+          ],
         ),
-        const SizedBox(width: 3),
-        Flexible(
-          child: Text(
-            label.replaceFirst('Delivery ', ''),
-            semanticsLabel: label,
-            softWrap: true,
-            style: TextStyle(
-              fontSize: 10.5,
-              color: AppPalette.of(context).textMuted,
-            ),
-          ),
-        ),
-      ],
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      ),
     );
   }
 }
@@ -600,121 +478,32 @@ class _DeliveryEstimateLabel extends ConsumerWidget {
 class _Tag extends StatelessWidget {
   final String label;
   final Color? color;
-  const _Tag({required this.label, this.color});
+  final Color textColor;
+  const _Tag({
+    required this.label,
+    this.color,
+    this.textColor = AppColors.white,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
         color: color ?? AppColors.black.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(AppRadius.pill),
+        borderRadius: BorderRadius.circular(AppSpacing.xs),
       ),
       child: Text(
         label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: AppColors.white,
+        style: TextStyle(
+          color: textColor,
           fontSize: 10,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.4,
         ),
       ),
-    );
-  }
-}
-
-/// "Buy" pill for one-of-a-kind fish: a word, not just a bolt, inside the
-/// same 48 pt hit area as the other card actions.
-class _BuyPill extends StatelessWidget {
-  final String tooltip;
-  final VoidCallback onTap;
-  const _BuyPill({required this.tooltip, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Semantics(
-        button: true,
-        label: tooltip,
-        child: SizedBox(
-          height: 48,
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(AppRadius.pill),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onTap,
-              child: Center(
-                child: Ink(
-                  height: 32,
-                  padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
-                  decoration: const BoxDecoration(
-                    color: AppColors.black,
-                    borderRadius: BorderRadius.all(Radius.circular(16)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.bolt, size: 18, color: AppColors.white),
-                      SizedBox(width: 2),
-                      Text(
-                        'Buy',
-                        style: TextStyle(
-                          color: AppColors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// "45 cm · Male" style line for live fish, where the card's delivery
-/// window would be wrong (fish are hand-delivered).
-class _FishFactsLabel extends StatelessWidget {
-  final Product product;
-  const _FishFactsLabel({required this.product});
-
-  @override
-  Widget build(BuildContext context) {
-    final f = product.fishDetails;
-    final parts = <String>[
-      if (f?.sizeCm != null)
-        '${f!.sizeCm! % 1 == 0 ? f.sizeCm!.toInt() : f.sizeCm} cm',
-      if (f?.gender != null && f!.gender!.trim().isNotEmpty) f.gender!.trim(),
-    ];
-    final text = parts.isEmpty ? 'Hand-delivered' : parts.join(' · ');
-    return Row(
-      children: [
-        Icon(
-          parts.isEmpty ? Icons.volunteer_activism_outlined : Icons.straighten,
-          size: 14,
-          color: AppPalette.of(context).textMuted,
-        ),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            text,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 10.5,
-              color: AppPalette.of(context).textMuted,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

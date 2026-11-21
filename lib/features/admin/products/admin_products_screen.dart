@@ -200,10 +200,6 @@ class _ProductGrid extends ConsumerWidget {
                       product: product,
                       onTap: () =>
                           context.push('/admin/products/${product.id}'),
-                      // Favoriting is a customer affordance — admin has no
-                      // use for it, and it collides with the sold-toggle
-                      // below in the same corner.
-                      showFavoriteToggle: false,
                     ),
                     // One-tap "mark sold/unavailable" for a single live
                     // fish — a farm admin selling a koi/arowana in

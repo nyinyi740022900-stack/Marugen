@@ -375,15 +375,6 @@ class Product {
   /// food is merely "Out of Stock" (it will come back).
   String get unavailableLabel => isLiveFish ? 'Sold' : 'Out of Stock';
 
-  /// A restockable, priced product with no size options — the only kind a
-  /// grid card can add straight to the cart without asking anything.
-  bool get supportsQuickAdd =>
-      !isLiveFish && isPurchasable && !hasVariants && !isOutOfStock;
-
-  /// Options a shopper picks from, for the "N options" grid label —
-  /// only meaningful when [hasVariants] is true.
-  int get variantCount => variants.length;
-
   Product withStats({
     required int soldCount,
     double? avgRating,

@@ -211,6 +211,9 @@ class _MyReviewCard extends ConsumerWidget {
           return SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(48, 48),
+              ),
               onPressed: () =>
                   openReviewForm(context, ref, productId, existing: null),
               icon: const Icon(Icons.star_border, size: 18),
@@ -241,7 +244,10 @@ class _MyReviewCard extends ConsumerWidget {
                   const Spacer(),
                   IconButton(
                     tooltip: 'Edit your review',
-                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     onPressed: () => openReviewForm(
                       context,
@@ -252,7 +258,10 @@ class _MyReviewCard extends ConsumerWidget {
                   ),
                   IconButton(
                     tooltip: 'Delete your review',
-                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
                     icon: Icon(
                       Icons.delete_outline,
                       size: 18,
@@ -469,21 +478,27 @@ class _ReviewTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Row(
+                    // Wraps: stars and badge side by side do not fit a
+                    // 360 dp phone once the date shared the row, or at
+                    // larger text.
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         _StarRow(rating: review.rating),
-                        const SizedBox(width: AppSpacing.sm),
                         const _VerifiedBadge(),
                       ],
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      DateFormat.yMMMd().format(review.createdAt),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
                   ],
-                ),
-              ),
-              Text(
-                DateFormat.yMMMd().format(review.createdAt),
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: AppPalette.of(context).textMuted,
                 ),
               ),
             ],
@@ -551,12 +566,14 @@ class _VerifiedBadge extends StatelessWidget {
         children: [
           Icon(Icons.verified, size: 11, color: AppPalette.of(context).success),
           SizedBox(width: 3),
-          Text(
-            'Verified Purchase',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              color: AppPalette.of(context).success,
+          Flexible(
+            child: Text(
+              'Verified Purchase',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: AppPalette.of(context).success,
+              ),
             ),
           ),
         ],

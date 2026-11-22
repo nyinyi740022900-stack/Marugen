@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/models/app_user.dart';
+import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/support_contact_picker.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../data/order_repository.dart' show CancellationRefundNeedsAttention;
@@ -70,6 +71,15 @@ class _OrderCancellationPanelState
             dialogRef.watch(currentAppUserProvider);
             dialogRef.watch(orderByIdProvider(widget.order.id));
             final eligible = mounted && _authorized(actor, action);
+            // An approved cancellation refunds the whole order; name the
+            // amount where staff confirm it.
+            final refund = formatPrice(
+              dialogRef
+                      .read(orderByIdProvider(widget.order.id))
+                      .valueOrNull
+                      ?.total ??
+                  widget.order.total,
+            );
             return AlertDialog(
               title: Text(
                 action == 'request'
@@ -90,7 +100,7 @@ class _OrderCancellationPanelState
                             ? 'Your order is not cancelled yet. Delivery will pause while the shop reviews your request. If approved, your payment will be refunded.'
                             : action == 'reject'
                             ? 'The order will continue. Explain the decision to the customer.'
-                            : 'This issues a real refund to the customer’s original payment method. Delivery stays paused. Payment provider confirmation is required before the order shows Refunded.',
+                            : "Refund $refund to the customer's original payment method? Delivery stays paused until Stripe confirms.",
                       ),
                       if (action != 'approve') ...[
                         const SizedBox(height: 16),
@@ -117,7 +127,9 @@ class _OrderCancellationPanelState
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Keep order'),
+                  // For staff this only closes the dialog; "Keep order"
+                  // would read as a decision on the request.
+                  child: Text(action == 'request' ? 'Keep order' : 'Back'),
                 ),
                 TextButton(
                   onPressed: eligible
@@ -132,7 +144,7 @@ class _OrderCancellationPanelState
                         ? 'Send request'
                         : action == 'reject'
                         ? 'Decline request'
-                        : 'Confirm refund',
+                        : 'Refund $refund',
                   ),
                 ),
               ],
@@ -282,26 +294,34 @@ class _OrderCancellationPanelState
             const SizedBox(height: 8),
             Text(
               completed
-                  ? 'Your payment has been refunded to the original payment method. Your bank may take additional time to show the credit.'
+                  ? admin
+                        ? "The payment has been refunded to the customer's original payment method."
+                        : 'Your payment has been refunded to the original payment method. Your bank may take additional time to show the credit.'
                   : request.status == 'requested'
                   ? admin
                         ? 'Delivery is paused. Review the customer’s request before continuing.'
                         : 'Delivery is paused while the shop reviews your request. No refund has been confirmed yet.'
                   : request.status == 'rejected'
-                  ? 'The order will continue. Contact support if you need help.'
-                  : completed
-                  ? 'Your payment has been refunded to the original payment method. Your bank may take additional time to show the credit.'
-                  : '${order.refundStatusLabel ?? 'Refund is being arranged'}. Delivery remains paused until the refund is resolved.',
+                  ? admin
+                        ? 'The order continues. The customer has been told why.'
+                        : 'The order will continue. Contact support if you need help.'
+                  : '${(admin ? order.staffRefundStatusLabel : order.refundStatusLabel) ?? 'Refund is being arranged'}. Delivery remains paused until the refund is resolved.',
             ),
             if (request.reason?.isNotEmpty == true)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text('Customer reason: ${request.reason}'),
+                child: Text(
+                  '${admin ? 'Customer reason' : 'Your reason'}: '
+                  '${request.reason}',
+                ),
               ),
             if (request.reviewNote?.isNotEmpty == true)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
-                child: Text('Shop response: ${request.reviewNote}'),
+                child: Text(
+                  '${admin ? 'Reply sent to the customer' : 'Shop response'}: '
+                  '${request.reviewNote}',
+                ),
               ),
             const SizedBox(height: 12),
             if (admin && request.status == 'requested') ...[

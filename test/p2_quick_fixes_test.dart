@@ -16,7 +16,6 @@ import 'package:marugen_app/shared/models/product.dart';
 import 'package:marugen_app/shared/providers/settings_providers.dart';
 import 'package:marugen_app/shared/utils/contact_launcher.dart';
 import 'package:marugen_app/shared/utils/error_message.dart';
-import 'package:marugen_app/shared/widgets/product_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 const koi = Product(
@@ -77,19 +76,13 @@ void main() {
     expect(find.text('2 / 3'), findsOneWidget);
   });
 
-  testWidgets('a guest saving a fish logs in and comes back to that fish, and '
-      'the buy button no longer looks like add-to-cart', (tester) async {
+  testWidgets('a guest saving a fish on its product page logs in and comes '
+      'back to that fish', (tester) async {
     final router = GoRouter(
       routes: [
         GoRoute(
           path: '/',
-          builder: (_, _) => const Scaffold(
-            body: SizedBox(
-              width: 250,
-              height: 500,
-              child: ProductCard(product: koi),
-            ),
-          ),
+          builder: (_, _) => const ProductDetailScreen(productId: 'koi'),
         ),
         GoRoute(
           path: '/login',
@@ -100,19 +93,18 @@ void main() {
     addTearDown(router.dispose);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: guestOverrides(),
+        overrides: [
+          ...guestOverrides(),
+          productDetailProvider('koi').overrideWith((ref) async => koi),
+          relatedProductsProvider((id: 'koi', category: ProductCategory.koi))
+              .overrideWith((ref) async => []),
+          productReviewsProvider('koi').overrideWith((ref) async => []),
+        ],
         child: MaterialApp.router(routerConfig: router),
       ),
     );
     await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: find.byTooltip('Buy Kohaku now'),
-        matching: find.byIcon(Icons.bolt),
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(find.byTooltip('Save Kohaku to wishlist'));
+    await tester.tap(find.byTooltip('Add to wishlist'));
     await tester.pumpAndSettle();
     expect(find.text('Login /login?redirect=%2Fproduct%2Fkoi'), findsOneWidget);
   });

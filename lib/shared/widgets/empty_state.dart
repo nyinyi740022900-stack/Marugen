@@ -14,6 +14,10 @@ class EmptyState extends StatelessWidget {
   final String? actionLabel;
   final VoidCallback? onAction;
 
+  /// A quieter second way out, under the main action.
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
+
   const EmptyState({
     super.key,
     required this.icon,
@@ -22,6 +26,8 @@ class EmptyState extends StatelessWidget {
     this.subtitleMinLines = 0,
     this.actionLabel,
     this.onAction,
+    this.secondaryLabel,
+    this.onSecondary,
   });
 
   @override
@@ -104,6 +110,19 @@ class EmptyState extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (secondaryLabel != null && onSecondary != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: onSecondary,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                      ),
+                      child: Text(secondaryLabel!),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -122,7 +141,17 @@ class ErrorState extends StatelessWidget {
   final VoidCallback onRetry;
   final String? subtitle;
 
-  const ErrorState({super.key, required this.onRetry, this.subtitle});
+  /// A way out under Retry, for a page with no other exit.
+  final String? secondaryLabel;
+  final VoidCallback? onSecondary;
+
+  const ErrorState({
+    super.key,
+    required this.onRetry,
+    this.subtitle,
+    this.secondaryLabel,
+    this.onSecondary,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -132,6 +161,8 @@ class ErrorState extends StatelessWidget {
       subtitle: subtitle ?? "We couldn't load this right now. Check your connection and try again.",
       actionLabel: 'Retry',
       onAction: onRetry,
+      secondaryLabel: secondaryLabel,
+      onSecondary: onSecondary,
     );
   }
 }

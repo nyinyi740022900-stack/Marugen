@@ -5,7 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/password_validator.dart';
 import 'auth_providers.dart';
-import 'login_screen.dart' show friendlyAuthError;
+import 'login_screen.dart'
+    show AuthErrorScreen, friendlyAuthError, isExpiredResetLinkError;
 
 /// Shown when the app is opened via the password-reset email link.
 /// Supabase creates a temporary session for this (`AuthChangeEvent
@@ -28,6 +29,11 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   bool _done = false;
   String? _error;
 
+  /// The link (or the session it opened) is no longer good: nothing typed
+  /// here can succeed, so the way out to a new link is offered.
+  bool _linkExpired = false;
+  bool _leaving = false;
+
   @override
   void dispose() {
     _passwordCtrl.dispose();
@@ -36,20 +42,42 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   }
 
   Future<void> _submit() async {
-    if (_loading) return;
+    if (_loading || _leaving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() {
       _loading = true;
       _error = null;
+      _linkExpired = false;
     });
     try {
       await ref.read(authRepositoryProvider).updatePassword(_passwordCtrl.text);
       if (mounted) setState(() => _done = true);
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyAuthError(e));
+      if (mounted) {
+        setState(() {
+          _error = friendlyAuthError(e, AuthErrorScreen.resetPassword);
+          _linkExpired = isExpiredResetLinkError(e, duringRecovery: true);
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Back to Forgot password for a new link. The router holds this screen
+  /// for as long as the recovery session is the current auth event, so
+  /// what is left of that session is ended first.
+  Future<void> _requestNewLink() async {
+    if (_leaving) return;
+    setState(() => _leaving = true);
+    try {
+      await ref.read(authRepositoryProvider).signOut();
+    } catch (_) {
+      // Already gone, or offline: Forgot password works signed out or not.
+    }
+    if (!mounted) return;
+    setState(() => _leaving = false);
+    context.go('/forgot-password');
   }
 
   @override
@@ -122,24 +150,35 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           ),
           if (_error != null) ...[
             const SizedBox(height: AppSpacing.md),
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppPalette.of(context).accentSoft,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-              ),
-              child: Text(
-                _error!,
-                style: TextStyle(
-                  color: AppPalette.of(context).accent,
-                  fontSize: 13,
+            // Announced the moment it appears.
+            Semantics(
+              liveRegion: true,
+              child: Container(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppPalette.of(context).accentSoft,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                ),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: AppPalette.of(context).accent,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ),
+            if (_linkExpired) ...[
+              const SizedBox(height: AppSpacing.sm),
+              OutlinedButton(
+                onPressed: _leaving ? null : _requestNewLink,
+                child: const Text('Go to Forgot password'),
+              ),
+            ],
           ],
           const SizedBox(height: AppSpacing.xl),
           ElevatedButton(
-            onPressed: _loading ? null : _submit,
+            onPressed: _loading || _leaving ? null : _submit,
             child: _loading
                 ? const SizedBox(
                     height: 18,

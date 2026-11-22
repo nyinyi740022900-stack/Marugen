@@ -23,6 +23,12 @@ const _faqs = [
         'photos. We will review the issue and explain the available next steps.',
   ),
   _Faq(
+    'What if a live fish arrives unwell?',
+    'Live fish are packed for transit. If a fish arrives unwell, contact us within 24 '
+        'hours of delivery with your order number and relevant photos. We will review it '
+        'and explain the available next steps.',
+  ),
+  _Faq(
     'What payment methods do you accept?',
     'We accept credit/debit cards and other methods supported by Stripe (e.g. Apple '
         'Pay, Google Pay, PayNow, depending on availability) directly at checkout in the '
@@ -30,8 +36,9 @@ const _faqs = [
   ),
   _Faq(
     'A product says "Contact us for price" — how do I order it?',
-    'Tap "Contact Us for Price" on the product page to message us on WhatsApp with the '
-        'product pre-filled. We\'ll confirm price and availability with you directly.',
+    'Tap "Contact Us for Price" on the product page, then choose who to contact and '
+        'how (WhatsApp, phone or email, where available). Your message starts with the '
+        'product filled in, and we\'ll confirm price and availability with you directly.',
   ),
   _Faq(
     'Can I cancel my order?',

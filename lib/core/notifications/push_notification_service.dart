@@ -8,6 +8,23 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../supabase/supabase_client.dart';
 
+/// What the phone itself says about notifications for this app — separate
+/// from the account's own "send me pushes" setting.
+enum PushPermission {
+  /// The OS shows this app's notifications.
+  authorized,
+
+  /// The OS has not been asked yet (or, on Android, will ask again).
+  canAsk,
+
+  /// Turned off for this app; only the phone's Settings can change it.
+  blocked,
+
+  /// Push is not set up on this build, or the OS could not be read: there
+  /// is nothing to say about the phone.
+  unknown,
+}
+
 /// Push notification wiring (Firebase Cloud Messaging).
 ///
 /// IMPORTANT — this needs real Firebase config to actually deliver
@@ -138,13 +155,48 @@ class PushNotificationService {
     }
   }
 
+  /// The phone's notification permission for this app. Like
+  /// [canAskPermission] it only waits for the startup initialisation and
+  /// never starts one.
+  static Future<PushPermission> permission() async {
+    final started = _initFuture;
+    if (started == null) return PushPermission.unknown;
+    await started;
+    if (!_initialized) return PushPermission.unknown;
+    try {
+      final settings = await FirebaseMessaging.instance
+          .getNotificationSettings()
+          .timeout(const Duration(seconds: 8));
+      return switch (settings.authorizationStatus) {
+        AuthorizationStatus.authorized ||
+        AuthorizationStatus.provisional => PushPermission.authorized,
+        AuthorizationStatus.notDetermined => PushPermission.canAsk,
+        // iOS never prompts twice. Android reports "never asked" and
+        // "denied" alike, and asking again there is harmless.
+        AuthorizationStatus.denied =>
+          defaultTargetPlatform == TargetPlatform.android
+              ? PushPermission.canAsk
+              : PushPermission.blocked,
+      };
+    } catch (e) {
+      developer.log(
+        'Could not read push permission: $e',
+        name: 'PushNotificationService',
+      );
+      return PushPermission.unknown;
+    }
+  }
+
   /// Shows the OS notification-permission prompt once per app session.
   /// Deliberately not part of [initialize]: a prompt on first launch has no
   /// context. Customers are asked by PushPermissionPrompt after their first
   /// order; the admin shell calls this after first paint, since staff need
   /// new-order pushes from the start. Safe to call repeatedly.
-  static Future<void> requestPermission() async {
-    if (_permissionRequested) return;
+  ///
+  /// [force] asks again within the session: the customer turning the
+  /// Profile switch on is an explicit request, not a repeat.
+  static Future<void> requestPermission({bool force = false}) async {
+    if (_permissionRequested && !force) return;
     _permissionRequested = true;
     await initialize();
     if (!_initialized) return;

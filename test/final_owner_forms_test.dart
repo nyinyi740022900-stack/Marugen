@@ -84,7 +84,8 @@ void main() {
             expect(tester.takeException(), isNull);
             final action = find.widgetWithText(
               ElevatedButton,
-              kind == 'guide' ? 'Publish' : 'Save',
+              // Only a new guide is published; an edit is saved.
+              kind == 'guide' && !edit ? 'Publish' : 'Save',
             );
             await _reach(tester, action);
             expect(action.hitTestable(), findsOneWidget);
@@ -122,10 +123,7 @@ void main() {
         '$kind failed save remains visible and retryable ${theme.brightness}',
         (tester) async {
           await _open(tester, theme, kind, edit: true, keyboard: true);
-          final action = find.widgetWithText(
-            ElevatedButton,
-            kind == 'guide' ? 'Publish' : 'Save',
-          );
+          final action = find.widgetWithText(ElevatedButton, 'Save');
           await _reach(tester, action);
           final before = _writes;
           await tester.tap(action);
@@ -250,10 +248,7 @@ void main() {
       final pending = Completer<http.Response>();
       _handler = (_) => pending.future;
       await _open(tester, AppTheme.light, kind, edit: true);
-      final action = find.widgetWithText(
-        ElevatedButton,
-        kind == 'guide' ? 'Publish' : 'Save',
-      );
+      final action = find.widgetWithText(ElevatedButton, 'Save');
       await _reach(tester, action);
       final loadsBefore = _loads[kind]!;
       await tester.tap(action);
@@ -349,13 +344,7 @@ void main() {
         testWidgets('capture owner $kind ${theme.brightness}', (tester) async {
           await _open(tester, theme, kind, edit: true, visual: true);
           await _snap(tester, '$kind-${theme.brightness.name}');
-          await _reach(
-            tester,
-            find.widgetWithText(
-              ElevatedButton,
-              kind == 'guide' ? 'Publish' : 'Save',
-            ),
-          );
+          await _reach(tester, find.widgetWithText(ElevatedButton, 'Save'));
           await _snap(tester, '$kind-bottom-${theme.brightness.name}');
           expect(tester.takeException(), isNull);
         });

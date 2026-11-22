@@ -135,6 +135,41 @@ void main() {
     expect(find.text(_exactFish), findsNothing);
   });
 
+  testWidgets('courier goods show the estimated delivery window that used '
+      'to sit on the shop card', (tester) async {
+    await _pump(tester, _food);
+    // Lead time defaults (2 to 5 days) apply when the shop has set none.
+    final estimate = find.textContaining('Estimated delivery');
+    expect(estimate, findsOneWidget);
+    expect(
+      tester.getRect(estimate).top,
+      greaterThan(
+        tester.getRect(find.text('Island-wide delivery in Singapore')).top,
+      ),
+    );
+    expect(find.textContaining('not a guaranteed date'), findsOneWidget);
+  });
+
+  testWidgets('hand-delivered fish and sold-out goods show no delivery '
+      'estimate', (tester) async {
+    await _pump(tester, _koi);
+    expect(find.textContaining('Estimated delivery'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+
+    await _pump(
+      tester,
+      const Product(
+        id: 'p',
+        name: 'Growth Pellets',
+        category: ProductCategory.fishFood,
+        price: 20,
+        stockQuantity: 0,
+      ),
+    );
+    expect(find.text('Island-wide delivery in Singapore'), findsOneWidget);
+    expect(find.textContaining('Estimated delivery'), findsNothing);
+  });
+
   testWidgets('the live-fish copy fits a small phone at double text size', (
     tester,
   ) async {

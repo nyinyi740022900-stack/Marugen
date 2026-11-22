@@ -235,6 +235,8 @@ void main() {
     final toggle = find.byTooltip('Mark as sold');
     expect(toggle, findsOneWidget);
     final ink = find.descendant(of: toggle, matching: find.byType(InkWell));
+    // A full-size touch target around the small pill.
+    expect(tester.getSize(ink), const Size(48, 48));
     await tester.tap(ink);
     await tester.tap(ink);
     await tester.pump();

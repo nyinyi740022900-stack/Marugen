@@ -154,7 +154,12 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/splash', builder: (_, _) => const SplashScreen()),
-      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
+      GoRoute(
+        path: '/login',
+        // `?email=` pre-fills the form when Sign Up sends the customer here.
+        builder: (_, state) =>
+            LoginScreen(initialEmail: state.uri.queryParameters['email']),
+      ),
       GoRoute(path: '/signup', builder: (_, _) => const SignupScreen()),
       GoRoute(
         path: '/forgot-password',

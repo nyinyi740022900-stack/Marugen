@@ -335,6 +335,13 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   bool _submitted = false;
   String? _saveError;
 
+  // One per section, so a failed check can be scrolled into view.
+  final _imageKey = GlobalKey();
+  final _textKey = GlobalKey();
+  final _linkKey = GlobalKey();
+  final _scheduleKey = GlobalKey();
+  final _scroll = ScrollController();
+
   bool get _dirty {
     final e = widget.existing;
     return _picked != null ||
@@ -412,6 +419,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
     _cta.dispose();
     _web.dispose();
     _appPage.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -460,13 +468,15 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
       ),
       helpText: start ? 'Starts at' : 'Ends at',
     );
-    if (!mounted) return;
+    // Backing out of the time leaves the schedule as it was, rather than
+    // quietly setting the day at 00:00.
+    if (time == null || !mounted) return;
     final picked = DateTime(
       date.year,
       date.month,
       date.day,
-      time?.hour ?? 0,
-      time?.minute ?? 0,
+      time.hour,
+      time.minute,
     );
     setState(() {
       if (start) {
@@ -475,6 +485,31 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
         _endsAt = picked;
       }
     });
+  }
+
+  /// Scrolls a section into view. The list builds lazily, so a section far
+  /// from the current position has no context yet: go to the end it lives
+  /// at first (the schedule is last, everything else is near the top).
+  void _reveal(GlobalKey section) {
+    void show() {
+      final target = section.currentContext;
+      if (target == null || !mounted) return;
+      Scrollable.ensureVisible(
+        target,
+        alignment: 0.1,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 300),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    if (section.currentContext != null) return show();
+    if (!_scroll.hasClients) return;
+    _scroll.jumpTo(
+      section == _scheduleKey ? _scroll.position.maxScrollExtent : 0,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => show());
   }
 
   Future<bool> _confirmDiscard() async {
@@ -490,15 +525,27 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
   Future<void> _save() async {
     if (_saving) return;
     setState(() => _submitted = true);
-    if (_imageError != null ||
-        _ctaError != null ||
-        _linkErrorFor(
-              _linkKind == BannerLinkKind.product
-                  ? ref.read(adminAllProductsProvider).valueOrNull
-                  : null,
-            ) !=
-            null ||
-        _windowError != null) {
+    final linkError = _linkErrorFor(
+      _linkKind == BannerLinkKind.product
+          ? ref.read(adminAllProductsProvider).valueOrNull
+          : null,
+    );
+    // In page order: the first problem is the one brought into view and
+    // named, so Save never looks like a button that did nothing.
+    final (problem, section) = _imageError != null
+        ? (_imageError, _imageKey)
+        : _ctaError != null
+        ? (_ctaError, _textKey)
+        : linkError != null
+        ? (linkError, _linkKey)
+        : _windowError != null
+        ? (_windowError, _scheduleKey)
+        : (null, null);
+    if (problem != null) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(problem)));
+      _reveal(section!);
       return;
     }
     setState(() {
@@ -541,13 +588,17 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(
-          () => _saveError = friendlyErrorMessage(
-            e,
-            fallback: 'Could not save the banner. Please try again.',
-            context: 'admin.banner_edit',
-          ),
+        final message = friendlyErrorMessage(
+          e,
+          fallback: 'Could not save the banner. Please try again.',
+          context: 'admin.banner_edit',
         );
+        setState(() => _saveError = message);
+        // The inline text sits by the Save button; the snackbar is seen
+        // wherever the form is scrolled to.
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -628,9 +679,10 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
           ],
         ),
         body: ListView(
+          controller: _scroll,
           padding: const EdgeInsets.all(AppSpacing.lg),
           children: [
-            _SectionLabel('PREVIEW'),
+            KeyedSubtree(key: _imageKey, child: _SectionLabel('PREVIEW')),
             ClipRRect(
               borderRadius: BorderRadius.circular(AppRadius.lg),
               child: AspectRatio(
@@ -673,7 +725,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
               ],
             ),
             const SizedBox(height: AppSpacing.xl),
-            _SectionLabel('TEXT (OPTIONAL)'),
+            KeyedSubtree(key: _textKey, child: _SectionLabel('TEXT (OPTIONAL)')),
             TextField(
               controller: _title,
               maxLength: 80,
@@ -710,7 +762,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.xl),
-            _SectionLabel('LINK TO'),
+            KeyedSubtree(key: _linkKey, child: _SectionLabel('LINK TO')),
             Wrap(
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.xs,
@@ -798,7 +850,7 @@ class _BannerFormScreenState extends ConsumerState<BannerFormScreen> {
               ),
             },
             const SizedBox(height: AppSpacing.xl),
-            _SectionLabel('SCHEDULE (OPTIONAL)'),
+            KeyedSubtree(key: _scheduleKey, child: _SectionLabel('SCHEDULE (OPTIONAL)')),
             _DateTimeTile(
               label: 'Starts',
               value: _startsAt,

@@ -13,9 +13,10 @@ import '../../../shared/utils/email_validator.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/password_validator.dart';
 import '../../orders/presentation/purchase_intent.dart'
-    show authRouteWithRedirect;
+    show safeLocalRedirect;
 import 'auth_providers.dart';
-import 'login_screen.dart' show friendlyAuthError;
+import 'login_screen.dart'
+    show AuthErrorScreen, friendlyAuthError, isEmailAlreadyRegisteredError;
 
 class SignupScreen extends ConsumerStatefulWidget {
   /// How long "Resend email" stays disabled after an email goes out (the
@@ -42,6 +43,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   bool _oauthLoading = false;
   String? _error;
 
+  /// The address sign-up was refused for because it already has an
+  /// account: the form stays, with a way to Log In carrying this address.
+  String? _registeredEmail;
+
   /// Set once sign-up succeeded without a session: the address the
   /// confirmation link went to. Replaces the form with the confirm state.
   String? _confirmEmail;
@@ -66,6 +71,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _registeredEmail = null;
     });
     final email = _emailCtrl.text.trim();
     try {
@@ -82,7 +88,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         _startCooldown();
       }
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyAuthError(e));
+      if (mounted) {
+        setState(() {
+          _error = friendlyAuthError(e, AuthErrorScreen.signUp);
+          // No email was sent for an address that already has an account:
+          // never the "confirm your email" state, always a way to log in.
+          _registeredEmail = isEmailAlreadyRegisteredError(e) ? email : null;
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -134,16 +147,21 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   /// Back to the Log In screen this one was opened from (it still holds
   /// the redirect); from a direct link, open Log In with the same redirect.
-  void _goToLogin() {
+  ///
+  /// [email] travels with it so the Log In form opens with it filled in.
+  void _goToLogin(String email) {
     if (context.canPop()) {
-      context.pop();
+      context.pop(email);
       return;
     }
+    final redirect = safeLocalRedirect(
+      GoRouterState.of(context).uri.queryParameters['redirect'],
+    );
     context.go(
-      authRouteWithRedirect(
-        '/login',
-        GoRouterState.of(context).uri.queryParameters['redirect'],
-      ),
+      Uri(
+        path: '/login',
+        queryParameters: {'email': email, 'redirect': ?redirect},
+      ).toString(),
     );
   }
 
@@ -158,7 +176,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyAuthError(e));
+      if (mounted) {
+        setState(() => _error = friendlyAuthError(e, AuthErrorScreen.signUp));
+      }
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -185,7 +205,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                 cooldownLeft: _cooldownLeft,
                 info: _resendInfo,
                 error: _resendError,
-                onLogin: _goToLogin,
+                onLogin: () => _goToLogin(confirmEmail),
                 onResend: _resend,
               ),
             ),
@@ -286,20 +306,31 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: AppSpacing.md),
-                      Container(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        decoration: BoxDecoration(
-                          color: AppPalette.of(context).accentSoft,
-                          borderRadius: BorderRadius.circular(AppRadius.sm),
-                        ),
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            color: AppPalette.of(context).accent,
-                            fontSize: 13,
+                      // Announced the moment it appears.
+                      Semantics(
+                        liveRegion: true,
+                        child: Container(
+                          padding: const EdgeInsets.all(AppSpacing.md),
+                          decoration: BoxDecoration(
+                            color: AppPalette.of(context).accentSoft,
+                            borderRadius: BorderRadius.circular(AppRadius.sm),
+                          ),
+                          child: Text(
+                            _error!,
+                            style: TextStyle(
+                              color: AppPalette.of(context).accent,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ),
+                      if (_registeredEmail != null) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton(
+                          onPressed: () => _goToLogin(_registeredEmail!),
+                          child: const Text('Go to Log In'),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: AppSpacing.lg),
                     RichText(

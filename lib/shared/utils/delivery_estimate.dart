@@ -1,8 +1,8 @@
 import 'package:intl/intl.dart';
 
 /// Formats the shop's configured delivery lead time (`settings.
-/// delivery_lead_days_min/max`, migration 0013) into the "Delivery by
-/// 22–25 Sep" label shown on shop grid cards.
+/// delivery_lead_days_min/max`, migration 0013) into the "Delivery
+/// 22–25 Sep" label shown in the product page's delivery block.
 String formatDeliveryEstimate({
   required int minDays,
   required int maxDays,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -6,11 +7,14 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
-import '../../../shared/widgets/discard_changes_guard.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../auth/presentation/auth_providers.dart';
-import '../admin_shell.dart' show adminTabIndexProvider, kAdminHomeBannersTab;
+import '../admin_shell.dart'
+    show
+        adminSettingsLeaveGuardProvider,
+        adminTabIndexProvider,
+        kAdminHomeBannersTab;
 import '../delivery/easyparcel_providers.dart';
 import '../delivery/easyparcel_repository.dart';
 import 'settings_repository.dart';
@@ -44,6 +48,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
   int? _loadedGst;
   bool _loadedGstIncluded = true;
   String? _baseline;
+  Map<String, dynamic>? _loaded;
+  bool _dirty = false;
+  String? _postcodeError;
   bool _gstIncluded = true;
   bool _showPriceDefault = true;
   bool _loading = true;
@@ -128,30 +135,69 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     }
   }
 
+  List<TextEditingController> get _controllers => [
+    _shopNameCtrl,
+    _phoneCtrl,
+    _addressCtrl,
+    _gstCtrl,
+    _deliveryMinCtrl,
+    _deliveryMaxCtrl,
+    _lowStockThresholdCtrl,
+    _shopPostcodeCtrl,
+    _shopCityCtrl,
+    _shopStateCtrl,
+    _parcelLengthCtrl,
+    _parcelWidthCtrl,
+    _parcelHeightCtrl,
+  ];
+
+  /// Typed text does not rebuild the screen on its own, so the unsaved-
+  /// changes state is recomputed here whenever any field changes.
+  void _syncDirty() {
+    if (!mounted) return;
+    final dirty = _baseline != null && _fingerprint() != _baseline;
+    if (dirty == _dirty) return;
+    setState(() => _dirty = dirty);
+    // Settings is a tab, not a pushed route: the shell asks this before
+    // Android back leaves the tab, and only while this tab is showing.
+    ref.read(adminSettingsLeaveGuardProvider.notifier).state = dirty
+        ? _confirmDiscard
+        : null;
+  }
+
+  /// "Discard changes?" for Android back on the Settings tab. Discarding
+  /// puts the loaded values back, so nothing half-edited is left behind.
+  Future<bool> _confirmDiscard() async {
+    if (!mounted || !_dirty || _saving) return true;
+    final discard = await confirmDestructiveAction(
+      context,
+      title: 'Discard changes?',
+      message: 'Your unsaved edits will be lost.',
+      confirmLabel: 'Discard',
+    );
+    if (!discard) return false;
+    final loaded = _loaded;
+    if (mounted && loaded != null) {
+      _apply(loaded);
+      setState(() => _postcodeError = null);
+      _syncDirty();
+    }
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
+    for (final c in _controllers) {
+      c.addListener(_syncDirty);
+    }
     _load();
     _checkEasyParcelStatus();
   }
 
   @override
   void dispose() {
-    for (final c in [
-      _shopNameCtrl,
-      _phoneCtrl,
-      _addressCtrl,
-      _gstCtrl,
-      _deliveryMinCtrl,
-      _deliveryMaxCtrl,
-      _lowStockThresholdCtrl,
-      _shopPostcodeCtrl,
-      _shopCityCtrl,
-      _shopStateCtrl,
-      _parcelLengthCtrl,
-      _parcelWidthCtrl,
-      _parcelHeightCtrl,
-    ]) {
+    for (final c in _controllers) {
       c.dispose();
     }
     super.dispose();
@@ -164,29 +210,46 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     });
     try {
       final s = await _repo.fetchSettings();
-      _shopNameCtrl.text = s['shop_name']?.toString() ?? '';
-      _phoneCtrl.text = s['shop_phone']?.toString() ?? '';
-      _addressCtrl.text = s['shop_address']?.toString() ?? '';
-      _gstCtrl.text = s['gst_percent']?.toString() ?? '9';
-      _gstIncluded = s['gst_included_in_price'] as bool? ?? true;
-      _showPriceDefault = s['show_price_default'] as bool? ?? true;
-      _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
-      _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
-      _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
-      _shopPostcodeCtrl.text = s['shop_postcode']?.toString() ?? '';
-      _shopCityCtrl.text = s['shop_city']?.toString() ?? '';
-      _shopStateCtrl.text = s['shop_state']?.toString() ?? '';
-      _parcelLengthCtrl.text = s['default_parcel_length_cm']?.toString() ?? '';
-      _parcelWidthCtrl.text = s['default_parcel_width_cm']?.toString() ?? '';
-      _parcelHeightCtrl.text = s['default_parcel_height_cm']?.toString() ?? '';
-      _loadedGst = int.tryParse(_gstCtrl.text);
-      _loadedGstIncluded = _gstIncluded;
-      _baseline = _fingerprint();
+      _loaded = s;
+      _apply(s);
     } catch (_) {
       if (mounted) setState(() => _loadFailed = true);
     } finally {
       if (mounted) setState(() => _loading = false);
+      _syncDirty();
     }
+  }
+
+  static final _sgPostcode = RegExp(r'^\d{6}$');
+  static const _postcodeMessage = 'Shop postcode must be 6 digits (Singapore).';
+
+  String? _postcodeProblem() {
+    final postcode = _shopPostcodeCtrl.text.trim();
+    return postcode.isNotEmpty && !_sgPostcode.hasMatch(postcode)
+        ? _postcodeMessage
+        : null;
+  }
+
+  /// Fills every field from a settings row and makes it the clean baseline.
+  void _apply(Map<String, dynamic> s) {
+    _shopNameCtrl.text = s['shop_name']?.toString() ?? '';
+    _phoneCtrl.text = s['shop_phone']?.toString() ?? '';
+    _addressCtrl.text = s['shop_address']?.toString() ?? '';
+    _gstCtrl.text = s['gst_percent']?.toString() ?? '0';
+    _gstIncluded = s['gst_included_in_price'] as bool? ?? true;
+    _showPriceDefault = s['show_price_default'] as bool? ?? true;
+    _deliveryMinCtrl.text = s['delivery_lead_days_min']?.toString() ?? '2';
+    _deliveryMaxCtrl.text = s['delivery_lead_days_max']?.toString() ?? '5';
+    _lowStockThresholdCtrl.text = s['low_stock_threshold']?.toString() ?? '5';
+    _shopPostcodeCtrl.text = s['shop_postcode']?.toString() ?? '';
+    _shopCityCtrl.text = s['shop_city']?.toString() ?? '';
+    _shopStateCtrl.text = s['shop_state']?.toString() ?? '';
+    _parcelLengthCtrl.text = s['default_parcel_length_cm']?.toString() ?? '';
+    _parcelWidthCtrl.text = s['default_parcel_width_cm']?.toString() ?? '';
+    _parcelHeightCtrl.text = s['default_parcel_height_cm']?.toString() ?? '';
+    _loadedGst = int.tryParse(_gstCtrl.text);
+    _loadedGstIncluded = _gstIncluded;
+    _baseline = _fingerprint();
   }
 
   /// Human-readable problems with the fields that every checkout total,
@@ -206,10 +269,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     if (low == null || low < 0) {
       return 'Low-stock threshold must be a whole number.';
     }
-    final postcode = _shopPostcodeCtrl.text.trim();
-    if (postcode.isNotEmpty && !RegExp(r'^\d{6}\$').hasMatch(postcode)) {
-      return 'Shop postcode must be 6 digits (Singapore).';
-    }
+    final postcodeProblem = _postcodeProblem();
+    if (postcodeProblem != null) return postcodeProblem;
     final dimensions = [_parcelLengthCtrl, _parcelWidthCtrl, _parcelHeightCtrl];
     final entered = dimensions.any((c) => c.text.trim().isNotEmpty);
     final valid = dimensions.every((c) {
@@ -243,6 +304,9 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
 
   Future<void> _save() async {
     final problem = _validationError();
+    // The postcode problem is also shown on the field itself, where it can
+    // be fixed, not only in a snackbar that disappears.
+    setState(() => _postcodeError = _postcodeProblem());
     if (problem != null) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
@@ -253,13 +317,20 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     final gstNow = int.parse(_gstCtrl.text.trim());
     if (_loadedGst != null &&
         (gstNow != _loadedGst || _gstIncluded != _loadedGstIncluded)) {
+      // Turning GST on is the one change a shop that is not GST-registered
+      // must never make by accident, so it is asked about in its own words.
+      final startsCharging = _loadedGst == 0 && gstNow > 0;
       final ok = await confirmAction(
         context,
-        title: 'Change GST for the whole shop?',
-        message:
-            'New GST settings apply to every price, checkout total and '
-            'invoice from now on. Existing orders are not changed.',
-        confirmLabel: 'Change GST',
+        title: startsCharging
+            ? 'Charge GST?'
+            : 'Change GST for the whole shop?',
+        message: startsCharging
+            ? 'Only a GST-registered business may charge GST. Prices and '
+                  'invoices will show GST from now on.'
+            : 'New GST settings apply to every price, checkout total and '
+                  'invoice from now on. Existing orders are not changed.',
+        confirmLabel: startsCharging ? 'Charge GST' : 'Change GST',
       );
       if (!ok || !mounted) return;
     }
@@ -272,7 +343,7 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         'shop_name': _shopNameCtrl.text.trim(),
         'shop_phone': _phoneCtrl.text.trim(),
         'shop_address': _addressCtrl.text.trim(),
-        'gst_percent': int.tryParse(_gstCtrl.text.trim()) ?? 9,
+        'gst_percent': gstNow,
         'gst_included_in_price': _gstIncluded,
         'show_price_default': _showPriceDefault,
         'delivery_lead_days_min':
@@ -299,6 +370,25 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         _loadedGst = gstNow;
         _loadedGstIncluded = _gstIncluded;
         _baseline = _fingerprint();
+        _loaded = {
+          ...?_loaded,
+          'shop_name': _shopNameCtrl.text,
+          'shop_phone': _phoneCtrl.text,
+          'shop_address': _addressCtrl.text,
+          'gst_percent': gstNow,
+          'gst_included_in_price': _gstIncluded,
+          'show_price_default': _showPriceDefault,
+          'delivery_lead_days_min': _deliveryMinCtrl.text,
+          'delivery_lead_days_max': _deliveryMaxCtrl.text,
+          'low_stock_threshold': _lowStockThresholdCtrl.text,
+          'shop_postcode': _shopPostcodeCtrl.text,
+          'shop_city': _shopCityCtrl.text,
+          'shop_state': _shopStateCtrl.text,
+          'default_parcel_length_cm': _nullIfBlank(_parcelLengthCtrl.text),
+          'default_parcel_width_cm': _nullIfBlank(_parcelWidthCtrl.text),
+          'default_parcel_height_cm': _nullIfBlank(_parcelHeightCtrl.text),
+        };
+        _syncDirty();
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
           ..showSnackBar(const SnackBar(content: Text('Settings saved')));
@@ -326,6 +416,8 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
     }
   }
 
+  static String? _nullIfBlank(String text) => text.isEmpty ? null : text;
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -337,313 +429,335 @@ class _AdminSettingsScreenState extends ConsumerState<AdminSettingsScreen> {
         body: ErrorState(onRetry: _load),
       );
     }
-    return DiscardChangesGuard(
-      dirty: _baseline != null && _fingerprint() != _baseline,
-      busy: _saving,
-      child: Scaffold(
-        appBar: AppBar(title: const Text('Settings')),
-        body: ListView(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          children: [
-            const _SectionLabel('THIS DEVICE'),
-            const AppearanceTile(),
-            Text(
-              'Appearance is saved on this device and does not change shop settings.',
-              style: TextStyle(
-                color: AppPalette.of(context).textMuted,
-                fontSize: 12,
+    // No PopScope here: this screen lives in the shell's IndexedStack, where
+    // one would also catch Android back on every other tab. The shell asks
+    // [adminSettingsLeaveGuardProvider] instead.
+    return Scaffold(
+      appBar: AppBar(title: const Text('Settings')),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        children: [
+          const _SectionLabel('THIS DEVICE'),
+          const AppearanceTile(),
+          Text(
+            'Appearance is saved on this device and does not change shop settings.',
+            style: TextStyle(
+              color: AppPalette.of(context).textMuted,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('SHOP INFO'),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _shopNameCtrl,
+            decoration: const InputDecoration(labelText: 'Shop name'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _phoneCtrl,
+            decoration: const InputDecoration(labelText: 'Phone'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _addressCtrl,
+            decoration: const InputDecoration(labelText: 'Address'),
+            maxLines: 2,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const SupportDirectorySettingsTile(),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('PRICING'),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _gstCtrl,
+            decoration: const InputDecoration(
+              labelText: 'GST %',
+              helperText:
+                  'Leave at 0 unless the shop is GST-registered with IRAS.',
+              helperMaxLines: 3,
+            ),
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('GST included in displayed price'),
+            value: _gstIncluded,
+            onChanged: (v) {
+              setState(() => _gstIncluded = v);
+              _syncDirty();
+            },
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Show prices by default on new products'),
+            subtitle: const Text('Can still be overridden per product'),
+            value: _showPriceDefault,
+            onChanged: (v) {
+              setState(() => _showPriceDefault = v);
+              _syncDirty();
+            },
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('DELIVERY'),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _deliveryMinCtrl,
+                  decoration: const InputDecoration(labelText: 'Min days'),
+                  keyboardType: TextInputType.number,
+                ),
               ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  controller: _deliveryMaxCtrl,
+                  decoration: const InputDecoration(labelText: 'Max days'),
+                  keyboardType: TextInputType.number,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Shown on shop cards as an estimated delivery date range',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
             ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('SHOP INFO'),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: _shopNameCtrl,
-              decoration: const InputDecoration(labelText: 'Shop name'),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('EASYPARCEL INTEGRATION'),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Connect once to auto-book couriers and auto-track shipments '
+            'from the Delivery tab, instead of typing tracking numbers in '
+            'by hand.',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
             ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _phoneCtrl,
-              decoration: const InputDecoration(labelText: 'Phone'),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppPalette.of(context).surfaceMuted,
+              borderRadius: BorderRadius.circular(AppRadius.md),
             ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _addressCtrl,
-              decoration: const InputDecoration(labelText: 'Address'),
-              maxLines: 2,
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            const SupportDirectorySettingsTile(),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('PRICING'),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: _gstCtrl,
-              decoration: const InputDecoration(labelText: 'GST %'),
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('GST included in displayed price'),
-              value: _gstIncluded,
-              onChanged: (v) => setState(() => _gstIncluded = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Show prices by default on new products'),
-              subtitle: const Text('Can still be overridden per product'),
-              value: _showPriceDefault,
-              onChanged: (v) => setState(() => _showPriceDefault = v),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('DELIVERY'),
-            const SizedBox(height: AppSpacing.sm),
-            Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: TextField(
-                    controller: _deliveryMinCtrl,
-                    decoration: const InputDecoration(labelText: 'Min days'),
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: TextField(
-                    controller: _deliveryMaxCtrl,
-                    decoration: const InputDecoration(labelText: 'Max days'),
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Shown on shop cards as an estimated delivery date range',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('EASYPARCEL INTEGRATION'),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'Connect once to auto-book couriers and auto-track shipments '
-              'from the Delivery tab, instead of typing tracking numbers in '
-              'by hand.',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppPalette.of(context).surfaceMuted,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _easyParcelStatus?.connected == true
-                            ? Icons.check_circle
-                            : Icons.link_off,
-                        color: _easyParcelStatus?.connected == true
-                            ? AppPalette.of(context).success
-                            : AppPalette.of(context).textMuted,
-                        size: 20,
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          _checkingEasyParcel
-                              ? 'Checking connection…'
-                              : _easyParcelStatus?.connected == true
-                              ? 'Connected'
-                                    '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
-                              : 'Not connected',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13.5,
-                          ),
+                Row(
+                  children: [
+                    Icon(
+                      _easyParcelStatus?.connected == true
+                          ? Icons.check_circle
+                          : Icons.link_off,
+                      color: _easyParcelStatus?.connected == true
+                          ? AppPalette.of(context).success
+                          : AppPalette.of(context).textMuted,
+                      size: 20,
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        _checkingEasyParcel
+                            ? 'Checking connection…'
+                            : _easyParcelStatus?.connected == true
+                            ? 'Connected'
+                                  '${_easyParcelStatus?.connectedAt != null ? ' since ${DateFormat.yMMMd().format(_easyParcelStatus!.connectedAt!)}' : ''}'
+                            : 'Not connected',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
                         ),
                       ),
-                    ],
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _checkingEasyParcel
-                          ? null
-                          : _checkEasyParcelStatus,
-                      child: const Text('Refresh'),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            const Text(
-              'For real pickups, select your live Singapore account when reconnecting. '
-              'Connected only confirms authorization; a sandbox account does not arrange real pickups.',
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            OutlinedButton.icon(
-              onPressed: _connectEasyParcel,
-              icon: const Icon(Icons.open_in_new, size: 16),
-              label: Text(
-                _easyParcelStatus?.connected == true
-                    ? 'Reconnect EasyParcel'
-                    : 'Connect EasyParcel',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'SENDER ADDRESS (used for shipping rate quotes)',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 11,
-                letterSpacing: 0.6,
-                color: AppPalette.of(context).textMuted,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _shopPostcodeCtrl,
-                    decoration: const InputDecoration(labelText: 'Postcode'),
-                    keyboardType: TextInputType.number,
-                  ),
+                  ],
                 ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: TextField(
-                    controller: _shopCityCtrl,
-                    decoration: const InputDecoration(labelText: 'City'),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _checkingEasyParcel
+                        ? null
+                        : _checkEasyParcelStatus,
+                    child: const Text('Refresh'),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _shopStateCtrl,
-              decoration: const InputDecoration(
-                labelText: 'State (if applicable)',
-              ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Text(
+            'For real pickups, select your live Singapore account when reconnecting. '
+            'Connected only confirms authorization; a sandbox account does not arrange real pickups.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          OutlinedButton.icon(
+            onPressed: _connectEasyParcel,
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: Text(
+              _easyParcelStatus?.connected == true
+                  ? 'Reconnect EasyParcel'
+                  : 'Connect EasyParcel',
             ),
-            const SizedBox(height: AppSpacing.md),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('SHIPPING POLICY'),
-            const SizedBox(height: AppSpacing.sm),
-            const Text('All available couriers · Currency: SGD (S\$)'),
-            const Text(
-              'Courier delivery: buyer 50%, shop 50%. The shop covers any rounding cent.',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'SENDER ADDRESS (used for shipping rate quotes)',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              fontSize: 11,
+              letterSpacing: 0.6,
+              color: AppPalette.of(context).textMuted,
             ),
-            const Text(
-              'Live fish and mixed shop-delivery orders: the shop covers delivery in full.',
-            ),
-            const SizedBox(height: AppSpacing.md),
-            const Text(
-              'Packed parcel dimensions (optional)',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const Text(
-              'Shipping weight comes from each product option × quantity. Leave dimensions blank for weight-based quotes; enter the actual packed dimensions before booking. Only configure these if they apply to every courier parcel.',
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            for (final entry in [
-              (_parcelLengthCtrl, 'Length (cm)'),
-              (_parcelWidthCtrl, 'Width (cm)'),
-              (_parcelHeightCtrl, 'Height (cm)'),
-            ])
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
                 child: TextField(
-                  controller: entry.$1,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                  controller: _shopPostcodeCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Postcode',
+                    errorText: _postcodeError,
+                    errorMaxLines: 3,
                   ),
-                  decoration: InputDecoration(labelText: entry.$2),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(6),
+                  ],
+                  onChanged: (_) {
+                    if (_postcodeError != null) {
+                      setState(() => _postcodeError = null);
+                    }
+                  },
                 ),
               ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('INVENTORY'),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: _lowStockThresholdCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Low stock alert quantity',
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: TextField(
+                  controller: _shopCityCtrl,
+                  decoration: const InputDecoration(labelText: 'City'),
+                ),
               ),
-              keyboardType: TextInputType.number,
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _shopStateCtrl,
+            decoration: const InputDecoration(
+              labelText: 'State (if applicable)',
             ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Products at or below this quantity appear in the dashboard\'s '
-              'Low Stock list',
-              style: TextStyle(
-                fontSize: 12,
-                color: AppPalette.of(context).textMuted,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('SHIPPING POLICY'),
+          const SizedBox(height: AppSpacing.sm),
+          const Text('All available couriers · Currency: SGD (S\$)'),
+          const Text(
+            'Courier delivery: buyer 50%, shop 50%. The shop covers any rounding cent.',
+          ),
+          const Text(
+            'Live fish and mixed shop-delivery orders: the shop covers delivery in full.',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const Text(
+            'Packed parcel dimensions (optional)',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const Text(
+            'Shipping weight comes from each product option × quantity. Leave dimensions blank for weight-based quotes; enter the actual packed dimensions before booking. Only configure these if they apply to every courier parcel.',
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final entry in [
+            (_parcelLengthCtrl, 'Length (cm)'),
+            (_parcelWidthCtrl, 'Width (cm)'),
+            (_parcelHeightCtrl, 'Height (cm)'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: TextField(
+                controller: entry.$1,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(labelText: entry.$2),
               ),
             ),
-            const SizedBox(height: AppSpacing.xl),
-            const _SectionLabel('PROMOTIONS'),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.view_carousel_outlined),
-              title: const Text('Promotions now live in Home Banners'),
-              subtitle: const Text(
-                'The once-a-day popup is retired. Add promotion slides to '
-                'the carousel on the shop home page.',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () =>
-                  ref.read(adminTabIndexProvider.notifier).state =
-                      kAdminHomeBannersTab,
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('INVENTORY'),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _lowStockThresholdCtrl,
+            decoration: const InputDecoration(
+              labelText: 'Low stock alert quantity',
             ),
-            const SizedBox(height: AppSpacing.xl),
-            ElevatedButton(
-              onPressed: _saving ? null : _save,
-              child: _saving
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppColors.white,
-                      ),
-                    )
-                  : const Text('Save Settings'),
+            keyboardType: TextInputType.number,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Products at or below this quantity appear in the dashboard\'s '
+            'Low Stock list',
+            style: TextStyle(
+              fontSize: 12,
+              color: AppPalette.of(context).textMuted,
             ),
-            const SizedBox(height: AppSpacing.xl),
-            const Divider(),
-            ListTile(
-              leading: _signingOut
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppPalette.of(context).error,
-                      ),
-                    )
-                  : Icon(Icons.logout, color: AppPalette.of(context).error),
-              title: Text(
-                'Log Out',
-                style: TextStyle(color: AppPalette.of(context).error),
-              ),
-              enabled: !_signingOut,
-              onTap: _confirmSignOut,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const _SectionLabel('PROMOTIONS'),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.view_carousel_outlined),
+            title: const Text('Promotions now live in Home Banners'),
+            subtitle: const Text(
+              'The once-a-day popup is retired. Add promotion slides to '
+              'the carousel on the shop home page.',
             ),
-          ],
-        ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => ref.read(adminTabIndexProvider.notifier).state =
+                kAdminHomeBannersTab,
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          ElevatedButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    height: 18,
+                    width: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.white,
+                    ),
+                  )
+                : const Text('Save Settings'),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const Divider(),
+          ListTile(
+            leading: _signingOut
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppPalette.of(context).error,
+                    ),
+                  )
+                : Icon(Icons.logout, color: AppPalette.of(context).error),
+            title: Text(
+              'Log Out',
+              style: TextStyle(color: AppPalette.of(context).error),
+            ),
+            enabled: !_signingOut,
+            onTap: _confirmSignOut,
+          ),
+        ],
       ),
     );
   }

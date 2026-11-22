@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../../orders/presentation/payment_awaiting.dart' show PurchasedLine;
 import '../../shop/presentation/shop_providers.dart';
 import '../domain/cart_item.dart';
 
@@ -53,7 +54,9 @@ String cartAddMessage(CartAddResult result) {
 /// real fix if something (a rebuild, another snackbar queued mid-flight)
 /// was ever eating the automatic timer.
 void showCartSnackBar(BuildContext context, CartAddResult result) {
-  const duration = Duration(seconds: 2);
+  // Long enough to read and reach "View Cart": the product page has no
+  // other confirmation that the item went in.
+  const duration = Duration(seconds: 4);
   // Physical confirmation on the same frame as the snackbar: a light tap
   // when the item lands in the cart, a firmer one when it was refused.
   if (result == CartAddResult.added) {
@@ -95,6 +98,7 @@ class CartNotifier extends Notifier<List<CartItem>> {
     // that user's own scoped storage key.
     _userId = ref.watch(currentUserIdProvider);
     _unrestored = const [];
+    _purchased = {};
     // Notifier.build() is synchronous, so kick the async hydration off in
     // a microtask and populate state once the saved cart (if any) has
     // been re-fetched from Supabase.
@@ -106,6 +110,18 @@ class CartNotifier extends Notifier<List<CartItem>> {
   /// stay in storage with the cart instead of being overwritten by the next
   /// change, and come back on a later launch.
   List<Map<String, dynamic>> _unrestored = const [];
+
+  /// What a confirmed payment bought (see [removePurchased]) that a saved
+  /// cart still being restored must not bring back, by line key: the units
+  /// to take off the restored line, or null for the whole line.
+  Map<String, int?> _purchased = {};
+
+  /// [quantity] less the [bought] units; null (the whole line) leaves none.
+  static int _remainder(int quantity, int? bought) =>
+      bought == null || bought >= quantity ? 0 : quantity - bought;
+
+  static String _lineKey(String productId, String? variantId, String? size) =>
+      '$productId::${variantId ?? ''}::${size ?? ''}';
 
   Future<void> _hydrate() async {
     final userId = _userId;
@@ -127,6 +143,10 @@ class CartNotifier extends Notifier<List<CartItem>> {
         final sizeLabel = entry['size_label'] as String?;
         final quantity = entry['quantity'] as int? ?? 1;
         if (productId == null) continue;
+        // Bought outright: not worth fetching. A part-bought line is cut
+        // down below, once, when the restored lines join the cart.
+        final key = _lineKey(productId, variantId, sizeLabel);
+        if (_purchased.containsKey(key) && _purchased[key] == null) continue;
         final Product? product;
         try {
           product = await repo.fetchProductById(productId);
@@ -169,10 +189,18 @@ class CartNotifier extends Notifier<List<CartItem>> {
       // in the meantime must not land the previous account's items here.
       if (_userId != userId) return;
       _unrestored = unrestored;
-      // Lines added while this ran stay; restored ones join them.
+      // Lines added while this ran stay; restored ones join them, except
+      // any a payment confirmed meanwhile.
       state = [
         ...state,
-        ...items.where((i) => !state.any((s) => s.lineKey == i.lineKey)),
+        for (final item in items)
+          if (!state.any((s) => s.lineKey == item.lineKey))
+            if (!_purchased.containsKey(item.lineKey))
+              item
+            else if (_remainder(item.quantity, _purchased[item.lineKey]) > 0)
+              item.copyWith(
+                quantity: _remainder(item.quantity, _purchased[item.lineKey]),
+              ),
       ];
       // Store the combined cart: lines added meanwhile were saved alone.
       await _persist();
@@ -283,6 +311,75 @@ class CartNotifier extends Notifier<List<CartItem>> {
                   i.selectedSize == size),
         )
         .toList();
+    _persist();
+  }
+
+  /// Takes what a server-confirmed payment bought out of the cart: the
+  /// purchased quantity comes off each line, and a line with nothing left
+  /// is removed (units added while the payment was being confirmed stay).
+  /// A purchase without a quantity takes the whole line. Applies also when
+  /// the saved cart is still being restored (a payment confirmed on the
+  /// launch after the app was closed), and to the lines that could not be
+  /// checked yet.
+  void removePurchased(Iterable<PurchasedLine> lines) {
+    final bought = <String, int?>{};
+    for (final line in lines) {
+      final key = _lineKey(line.productId, line.variantId, line.size);
+      final quantity = line.quantity;
+      final already = bought[key];
+      bought[key] =
+          quantity == null || (bought.containsKey(key) && already == null)
+          ? null
+          : (already ?? 0) + quantity;
+    }
+    if (bought.isEmpty) return;
+
+    var changed = false;
+    final inMemory = <String>{};
+    final kept = <CartItem>[];
+    for (final item in state) {
+      if (!bought.containsKey(item.lineKey)) {
+        kept.add(item);
+        continue;
+      }
+      changed = true;
+      inMemory.add(item.lineKey);
+      final left = _remainder(item.quantity, bought[item.lineKey]);
+      if (left > 0) kept.add(item.copyWith(quantity: left));
+    }
+    final unrestored = <Map<String, dynamic>>[];
+    for (final line in _unrestored) {
+      final key = _lineKey(
+        line['product_id'] as String? ?? '',
+        line['variant_id'] as String?,
+        line['size_label'] as String?,
+      );
+      if (!bought.containsKey(key)) {
+        unrestored.add(line);
+        continue;
+      }
+      // The same line in the cart already answered for the purchase; this
+      // unchecked copy of it goes.
+      if (inMemory.contains(key)) continue;
+      changed = true;
+      inMemory.add(key);
+      final left = _remainder(line['quantity'] as int? ?? 1, bought[key]);
+      if (left > 0) unrestored.add({...line, 'quantity': left});
+    }
+    // For a cart still being restored: a line dealt with above must not
+    // come back from storage at all, the others lose what was bought.
+    _purchased = {
+      ..._purchased,
+      for (final entry in bought.entries)
+        entry.key: inMemory.contains(entry.key) ? null : entry.value,
+    };
+    if (!changed) {
+      // Nothing of it in memory: restoring (if still running) takes it off
+      // the saved lines and saves the result itself.
+      return;
+    }
+    _unrestored = unrestored;
+    state = kept;
     _persist();
   }
 

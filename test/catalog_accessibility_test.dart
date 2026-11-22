@@ -6,12 +6,15 @@ import 'package:go_router/go_router.dart';
 import 'package:marugen_app/features/cart/domain/cart_item.dart';
 import 'package:marugen_app/features/cart/presentation/cart_providers.dart';
 import 'package:marugen_app/features/orders/presentation/purchase_intent.dart';
+import 'package:marugen_app/features/reviews/presentation/review_providers.dart';
+import 'package:marugen_app/features/shop/presentation/product_detail_screen.dart';
 import 'package:marugen_app/features/shop/presentation/shop_screen.dart';
 import 'package:marugen_app/features/shop/presentation/shop_providers.dart';
 import 'package:marugen_app/features/notifications/presentation/notification_providers.dart';
 import 'package:marugen_app/shared/widgets/product_grid.dart';
 import 'package:marugen_app/shared/widgets/skeleton.dart';
 import 'package:marugen_app/shared/models/product.dart';
+import 'package:marugen_app/shared/models/review.dart';
 import 'package:marugen_app/shared/widgets/product_card.dart';
 import 'package:marugen_app/shared/providers/settings_providers.dart';
 import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
@@ -84,12 +87,9 @@ void main() {
               tester.getTopLeft(cards.at(2)).dy,
               greaterThan(tester.getTopLeft(cards.at(0)).dy),
             );
-            expect(
-              tester
-                  .getSize(find.byTooltip('Add ${product.name} to cart').first)
-                  .width,
-              greaterThanOrEqualTo(48),
-            );
+            // The card carries no controls of its own.
+            expect(find.byType(Tooltip), findsNothing);
+            expect(find.byType(IconButton), findsNothing);
             expect(tester.takeException(), isNull);
           },
         );
@@ -148,7 +148,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('card offers named 48 pixel actions and two name lines', (
+  testWidgets('card keeps two name lines and offers no buttons', (
     tester,
   ) async {
     final product = Product.fromMap({
@@ -178,12 +178,15 @@ void main() {
     );
     await tester.pump();
     expect(tester.widget<Text>(find.text(product.name)).maxLines, 2);
-    expect(find.byTooltip('Add ${product.name} to cart'), findsOneWidget);
+    expect(find.byType(Tooltip), findsNothing);
+    expect(find.byIcon(Icons.add_shopping_cart), findsNothing);
     expect(
-      tester.getSize(find.byTooltip('Add ${product.name} to cart')).height,
-      greaterThanOrEqualTo(48),
+      find.descendant(
+        of: find.byType(ProductCard),
+        matching: find.byType(InkWell),
+      ),
+      findsOneWidget,
     );
-    expect(find.byTooltip('Save ${product.name} to wishlist'), findsOneWidget);
   });
   for (final width in [320.0, 360.0, 390.0, 1024.0]) {
     testWidgets('long card names at double text scale fit width $width', (
@@ -251,7 +254,8 @@ void main() {
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
 
-  testWidgets('live fish buy now leaves existing cart isolated', (
+  testWidgets('live fish buy now on the product page leaves the existing '
+      'cart isolated', (
     tester,
   ) async {
     final fish = Product.fromMap({
@@ -268,6 +272,14 @@ void main() {
         cartProvider.overrideWith(_ExistingCart.new),
         wishlistProductIdsProvider.overrideWith(_EmptyWishlist.new),
         shopSettingsProvider.overrideWith((ref) async => {}),
+        productDetailProvider('fish').overrideWith((ref) async => fish),
+        relatedProductsProvider((
+          id: 'fish',
+          category: fish.category,
+        )).overrideWith((ref) async => []),
+        productReviewsProvider('fish').overrideWith((ref) async => []),
+        myReviewForProductProvider.overrideWith(_NoReview.new),
+        canReviewProductProvider('fish').overrideWith((ref) async => false),
       ],
     );
     addTearDown(container.dispose);
@@ -275,13 +287,7 @@ void main() {
       routes: [
         GoRoute(
           path: '/',
-          builder: (_, _) => Scaffold(
-            body: SizedBox(
-              width: 250,
-              height: 500,
-              child: ProductCard(product: fish),
-            ),
-          ),
+          builder: (_, _) => const ProductDetailScreen(productId: 'fish'),
         ),
         GoRoute(
           path: '/checkout',
@@ -296,9 +302,9 @@ void main() {
         child: MaterialApp.router(routerConfig: router),
       ),
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
     final before = List.of(container.read(cartProvider));
-    await tester.tap(find.byTooltip('Buy Chosen fish now'));
+    await tester.tap(find.text('Buy Now'));
     await tester.pumpAndSettle();
     expect(container.read(cartProvider), before);
     expect(
@@ -336,6 +342,11 @@ void main() {
     expect(container.read(selectedCategoryProvider), isNull);
     expect(find.text('No products yet'), findsOneWidget);
   });
+}
+
+class _NoReview extends MyReviewNotifier {
+  @override
+  AsyncValue<ProductReview?> build(String arg) => const AsyncData(null);
 }
 
 class _EmptyWishlist extends WishlistIdsNotifier {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' show PostgrestException;
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/sheet_header.dart';
@@ -10,6 +11,7 @@ import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/guarded_write.dart';
 import '../../promo/presentation/promo_providers.dart';
 
 /// Admin CRUD for `promo_codes` — mirrors [AdminKnowledgeScreen]'s
@@ -74,24 +76,7 @@ class AdminPromoScreen extends ConsumerWidget {
                             ? AppPalette.of(context).success
                             : AppPalette.of(context).textMuted,
                       ),
-                      IconButton(
-                        tooltip: 'Delete',
-                        icon: Icon(
-                          Icons.delete_outline,
-                          color: AppPalette.of(context).error,
-                        ),
-                        onPressed: () async {
-                          final confirmed = await confirmDestructiveAction(
-                            context,
-                            title: 'Delete promo code?',
-                            message:
-                                'This permanently removes "${p.code}". This cannot be undone.',
-                          );
-                          if (!confirmed) return;
-                          await ref.read(promoRepositoryProvider).delete(p.id);
-                          ref.invalidate(adminPromoCodesProvider);
-                        },
-                      ),
+                      _PromoRowAction(promo: p),
                     ],
                   ),
                   onTap: () => _showForm(context, ref, existing: p),
@@ -140,6 +125,20 @@ class AdminPromoScreen extends ConsumerWidget {
         active != initialActive ||
         expiresAt != initialExpiry;
 
+    // Typing does not rebuild the sheet, so the unsaved-changes guard is
+    // rebuilt from here whenever a field flips the answer.
+    bool guardDirty = false;
+    BuildContext? sheetContext;
+    void Function(VoidCallback)? rebuildSheet;
+    void onEdited() {
+      if (sheetContext?.mounted != true) return;
+      if (dirty() != guardDirty) rebuildSheet?.call(() {});
+    }
+
+    for (final c in [codeCtrl, valueCtrl, maxRedemptionsCtrl]) {
+      c.addListener(onEdited);
+    }
+
     // Created outside the sheet's own widget tree (this is a plain method,
     // not a State), so nothing disposes them automatically — do it
     // ourselves once the sheet closes, whichever way it closes.
@@ -149,250 +148,356 @@ class AdminPromoScreen extends ConsumerWidget {
       isDismissible: false,
       enableDrag: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => DiscardChangesGuard(
-          dirty: dirty(),
-          busy: saving,
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: AppSpacing.xl,
-              right: AppSpacing.xl,
-              top: AppSpacing.xl,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.xl,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SheetHeader(
-                    existing == null ? 'Add Promo Code' : 'Edit Promo Code',
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  TextField(
-                    controller: codeCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'Code',
-                      hintText: 'e.g. WELCOME10',
+        builder: (ctx, setSheetState) {
+          sheetContext = ctx;
+          rebuildSheet = setSheetState;
+          guardDirty = dirty();
+          return DiscardChangesGuard(
+            dirty: guardDirty,
+            busy: saving,
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: AppSpacing.xl,
+                right: AppSpacing.xl,
+                top: AppSpacing.xl,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.xl,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SheetHeader(
+                      existing == null ? 'Add Promo Code' : 'Edit Promo Code',
                     ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  DropdownButtonFormField<DiscountType>(
-                    isExpanded: true,
-                    isDense: false,
-                    itemHeight:
-                        48 * MediaQuery.textScalerOf(ctx).scale(14) / 14,
-                    initialValue: type,
-                    items: const [
-                      DropdownMenuItem(
-                        value: DiscountType.percent,
-                        child: Text('Percent off'),
+                    const SizedBox(height: AppSpacing.lg),
+                    TextField(
+                      controller: codeCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Code',
+                        hintText: 'e.g. WELCOME10',
                       ),
-                      DropdownMenuItem(
-                        value: DiscountType.fixed,
-                        child: Text('Fixed amount off', maxLines: 2),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    DropdownButtonFormField<DiscountType>(
+                      isExpanded: true,
+                      isDense: false,
+                      itemHeight:
+                          48 * MediaQuery.textScalerOf(ctx).scale(14) / 14,
+                      initialValue: type,
+                      items: const [
+                        DropdownMenuItem(
+                          value: DiscountType.percent,
+                          child: Text('Percent off'),
+                        ),
+                        DropdownMenuItem(
+                          value: DiscountType.fixed,
+                          child: Text('Fixed amount off', maxLines: 2),
+                        ),
+                      ],
+                      onChanged: (v) =>
+                          setSheetState(() => type = v ?? DiscountType.percent),
+                      decoration: const InputDecoration(
+                        labelText: 'Discount type',
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    TextField(
+                      controller: valueCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: type == DiscountType.percent
+                            ? 'Percent (%)'
+                            : 'Amount (S\$)',
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    TextField(
+                      controller: maxRedemptionsCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Usage limit (optional)',
+                        hintText: 'e.g. 100 — leave blank for unlimited',
+                      ),
+                    ),
+                    if (existing != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Used ${existing.timesRedeemed} time(s) so far.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppPalette.of(context).textMuted,
+                        ),
                       ),
                     ],
-                    onChanged: (v) =>
-                        setSheetState(() => type = v ?? DiscountType.percent),
-                    decoration: const InputDecoration(
-                      labelText: 'Discount type',
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
-                    controller: valueCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: type == DiscountType.percent
-                          ? 'Percent (%)'
-                          : 'Amount (S\$)',
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  TextField(
-                    controller: maxRedemptionsCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Usage limit (optional)',
-                      hintText: 'e.g. 100 — leave blank for unlimited',
-                    ),
-                  ),
-                  if (existing != null) ...[
                     const SizedBox(height: 4),
                     Text(
-                      'Used ${existing.timesRedeemed} time(s) so far.',
+                      'Every code is one-use-per-customer automatically — this '
+                      'limit only caps the total number of customers who can use it.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppPalette.of(context).textMuted,
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 4),
-                  Text(
-                    'Every code is one-use-per-customer automatically — this '
-                    'limit only caps the total number of customers who can use it.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppPalette.of(context).textMuted,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Expiry date'),
-                    subtitle: Text(
-                      expiresAt == null
-                          ? 'No expiry'
-                          : DateFormat.yMMMd().format(expiresAt!),
-                    ),
-                    trailing: Wrap(
-                      children: [
-                        if (expiresAt != null)
+                    const SizedBox(height: AppSpacing.md),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Expiry date'),
+                      subtitle: Text(
+                        expiresAt == null
+                            ? 'No expiry'
+                            : DateFormat.yMMMd().format(expiresAt!),
+                      ),
+                      trailing: Wrap(
+                        children: [
+                          if (expiresAt != null)
+                            IconButton(
+                              tooltip: 'Clear expiry date',
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () =>
+                                  setSheetState(() => expiresAt = null),
+                            ),
                           IconButton(
-                            tooltip: 'Clear expiry date',
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () =>
-                                setSheetState(() => expiresAt = null),
+                            tooltip: 'Choose expiry date',
+                            icon: const Icon(
+                              Icons.calendar_today_outlined,
+                              size: 18,
+                            ),
+                            onPressed: () async {
+                              final picked = await showDatePicker(
+                                context: ctx,
+                                initialDate: expiresAt ?? DateTime.now(),
+                                firstDate:
+                                    expiresAt != null &&
+                                        expiresAt!.isBefore(
+                                          DateTime.now().subtract(
+                                            const Duration(days: 365),
+                                          ),
+                                        )
+                                    ? expiresAt!
+                                    : DateTime.now().subtract(
+                                        const Duration(days: 365),
+                                      ),
+                                lastDate:
+                                    expiresAt != null &&
+                                        expiresAt!.isAfter(
+                                          DateTime.now().add(
+                                            const Duration(days: 365 * 3),
+                                          ),
+                                        )
+                                    ? expiresAt!
+                                    : DateTime.now().add(
+                                        const Duration(days: 365 * 3),
+                                      ),
+                              );
+                              if (ctx.mounted && picked != null) {
+                                setSheetState(() => expiresAt = picked);
+                              }
+                            },
                           ),
-                        IconButton(
-                          tooltip: 'Choose expiry date',
-                          icon: const Icon(
-                            Icons.calendar_today_outlined,
-                            size: 18,
-                          ),
-                          onPressed: () async {
-                            final picked = await showDatePicker(
-                              context: ctx,
-                              initialDate: expiresAt ?? DateTime.now(),
-                              firstDate:
-                                  expiresAt != null &&
-                                      expiresAt!.isBefore(
-                                        DateTime.now().subtract(
-                                          const Duration(days: 365),
-                                        ),
-                                      )
-                                  ? expiresAt!
-                                  : DateTime.now().subtract(
-                                      const Duration(days: 365),
-                                    ),
-                              lastDate:
-                                  expiresAt != null &&
-                                      expiresAt!.isAfter(
-                                        DateTime.now().add(
-                                          const Duration(days: 365 * 3),
-                                        ),
-                                      )
-                                  ? expiresAt!
-                                  : DateTime.now().add(
-                                      const Duration(days: 365 * 3),
-                                    ),
-                            );
-                            if (ctx.mounted && picked != null) {
-                              setSheetState(() => expiresAt = picked);
-                            }
-                          },
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Active'),
-                    value: active,
-                    onChanged: (v) => setSheetState(() => active = v),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  if (saveError != null) ...[
-                    Text(
-                      saveError!,
-                      style: TextStyle(color: AppPalette.of(ctx).error),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Active'),
+                      value: active,
+                      onChanged: (v) => setSheetState(() => active = v),
                     ),
-                    const SizedBox(height: AppSpacing.sm),
-                  ],
-                  ElevatedButton(
-                    onPressed: saving
-                        ? null
-                        : () async {
-                            final code = codeCtrl.text.trim().toUpperCase();
-                            final value =
-                                double.tryParse(valueCtrl.text.trim()) ?? 0;
-                            if (code.isEmpty || !value.isFinite || value <= 0) {
-                              setSheetState(
-                                () => saveError = 'Enter a code and a discount value greater than 0.',
-                              );
-                              return;
-                            }
-                            // Not exploitable (the checkout total is already
-                            // clamped to the subtotal both client- and
-                            // server-side), but a percent code saved above 100
-                            // reads as an admin data-entry mistake — catch it here.
-                            if (type == DiscountType.percent && value > 100) {
-                              setSheetState(
-                                () => saveError =
-                                    "Percent discount can't be more than 100%.",
-                              );
-                              return;
-                            }
-                            final maxRedemptionsText = maxRedemptionsCtrl.text
-                                .trim();
-                            final limit = int.tryParse(maxRedemptionsText);
-                            if (maxRedemptionsText.isNotEmpty &&
-                                (limit == null || limit <= 0)) {
-                              setSheetState(
-                                () => saveError = 'Enter a whole-number usage limit greater than 0, or leave it blank.',
-                              );
-                              return;
-                            }
-                            setSheetState(() {
-                              saving = true;
-                              saveError = null;
-                            });
-                            try {
-                              await repository.upsert({
-                                'code': code,
-                                'discount_type': type.name,
-                                'discount_value': value,
-                                'active': active,
-                                'expires_at': expiresAt == null
-                                    ? null
-                                    : promoExpiryStorageValue(expiresAt!),
-                                'max_redemptions': maxRedemptionsText.isEmpty
-                                    ? null
-                                    : int.tryParse(maxRedemptionsText),
-                              }, id: existing?.id);
-                              container.invalidate(adminPromoCodesProvider);
-                              if (ctx.mounted) Navigator.pop(ctx);
-                            } catch (error) {
-                              if (ctx.mounted) {
+                    const SizedBox(height: AppSpacing.lg),
+                    if (saveError != null) ...[
+                      Text(
+                        saveError!,
+                        style: TextStyle(color: AppPalette.of(ctx).error),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                    ElevatedButton(
+                      onPressed: saving
+                          ? null
+                          : () async {
+                              final code = codeCtrl.text.trim().toUpperCase();
+                              final value =
+                                  double.tryParse(valueCtrl.text.trim()) ?? 0;
+                              if (code.isEmpty ||
+                                  !value.isFinite ||
+                                  value <= 0) {
                                 setSheetState(
-                                  () => saveError = friendlyErrorMessage(
-                                    error,
-                                    fallback: 'Could not save the promo code. Please try again.',
-                                    context: 'admin.promo_form',
-                                  ),
+                                  () => saveError = 'Enter a code and a discount value greater than 0.',
                                 );
+                                return;
                               }
-                            } finally {
-                              if (ctx.mounted) {
-                                setSheetState(() => saving = false);
+                              // Not exploitable (the checkout total is already
+                              // clamped to the subtotal both client- and
+                              // server-side), but a percent code saved above 100
+                              // reads as an admin data-entry mistake — catch it here.
+                              if (type == DiscountType.percent && value > 100) {
+                                setSheetState(
+                                  () => saveError = "Percent discount can't be more than 100%.",
+                                );
+                                return;
                               }
-                            }
-                          },
-                    child: Text(saving ? 'Saving…' : 'Save'),
-                  ),
-                ],
+                              final maxRedemptionsText = maxRedemptionsCtrl.text
+                                  .trim();
+                              final limit = int.tryParse(maxRedemptionsText);
+                              if (maxRedemptionsText.isNotEmpty &&
+                                  (limit == null || limit <= 0)) {
+                                setSheetState(
+                                  () => saveError = 'Enter a whole-number usage limit greater than 0, or leave it blank.',
+                                );
+                                return;
+                              }
+                              setSheetState(() {
+                                saving = true;
+                                saveError = null;
+                              });
+                              try {
+                                await repository.upsert({
+                                  'code': code,
+                                  'discount_type': type.name,
+                                  'discount_value': value,
+                                  'active': active,
+                                  'expires_at': expiresAt == null
+                                      ? null
+                                      : promoExpiryStorageValue(expiresAt!),
+                                  'max_redemptions': maxRedemptionsText.isEmpty
+                                      ? null
+                                      : int.tryParse(maxRedemptionsText),
+                                }, id: existing?.id);
+                                container.invalidate(adminPromoCodesProvider);
+                                if (ctx.mounted) Navigator.pop(ctx);
+                              } catch (error) {
+                                if (ctx.mounted) {
+                                  setSheetState(
+                                    () => saveError = friendlyErrorMessage(
+                                      error,
+                                      fallback: 'Could not save the promo code. Please try again.',
+                                      context: 'admin.promo_form',
+                                    ),
+                                  );
+                                }
+                              } finally {
+                                if (ctx.mounted) {
+                                  setSheetState(() => saving = false);
+                                }
+                              }
+                            },
+                      child: Text(saving ? 'Saving…' : 'Save'),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     ).whenComplete(() {
       codeCtrl.dispose();
       valueCtrl.dispose();
       maxRedemptionsCtrl.dispose();
     });
+  }
+}
+
+/// The row's one write. An unused code can be deleted. A code that has been
+/// used is kept for the records (its redemptions hang off it, and the
+/// database refuses the delete), so it is turned off instead; once it is
+/// off there is nothing left to do here.
+class _PromoRowAction extends ConsumerWidget {
+  final PromoCode promo;
+  const _PromoRowAction({required this.promo});
+
+  static String _times(int n) => n == 1 ? '1 time' : '$n times';
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final used = promo.timesRedeemed > 0;
+    if (used && !promo.active) return const SizedBox(width: 48);
+    return GuardedWrite(
+      errorFallback: used
+          ? 'Could not turn off the promo code. Please try again.'
+          : 'Could not delete the promo code. Please try again.',
+      errorContext: 'admin.promo',
+      builder: (context, busy, run) => used
+          // An icon like Delete: a text button does not fit beside the
+          // code at large text sizes.
+          ? IconButton(
+              tooltip: 'Turn off',
+              icon: Icon(
+                Icons.do_not_disturb_on_outlined,
+                color: AppPalette.of(context).textMuted,
+              ),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final container = ProviderScope.containerOf(
+                        context,
+                        listen: false,
+                      );
+                      final confirmed = await confirmAction(
+                        context,
+                        title: 'Turn off ${promo.code}?',
+                        message:
+                            'It has been used ${_times(promo.timesRedeemed)}, '
+                            'so it is kept for your records. Customers can '
+                            'no longer apply it.',
+                        confirmLabel: 'Turn off',
+                      );
+                      if (!confirmed) return;
+                      await run(() async {
+                        await container.read(promoRepositoryProvider).upsert({
+                          'active': false,
+                        }, id: promo.id);
+                        container.invalidate(adminPromoCodesProvider);
+                      });
+                    },
+            )
+          : IconButton(
+              tooltip: 'Delete',
+              icon: Icon(
+                Icons.delete_outline,
+                color: AppPalette.of(context).error,
+              ),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final container = ProviderScope.containerOf(
+                        context,
+                        listen: false,
+                      );
+                      final confirmed = await confirmDestructiveAction(
+                        context,
+                        title: 'Delete promo code?',
+                        message:
+                            'This permanently removes "${promo.code}". This cannot be undone.',
+                      );
+                      if (!confirmed) return;
+                      await run(() async {
+                        try {
+                          await container
+                              .read(promoRepositoryProvider)
+                              .delete(promo.id);
+                        } on PostgrestException catch (e) {
+                          // The database refuses to delete a code that has
+                          // been used (migration 0081) and says what to do
+                          // instead; show that, not the generic "in use".
+                          if (e.code == '23503' &&
+                              !e.message.contains('violates')) {
+                            throw ServerMessageException(
+                              e.message,
+                              status: 409,
+                            );
+                          }
+                          rethrow;
+                        } finally {
+                          container.invalidate(adminPromoCodesProvider);
+                        }
+                      });
+                    },
+            ),
+    );
   }
 }

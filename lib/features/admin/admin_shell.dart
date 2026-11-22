@@ -16,14 +16,44 @@ import 'promo/admin_promo_screen.dart';
 import 'reviews/admin_reviews_screen.dart';
 import 'settings/admin_settings_screen.dart';
 
-/// The AdminShell's currently selected tab (index into _AdminShellState.
-/// _tabs). Exposed so screens nested inside a tab — e.g. the dashboard's
+/// The AdminShell's currently selected tab (index into
+/// [AdminShell.tabs]). Exposed so screens nested inside a tab — e.g. the dashboard's
 /// stat cards — can jump to another tab without the shell needing to pass
 /// callbacks down through every nested widget.
 final adminTabIndexProvider = StateProvider<int>((ref) => 0);
 
-/// Index of the Home Banners screen in the shell's tabs.
+/// Indexes into [AdminShell.tabs], for anything that sends staff to a tab.
+const int kAdminHomeTab = 0;
+const int kAdminProductsTab = 1;
+const int kAdminOrdersTab = 2;
+const int kAdminKnowledgeTab = 3;
+const int kAdminPromoTab = 4;
+const int kAdminReviewsTab = 5;
+const int kAdminSettingsTab = 6;
+const int kAdminAnalyticsTab = 7;
 const int kAdminHomeBannersTab = 8;
+
+/// Set by the Settings tab while it holds unsaved edits: asked before
+/// Android back leaves that tab, and returns whether leaving is allowed.
+///
+/// Settings is a tab inside the shell's IndexedStack, so a PopScope of its
+/// own would also intercept back on every other tab (and "Discard" would
+/// pop the shell itself). The shell owns the one PopScope and consults
+/// this only while Settings is the tab on screen.
+final adminSettingsLeaveGuardProvider = StateProvider<Future<bool> Function()?>(
+  (ref) => null,
+);
+
+/// Android back on a tab other than Home: returns to Home, after asking
+/// the Settings tab about unsaved edits when that is the tab showing.
+Future<void> adminShellBackToHome(WidgetRef ref) async {
+  final guard = ref.read(adminSettingsLeaveGuardProvider);
+  if (ref.read(adminTabIndexProvider) == kAdminSettingsTab && guard != null) {
+    if (!await guard()) return;
+    if (!ref.context.mounted) return;
+  }
+  ref.read(adminTabIndexProvider.notifier).state = kAdminHomeTab;
+}
 
 class _MoreItem {
   final IconData icon;
@@ -43,7 +73,8 @@ class _MoreItem {
 class AdminShell extends ConsumerWidget {
   const AdminShell({super.key});
 
-  static const _tabs = [
+  /// In the order of the `kAdmin…Tab` constants above.
+  static const tabs = <Widget>[
     AdminDashboardScreen(),
     AdminProductsScreen(),
     AdminOrdersScreen(),
@@ -70,19 +101,39 @@ class AdminShell extends ConsumerWidget {
   // Settings kept last — it's the least-used item, so the more frequently
   // reached-for ones (Knowledge/Promo/Reviews/Analytics) sit above it.
   static const _moreItems = [
-    _MoreItem(icon: Icons.menu_book_outlined, label: 'Knowledge', index: 3),
-    _MoreItem(icon: Icons.local_offer_outlined, label: 'Promo Codes', index: 4),
+    _MoreItem(
+      icon: Icons.menu_book_outlined,
+      label: 'Knowledge',
+      index: kAdminKnowledgeTab,
+    ),
+    _MoreItem(
+      icon: Icons.local_offer_outlined,
+      label: 'Promo Codes',
+      index: kAdminPromoTab,
+    ),
     _MoreItem(
       icon: Icons.view_carousel_outlined,
       label: 'Home Banners',
       index: kAdminHomeBannersTab,
     ),
-    _MoreItem(icon: Icons.rate_review_outlined, label: 'Reviews', index: 5),
-    _MoreItem(icon: Icons.query_stats_outlined, label: 'Analytics', index: 7),
-    _MoreItem(icon: Icons.settings_outlined, label: 'Settings', index: 6),
+    _MoreItem(
+      icon: Icons.rate_review_outlined,
+      label: 'Reviews',
+      index: kAdminReviewsTab,
+    ),
+    _MoreItem(
+      icon: Icons.query_stats_outlined,
+      label: 'Analytics',
+      index: kAdminAnalyticsTab,
+    ),
+    _MoreItem(
+      icon: Icons.settings_outlined,
+      label: 'Settings',
+      index: kAdminSettingsTab,
+    ),
   ];
 
-  bool _isMoreSelected(int index) => index >= 3;
+  bool _isMoreSelected(int index) => index > kAdminOrdersTab;
 
   IconData _moreTabIcon(int index) {
     if (!_isMoreSelected(index)) return Icons.more_horiz;
@@ -122,15 +173,15 @@ class AdminShell extends ConsumerWidget {
     );
     return BackToFirstTab(
       index: index,
-      onBackToFirst: () => ref.read(adminTabIndexProvider.notifier).state = 0,
+      onBackToFirst: () => adminShellBackToHome(ref),
       child: Scaffold(
         body: IndexedStack(
           index: index,
           children: [
-            for (var i = 0; i < _tabs.length; i++)
+            for (var i = 0; i < tabs.length; i++)
               TickerMode(
                 enabled: i == index,
-                child: HeroMode(enabled: i == index, child: _tabs[i]),
+                child: HeroMode(enabled: i == index, child: tabs[i]),
               ),
           ],
         ),
@@ -140,7 +191,7 @@ class AdminShell extends ConsumerWidget {
             if (i == 3) {
               _openMoreSheet(context, ref, index);
             } else {
-              if (i == 2) refreshAdminOrders(ref);
+              if (i == kAdminOrdersTab) refreshAdminOrders(ref);
               ref.read(adminTabIndexProvider.notifier).state = i;
             }
           },

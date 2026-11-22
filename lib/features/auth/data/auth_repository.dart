@@ -16,6 +16,35 @@ import '../../../shared/models/app_user.dart';
 import '../../../shared/utils/error_message.dart';
 import '../../../shared/utils/image_upload.dart';
 
+/// A failure this repository reports in its own words. [message] is written
+/// for the customer and is the only auth error text the screens show as-is;
+/// everything else (Supabase, Google, Apple) is mapped to fixed copy.
+const googleSignInUnavailableMessage =
+    "Google sign-in isn't available right now. Use email instead.";
+
+class AuthRepositoryException implements Exception {
+  final String message;
+  const AuthRepositoryException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+/// Sign-up was refused because the address already has an account.
+class EmailAlreadyRegisteredException extends AuthRepositoryException {
+  const EmailAlreadyRegisteredException()
+    : super(
+        'An account with this email already exists. Log in, or use Forgot password.',
+      );
+}
+
+/// With email confirmation on, Supabase answers a sign-up for an address
+/// that already has an account exactly like a new one — no error, no
+/// session — except that the returned user carries no identities, and no
+/// email is sent. Treating that as "check your inbox" strands the customer.
+bool signUpEmailAlreadyRegistered(AuthResponse response) =>
+    response.session == null && (response.user?.identities?.isEmpty ?? false);
+
 /// Wraps Supabase Auth + the `profiles` table (which stores the app-level
 /// role used to decide customer vs admin UI). See
 /// `supabase/migrations/0001_init.sql` for the `profiles` table + RLS.
@@ -52,7 +81,9 @@ class AuthRepository {
   /// Throws if there is no address to send to.
   Future<void> resendVerificationEmail({String? email}) async {
     final address = email ?? currentUser?.email;
-    if (address == null) throw Exception('Not signed in');
+    if (address == null) {
+      throw const AuthRepositoryException('Log in to resend the email.');
+    }
     await _client.auth.resend(type: OtpType.signup, email: address);
   }
 
@@ -100,7 +131,9 @@ class AuthRepository {
   /// other path in the bucket admin-only as before.
   Future<String> uploadAvatar(Uint8List bytes, String ext) async {
     final user = currentUser;
-    if (user == null) throw Exception('Not logged in');
+    if (user == null) {
+      throw const AuthRepositoryException('Log in to change your photo.');
+    }
     final upload = prepareImageUpload(bytes, ext, upsert: true);
     final path =
         'avatars/${user.id}/${DateTime.now().millisecondsSinceEpoch}.${upload.extension}';
@@ -143,7 +176,9 @@ class AuthRepository {
 
   /// Creates the account. Returns true when the email must be confirmed
   /// before logging in (Supabase returned no session); false when the
-  /// customer is already signed in and the router takes over.
+  /// customer is already signed in and the router takes over. Throws
+  /// [EmailAlreadyRegisteredException] when the address already has an
+  /// account (see [signUpEmailAlreadyRegistered]).
   Future<bool> signUpWithEmail(
     String email,
     String password, {
@@ -154,6 +189,9 @@ class AuthRepository {
       password: password,
       data: fullName != null ? {'full_name': fullName} : null,
     );
+    if (signUpEmailAlreadyRegistered(response)) {
+      throw const EmailAlreadyRegisteredException();
+    }
     return response.session == null;
   }
 
@@ -165,10 +203,14 @@ class AuthRepository {
     final webClientId = Env.googleWebClientId;
     final iosClientId = Env.googleIosClientId;
     if (webClientId.isEmpty) {
-      throw Exception(
-        'Google Sign-In is not configured. Add GOOGLE_WEB_CLIENT_ID '
-        '(and GOOGLE_IOS_CLIENT_ID on iOS) to .env — see README.',
+      // Missing GOOGLE_WEB_CLIENT_ID (and GOOGLE_IOS_CLIENT_ID on iOS) in
+      // the build's environment — see README. Not something a customer can
+      // act on, so they are pointed at the way that works.
+      developer.log(
+        'Google Sign-In is not configured for this build',
+        name: 'AuthRepository',
       );
+      throw const AuthRepositoryException(googleSignInUnavailableMessage);
     }
     await GoogleSignIn.instance.initialize(
       serverClientId: webClientId,
@@ -193,7 +235,7 @@ class AuthRepository {
       googleUser = await googleSignIn.authenticate(scopeHint: scopes);
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) {
-        throw Exception('Google sign-in was cancelled.');
+        throw const AuthRepositoryException('Sign-in was cancelled.');
       }
       rethrow;
     }
@@ -204,9 +246,11 @@ class AuthRepository {
 
     final idToken = googleUser.authentication.idToken;
     if (idToken == null) {
-      throw Exception(
-        'Google did not return an ID token. Check GOOGLE_WEB_CLIENT_ID.',
+      developer.log(
+        'Google did not return an ID token',
+        name: 'AuthRepository',
       );
+      throw const AuthRepositoryException(googleSignInUnavailableMessage);
     }
 
     await _client.auth.signInWithIdToken(
@@ -229,7 +273,9 @@ class AuthRepository {
         redirectTo: oauthRedirectTo,
       );
       if (!launched) {
-        throw Exception('Could not open Apple sign-in.');
+        throw const AuthRepositoryException(
+          "Apple sign-in couldn't be opened. Use email instead.",
+        );
       }
       return;
     }
@@ -247,7 +293,9 @@ class AuthRepository {
 
     final idToken = credential.identityToken;
     if (idToken == null) {
-      throw Exception('Apple did not return an ID token.');
+      throw const AuthRepositoryException(
+        "Apple sign-in didn't complete. Try again, or use email instead.",
+      );
     }
 
     await _client.auth.signInWithIdToken(

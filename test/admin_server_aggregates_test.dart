@@ -283,10 +283,10 @@ void main() {
     test('before migration 0078 it adds up every order as before', () async {
       final container = containerWith(Aggregates());
       final summary = await container.read(adminPaymentsSummaryProvider.future);
-      // The unpaid checkout reached Stripe, so it counts as a transaction,
-      // but nothing was collected from it.
+      // The unpaid checkout reached Stripe but collected nothing, so it is
+      // not one of the paid orders the figure comes from.
       expect(summary.collected, 50);
-      expect(summary.transactionCount, 3);
+      expect(summary.transactionCount, 2);
     });
 
     test('a real failure is not papered over with the fallback', () async {

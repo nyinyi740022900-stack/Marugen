@@ -57,9 +57,75 @@ InvoiceGst invoiceGst({
   );
 }
 
-/// Builds a proper tax-invoice PDF for [order] — shop letterhead, bill-to /
+/// One line of the invoice's totals block, above TOTAL. A line with an
+/// [amount] is part of the sum; a [note] explains the line above it and
+/// carries its figure inside the text, so nothing that is not added up is
+/// printed in the amount column.
+typedef InvoiceTotalLine = ({String label, double? amount, bool note});
+
+/// The totals block: the amounts that add up to the order total, each
+/// followed by its "of which" notes (discount already taken off, GST
+/// inside the item prices, the delivery share the shop pays). No GST note
+/// is printed when the rate is 0.
+List<InvoiceTotalLine> invoiceTotalLines({
+  required Order order,
+  required Map<String, dynamic> settings,
+}) {
+  InvoiceTotalLine row(String label, double amount) =>
+      (label: label, amount: amount, note: false);
+  InvoiceTotalLine note(String label) =>
+      (label: label, amount: null, note: true);
+
+  final discount = order.discountAmount ?? 0;
+  // orders.total is the amount charged by the server, including merchandise
+  // tax and only the buyer's shipping share. Never tax shipping a second time.
+  final buyerShipping = (order.buyerShippingCents ?? 0) / 100;
+  final merchandiseTotal = order.total - buyerShipping;
+  final gst = invoiceGst(order: order, settings: settings);
+  final hasGst = gst.percent > 0;
+  final sellerShipping =
+      order.shippingCostPolicy == 'shared_50_50' &&
+          order.sellerShippingCents != null
+      ? order.sellerShippingCents! / 100
+      : null;
+  return [
+    row(
+      '${discount > 0 ? 'Items after discount' : 'Items'}'
+      '${hasGst ? ' (incl. GST)' : ''}',
+      merchandiseTotal,
+    ),
+    if (discount > 0)
+      note(
+        'after ${_money(discount)} discount'
+        '${order.promoCode != null ? ' (${order.promoCode})' : ''}',
+      ),
+    if (hasGst) note('of which ${gst.label}: ${_money(gst.amount)}'),
+    if (order.shippingQuoteId != null || buyerShipping > 0)
+      row(
+        order.shippingCostPolicy == 'seller_100'
+            ? 'Delivery (shop covers in full)'
+            : 'Delivery - buyer share',
+        buyerShipping,
+      ),
+    if (sellerShipping != null)
+      note('the shop pays a further ${_money(sellerShipping)} of delivery'),
+  ];
+}
+
+/// The document title. "TAX INVOICE" is reserved for an invoice that
+/// charges GST: the order's own snapshot rate when it has one, otherwise
+/// the shop's current rate. A shop that is not GST-registered (0%) issues
+/// a plain "INVOICE".
+String invoiceTitle({
+  required Order order,
+  required Map<String, dynamic> settings,
+}) => invoiceGst(order: order, settings: settings).percent > 0
+    ? 'TAX INVOICE'
+    : 'INVOICE';
+
+/// Builds the invoice PDF for [order] — shop letterhead, bill-to /
 /// order-info columns, an itemised table, and a totals block (subtotal,
-/// promo discount, GST, grand total). Used for both "Print Invoice" (admin)
+/// promo discount, GST when charged, grand total). Used for both "Print Invoice" (admin)
 /// and the customer's receipt-share action, so both sides see the exact
 /// same document.
 Future<Uint8List> buildInvoicePdf({
@@ -69,12 +135,7 @@ Future<Uint8List> buildInvoicePdf({
   final shopName = settings['shop_name'] as String? ?? 'Marugen Fish Farm';
   final shopPhone = settings['shop_phone'] as String?;
   final shopAddress = settings['shop_address'] as String?;
-  final discount = order.discountAmount ?? 0;
-  // orders.total is the amount charged by the server, including merchandise
-  // tax and only the buyer's shipping share. Never tax shipping a second time.
-  final buyerShipping = (order.buyerShippingCents ?? 0) / 100;
-  final merchandiseTotal = order.total - buyerShipping;
-  final gst = invoiceGst(order: order, settings: settings);
+  final totalLines = invoiceTotalLines(order: order, settings: settings);
   final grandTotal = order.total;
 
   final shipping = order.shippingAddress;
@@ -149,7 +210,7 @@ Future<Uint8List> buildInvoicePdf({
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text(
-                      'TAX INVOICE',
+                      invoiceTitle(order: order, settings: settings),
                       style: pw.TextStyle(
                         fontSize: 16,
                         fontWeight: pw.FontWeight.bold,
@@ -328,32 +389,10 @@ Future<Uint8List> buildInvoicePdf({
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                     children: [
-                      _totalRow(
-                        'Items after discount (incl. GST)',
-                        _money(merchandiseTotal),
-                      ),
-                      if (discount > 0)
-                        _totalRow(
-                          order.promoCode != null
-                              ? 'Discount included (${order.promoCode})'
-                              : 'Discount included above',
-                          '-${_money(discount)}',
-                          color: _brandRed,
-                        ),
-                      _totalRow(gst.label, _money(gst.amount)),
-                      if (order.shippingQuoteId != null)
-                        _totalRow(
-                          order.shippingCostPolicy == 'seller_100'
-                              ? 'Delivery (shop covers in full)'
-                              : 'Delivery - buyer share',
-                          _money(buyerShipping),
-                        ),
-                      if (order.shippingCostPolicy == 'shared_50_50' &&
-                          order.sellerShippingCents != null)
-                        _totalRow(
-                          'Delivery covered by shop',
-                          _money(order.sellerShippingCents! / 100),
-                        ),
+                      for (final line in totalLines)
+                        line.note
+                            ? _totalNote(line.label)
+                            : _totalRow(line.label, _money(line.amount!)),
                       pw.Padding(
                         padding: const pw.EdgeInsets.symmetric(vertical: 6),
                         child: pw.Divider(color: _lightGrey, thickness: 1),
@@ -431,6 +470,20 @@ pw.Widget _cell(
         )
       : child;
 }
+
+/// An explanatory line under a totals row: smaller, indented, and with no
+/// figure in the amount column.
+pw.Widget _totalNote(String text) => pw.Padding(
+  padding: const pw.EdgeInsets.only(left: 10, bottom: 3),
+  child: pw.Text(
+    text,
+    style: pw.TextStyle(
+      fontSize: 8,
+      color: _grey,
+      fontStyle: pw.FontStyle.italic,
+    ),
+  ),
+);
 
 pw.Widget _totalRow(
   String label,

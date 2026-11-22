@@ -5,6 +5,7 @@ import '../../core/supabase/supabase_client.dart';
 import '../../shared/models/app_user.dart';
 import '../../shared/models/support_contact.dart';
 import '../../shared/providers/settings_providers.dart';
+import '../../shared/widgets/confirm_dialog.dart';
 import '../auth/presentation/auth_providers.dart';
 import 'support_contact_form.dart';
 
@@ -108,7 +109,15 @@ class _SupportDirectorySettingsState
     await _save();
   }
 
+  /// Removing is saved at once and customers see it at once, so it asks.
   Future<void> _remove(SupportContact contact) async {
+    final confirmed = await confirmDestructiveAction(
+      context,
+      title: 'Remove ${contact.name}?',
+      message: 'Customers will no longer see this contact.',
+      confirmLabel: 'Remove',
+    );
+    if (!confirmed || !mounted || !_sameOwner || _saving) return;
     setState(() => _contacts!.remove(contact));
     await _save();
   }

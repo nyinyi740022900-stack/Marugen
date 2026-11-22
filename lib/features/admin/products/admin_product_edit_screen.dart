@@ -65,8 +65,12 @@ class _AdminProductEditScreenState
   _Photo? _certificate;
 
   /// The fish details as loaded, so saving keeps what this form has no
-  /// field for (gender, keys written by a newer version of the app).
+  /// field for (keys written by a newer version of the app).
   FishDetails? _loadedFish;
+
+  /// Stored gender text. The form offers Unknown / Male / Female; any
+  /// other stored wording is kept until staff pick one of those.
+  String? _gender;
 
   /// Photos in display order (first = cover). Each is either already
   /// uploaded (`url`) or still a local file; uploads happen on Save, one
@@ -88,9 +92,12 @@ class _AdminProductEditScreenState
 
   // Product-level size labels (e.g. pellet Small/Medium/Large) — independent
   // of weight price; stock is entered in the weight×size matrix below.
-  final List<TextEditingController> _sizeOptionCtrls = [];
+  final List<_SizeRow> _sizeRows = [];
 
-  /// Matrix cells keyed by "$variantIndex::$sizeLabel".
+  /// Matrix cells keyed by the identity of their weight row and size row
+  /// (see [_cellKey]), never by position or label text: duplicating,
+  /// removing or reordering a row, or renaming a size, must not move a
+  /// quantity to another cell or reset it.
   final Map<String, TextEditingController> _sizeStockCtrls = {};
   final _fillAllStockCtrl = TextEditingController();
 
@@ -115,6 +122,7 @@ class _AdminProductEditScreenState
     _ageCtrl.text,
     _category.name,
     _showPrice,
+    _gender ?? '',
     _hasCertificate,
     _certificate == null ? '' : _certificate!.url ?? _certificate!.file!.path,
     _photos.map((ph) => ph.url ?? ph.file!.path).join(','),
@@ -128,10 +136,11 @@ class _AdminProductEditScreenState
       v.packedSize.width.text,
       v.packedSize.height.text,
     ],
-    _sizeOptionCtrls.map((c) => c.text).join(','),
-    (_sizeStockCtrls.entries.map((e) => '${e.key}=${e.value.text}').toList()
-          ..sort())
-        .join(','),
+    _sizeRows.map((r) => r.ctrl.text).join(','),
+    // By position, so a row added and then removed again is not a change.
+    for (var v = 0; v < _variants.length; v++)
+      for (var z = 0; z < _sizeRows.length; z++)
+        '$v:$z=${_sizeStockCtrls[_cellKey(_variants[v], _sizeRows[z])]?.text ?? '0'}',
   ].join('\u0001');
 
   bool get _dirty => _baseline != null && _fingerprint() != _baseline;
@@ -215,23 +224,24 @@ class _AdminProductEditScreenState
         _breederCtrl.text = product.fishDetails!.breeder ?? '';
         _hasCertificate = product.fishDetails!.hasCertificate;
         _ageCtrl.text = product.fishDetails!.age ?? '';
+        _gender = product.fishDetails!.gender;
         final certificateUrl = product.fishDetails!.certificateImageUrl;
         _certificate = certificateUrl == null
             ? null
             : _Photo.uploaded(certificateUrl);
         _loadedFish = product.fishDetails;
       }
-      for (var i = 0; i < product.variants.length; i++) {
-        final v = product.variants[i];
-        _variants.add(_VariantRow.existing(v));
-        for (final size in product.sizeOptions) {
-          _sizeStockCtrls['$i::$size'] = TextEditingController(
-            text: '${v.sizeStocks[size] ?? 0}',
+      for (final size in product.sizeOptions) {
+        _sizeRows.add(_SizeRow(size));
+      }
+      for (final v in product.variants) {
+        final row = _VariantRow.existing(v);
+        _variants.add(row);
+        for (final size in _sizeRows) {
+          _sizeStockCtrls[_cellKey(row, size)] = TextEditingController(
+            text: '${v.sizeStocks[size.label] ?? 0}',
           );
         }
-      }
-      for (final size in product.sizeOptions) {
-        _sizeOptionCtrls.add(TextEditingController(text: size));
       }
     }
   }
@@ -285,7 +295,7 @@ class _AdminProductEditScreenState
         _certificate != null;
     final hasGoodsData =
         _variants.any((v) => v.labelCtrl.text.trim().isNotEmpty) ||
-        _sizeOptionCtrls.any((c) => c.text.trim().isNotEmpty);
+        _sizeRows.any((r) => r.label.isNotEmpty);
     if (crossing && (hasFishData || hasGoodsData)) {
       final ok = await confirmAction(
         context,
@@ -323,7 +333,9 @@ class _AdminProductEditScreenState
   }
 
   /// Copies a weight row (price, kg, packed size) as a new unsaved row,
-  /// so a second similar size is one tap plus a label edit.
+  /// so a second similar size is one tap plus a label edit. Its weight ×
+  /// size cells start at 0 (stock that does not exist yet must be typed),
+  /// and every other row keeps its own cells.
   void _duplicateVariantRow(int index) {
     final src = _variants[index];
     final row = _VariantRow.blank();
@@ -339,60 +351,67 @@ class _AdminProductEditScreenState
   void _removeVariantRow(int index) {
     final row = _variants[index];
     if (row.id != null) _deletedVariantIds.add(row.id!);
-    final sizes = _collectedSizeOptions();
-    for (final size in sizes) {
-      _sizeStockCtrls.remove('$index::$size')?.dispose();
-    }
-    // Re-key controllers after the hole so indices stay aligned with rows.
-    final rekeyed = <String, TextEditingController>{};
-    for (final entry in _sizeStockCtrls.entries) {
-      final parts = entry.key.split('::');
-      if (parts.length != 2) continue;
-      final i = int.tryParse(parts[0]);
-      if (i == null) continue;
-      if (i < index) {
-        rekeyed[entry.key] = entry.value;
-      } else if (i > index) {
-        rekeyed['${i - 1}::${parts[1]}'] = entry.value;
-      }
-    }
-    _sizeStockCtrls
-      ..clear()
-      ..addAll(rekeyed);
+    _sizeStockCtrls.removeWhere((key, ctrl) {
+      if (!key.startsWith('${row.uid}::')) return false;
+      ctrl.dispose();
+      return true;
+    });
     setState(() => _variants.removeAt(index));
   }
 
   void _addSizeOptionRow() {
-    setState(() => _sizeOptionCtrls.add(TextEditingController()));
+    setState(() => _sizeRows.add(_SizeRow('')));
   }
 
-  void _removeSizeOptionRow(int index) {
-    final removedLabel = _sizeOptionCtrls[index].text.trim();
-    final ctrl = _sizeOptionCtrls.removeAt(index);
-    ctrl.dispose();
-    if (removedLabel.isNotEmpty) {
-      for (var i = 0; i < _variants.length; i++) {
-        _sizeStockCtrls.remove('$i::$removedLabel')?.dispose();
-      }
+  /// Removing a size deletes its stock for every weight on save, so a size
+  /// that holds stock asks first.
+  Future<void> _removeSizeOptionRow(_SizeRow size) async {
+    final hasStock = _variants.any(
+      (v) =>
+          (int.tryParse(
+                _sizeStockCtrls[_cellKey(v, size)]?.text.trim() ?? '',
+              ) ??
+              0) >
+          0,
+    );
+    if (hasStock) {
+      final ok = await confirmDestructiveAction(
+        context,
+        title: 'Remove size "${size.label}"?',
+        message: 'Its stock for every weight will be deleted when you save.',
+        confirmLabel: 'Remove',
+      );
+      if (!ok || !mounted) return;
     }
+    if (!_sizeRows.remove(size)) return;
+    _sizeStockCtrls.removeWhere((key, ctrl) {
+      if (!key.endsWith('::${size.uid}')) return false;
+      ctrl.dispose();
+      return true;
+    });
+    size.ctrl.dispose();
     setState(() {});
   }
 
-  List<String> _collectedSizeOptions() {
+  /// The size rows that count: named, and the first of any repeated name.
+  List<_SizeRow> _activeSizeRows() {
     final seen = <String>{};
-    final out = <String>[];
-    for (final ctrl in _sizeOptionCtrls) {
-      final label = ctrl.text.trim();
-      if (label.isEmpty || seen.contains(label)) continue;
-      seen.add(label);
-      out.add(label);
-    }
-    return out;
+    return [
+      for (final row in _sizeRows)
+        if (row.label.isNotEmpty && seen.add(row.label)) row,
+    ];
   }
 
-  TextEditingController _sizeStockCtrl(int variantIndex, String size) {
+  List<String> _collectedSizeOptions() => [
+    for (final row in _activeSizeRows()) row.label,
+  ];
+
+  static String _cellKey(_VariantRow variant, _SizeRow size) =>
+      '${variant.uid}::${size.uid}';
+
+  TextEditingController _sizeStockCtrl(_VariantRow variant, _SizeRow size) {
     return _sizeStockCtrls.putIfAbsent(
-      '$variantIndex::$size',
+      _cellKey(variant, size),
       () => TextEditingController(text: '0'),
     );
   }
@@ -401,11 +420,11 @@ class _AdminProductEditScreenState
   void _fillAllSizeStocks() {
     final qty = int.tryParse(_fillAllStockCtrl.text.trim()) ?? 0;
     final clamped = qty < 0 ? 0 : qty;
-    final sizes = _collectedSizeOptions();
-    for (var i = 0; i < _variants.length; i++) {
-      if (_variants[i].labelCtrl.text.trim().isEmpty) continue;
+    final sizes = _activeSizeRows();
+    for (final variant in _variants) {
+      if (variant.labelCtrl.text.trim().isEmpty) continue;
       for (final size in sizes) {
-        _sizeStockCtrl(i, size).text = '$clamped';
+        _sizeStockCtrl(variant, size).text = '$clamped';
       }
     }
     setState(() {});
@@ -417,7 +436,8 @@ class _AdminProductEditScreenState
       await repo.deleteVariant(id);
     }
     if (!mounted) return;
-    final sizes = _collectedSizeOptions();
+    // Live fish have no size matrix, even if stale size rows linger.
+    final sizes = supportsSizeMatrix ? _activeSizeRows() : const <_SizeRow>[];
     final useMatrix = sizes.isNotEmpty;
 
     for (var i = 0; i < _variants.length; i++) {
@@ -450,17 +470,20 @@ class _AdminProductEditScreenState
       if (useMatrix) {
         for (final size in sizes) {
           if (!mounted) return;
-          final qty = int.tryParse(_sizeStockCtrl(i, size).text.trim()) ?? 0;
+          final qty = int.tryParse(_sizeStockCtrl(row, size).text.trim()) ?? 0;
           await repo.upsertVariantSizeStock(
             variantId: variantId,
-            sizeLabel: size,
+            sizeLabel: size.label,
             stockQuantity: qty,
           );
         }
       }
     }
     if (!mounted) return;
-    await repo.deleteOrphanSizeStocks(productId: productId, keepSizes: sizes);
+    await repo.deleteOrphanSizeStocks(
+      productId: productId,
+      keepSizes: [for (final size in sizes) size.label],
+    );
   }
 
   Future<void> _pickImages() async {
@@ -513,7 +536,7 @@ class _AdminProductEditScreenState
     return FishDetails(
       variety: text(_varietyCtrl),
       sizeCm: double.tryParse(_sizeCtrl.text.trim()),
-      gender: _loadedFish?.gender,
+      gender: _gender,
       breeder: text(_breederCtrl),
       hasCertificate: _hasCertificate,
       age: text(_ageCtrl),
@@ -871,6 +894,20 @@ class _AdminProductEditScreenState
               ),
           ],
         ),
+        // Save is pinned under the form, so it stays in reach however far
+        // down the change was. As the bottom bar (not part of the body)
+        // snackbars appear above it; the padding lifts it over the keyboard.
+        bottomNavigationBar: Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: _SaveBar(
+            dirty: _guardDirty,
+            saving: _loading,
+            note: _uploadNote,
+            onSave: _save,
+          ),
+        ),
         body: AbsorbPointer(
           absorbing: _loading,
           child: Form(
@@ -945,9 +982,9 @@ class _AdminProductEditScreenState
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
                     child: Text(
-                      'This product has variants below — their price & stock are used '
-                      'instead of the fields here. The price/stock below are ignored '
-                      'once at least one variant exists.',
+                      'This product has options below. Each option has its '
+                      'own price and stock; sale price is not available for '
+                      'products with options yet.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppPalette.of(context).textMuted,
@@ -1028,14 +1065,6 @@ class _AdminProductEditScreenState
                           },
                         ),
                         const SizedBox(height: AppSpacing.sm),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: const Text('Show price to customers'),
-                          subtitle: const Text('Off = "Contact for price"'),
-                          value: _showPrice,
-                          onChanged: (v) => setState(() => _showPrice = v),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
                         if (isLiveFish)
                           // A live fish is one animal, not a countable
                           // quantity — a plain 0/1 switch is the one-tap
@@ -1072,6 +1101,16 @@ class _AdminProductEditScreenState
                     ),
                   ),
                 ),
+                // Outside the block above: it applies to products with
+                // options too, so it must stay usable when that is disabled.
+                const SizedBox(height: AppSpacing.sm),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Show price to customers'),
+                  subtitle: const Text('Off = "Contact for price"'),
+                  value: _showPrice,
+                  onChanged: (v) => setState(() => _showPrice = v),
+                ),
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: _videoUrlCtrl,
@@ -1103,6 +1142,7 @@ class _AdminProductEditScreenState
                   const SizedBox(height: AppSpacing.sm),
                   for (var i = 0; i < _variants.length; i++)
                     Padding(
+                      key: ValueKey('variant-row-${_variants[i].uid}'),
                       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                       child: _VariantEditRow(
                         showShippingWeight: !isLiveFish,
@@ -1161,12 +1201,13 @@ class _AdminProductEditScreenState
                     ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  for (var i = 0; i < _sizeOptionCtrls.length; i++)
+                  for (final size in _sizeRows)
                     Padding(
+                      key: ValueKey('size-row-${size.uid}'),
                       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                       child: _SizeOptionEditRow(
-                        controller: _sizeOptionCtrls[i],
-                        onRemove: () => _removeSizeOptionRow(i),
+                        controller: size.ctrl,
+                        onRemove: () => _removeSizeOptionRow(size),
                         onChanged: (_) => setState(() {}),
                       ),
                     ),
@@ -1215,16 +1256,11 @@ class _AdminProductEditScreenState
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     _SizeStockMatrix(
-                      variantLabels: [
+                      variants: [
                         for (final v in _variants)
-                          if (v.labelCtrl.text.trim().isNotEmpty)
-                            v.labelCtrl.text.trim(),
+                          if (v.labelCtrl.text.trim().isNotEmpty) v,
                       ],
-                      variantIndexes: [
-                        for (var i = 0; i < _variants.length; i++)
-                          if (_variants[i].labelCtrl.text.trim().isNotEmpty) i,
-                      ],
-                      sizes: _collectedSizeOptions(),
+                      sizes: _activeSizeRows(),
                       controllerFor: _sizeStockCtrl,
                     ),
                   ],
@@ -1246,7 +1282,16 @@ class _AdminProductEditScreenState
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
+                    validator: _validateSizeCm,
                   ),
+                  // Gender, like age, describes one animal.
+                  if (_variants.isEmpty) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _GenderField(
+                      value: _gender,
+                      onChanged: (v) => setState(() => _gender = v),
+                    ),
+                  ],
                   // Age and the certificate photo describe one animal, so
                   // a batch listing (fish options) does not offer them.
                   if (_variants.isEmpty) ...[
@@ -1292,8 +1337,8 @@ class _AdminProductEditScreenState
                   if (_variants.isNotEmpty) ...[
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      'Age and a certificate photo describe one fish, so they '
-                      'are not used for a listing with fish options.',
+                      'Gender, age and a certificate photo describe one fish, '
+                      'so they are not used for a listing with fish options.',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppPalette.of(context).textMuted,
@@ -1301,29 +1346,6 @@ class _AdminProductEditScreenState
                     ),
                   ],
                 ],
-                const SizedBox(height: AppSpacing.xxl),
-                ElevatedButton(
-                  onPressed: _loading ? null : _save,
-                  child: _loading
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.white,
-                              ),
-                            ),
-                            if (_uploadNote != null) ...[
-                              const SizedBox(width: 10),
-                              Text(_uploadNote!),
-                            ],
-                          ],
-                        )
-                      : const Text('Save'),
-                ),
                 const SizedBox(height: AppSpacing.md),
               ],
             ),
@@ -1730,6 +1752,11 @@ class _PhotoTile extends StatelessWidget {
 /// [TextEditingController]s so field state survives rebuilds; [id] is
 /// null for a row the admin just added (not yet saved to Supabase).
 class _VariantRow {
+  static int _nextUid = 0;
+
+  /// Identity of this row for as long as the form is open; matrix cells
+  /// are keyed by it so they follow the row wherever it moves.
+  final int uid = _nextUid++;
   final String? id;
   final TextEditingController labelCtrl;
   final TextEditingController priceCtrl;
@@ -1966,6 +1993,118 @@ class _VariantEditRow extends StatelessWidget {
   }
 }
 
+/// One size label in the form, with an identity that survives renaming.
+class _SizeRow {
+  static int _nextUid = 0;
+  final int uid = _nextUid++;
+  final TextEditingController ctrl;
+  _SizeRow(String label) : ctrl = TextEditingController(text: label);
+  String get label => ctrl.text.trim();
+}
+
+/// "Gender" for a single fish: Unknown (nothing stored), Male or Female.
+class _GenderField extends StatelessWidget {
+  final String? value;
+  final ValueChanged<String?> onChanged;
+  const _GenderField({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final current = value?.trim().toLowerCase();
+    final selected = current == 'male'
+        ? 'Male'
+        : current == 'female'
+        ? 'Female'
+        : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Gender',
+          style: TextStyle(
+            fontSize: 12.5,
+            color: AppPalette.of(context).textMuted,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.xs,
+          children: [
+            for (final option in const [null, 'Male', 'Female'])
+              ChoiceChip(
+                label: Text(option ?? 'Unknown'),
+                selected: selected == option,
+                materialTapTargetSize: MaterialTapTargetSize.padded,
+                onSelected: (_) => onChanged(option),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Save, pinned under the form. Enabled once something has changed; while
+/// saving it shows the same progress text the upload loop reports.
+class _SaveBar extends StatelessWidget {
+  final bool dirty;
+  final bool saving;
+  final String? note;
+  final VoidCallback onSave;
+  const _SaveBar({
+    required this.dirty,
+    required this.saving,
+    required this.note,
+    required this.onSave,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Material(
+      color: palette.surface,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.xl,
+            AppSpacing.sm,
+            AppSpacing.xl,
+            AppSpacing.sm,
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: saving || !dirty ? null : onSave,
+              child: saving
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.white,
+                          ),
+                        ),
+                        if (note != null) ...[
+                          const SizedBox(width: 10),
+                          Flexible(child: Text(note!)),
+                        ],
+                      ],
+                    )
+                  : const Text('Save'),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Single label row for the SIZE OPTIONS section.
 class _SizeOptionEditRow extends StatelessWidget {
   final TextEditingController controller;
@@ -2019,15 +2158,13 @@ class _SizeOptionEditRow extends StatelessWidget {
 
 /// Compact editable grid: one row per weight, one column per size.
 class _SizeStockMatrix extends StatelessWidget {
-  final List<String> variantLabels;
-  final List<int> variantIndexes;
-  final List<String> sizes;
-  final TextEditingController Function(int variantIndex, String size)
+  final List<_VariantRow> variants;
+  final List<_SizeRow> sizes;
+  final TextEditingController Function(_VariantRow variant, _SizeRow size)
   controllerFor;
 
   const _SizeStockMatrix({
-    required this.variantLabels,
-    required this.variantIndexes,
+    required this.variants,
     required this.sizes,
     required this.controllerFor,
   });
@@ -2063,7 +2200,7 @@ class _SizeStockMatrix extends StatelessWidget {
                   SizedBox(
                     width: 72,
                     child: Text(
-                      size,
+                      size.label,
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 11,
@@ -2075,13 +2212,13 @@ class _SizeStockMatrix extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
-            for (var r = 0; r < variantLabels.length; r++) ...[
+            for (final variant in variants) ...[
               Row(
                 children: [
                   SizedBox(
                     width: 72,
                     child: Text(
-                      variantLabels[r],
+                      variant.labelCtrl.text.trim(),
                       style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -2090,29 +2227,37 @@ class _SizeStockMatrix extends StatelessWidget {
                   ),
                   for (final size in sizes)
                     SizedBox(
+                      // The field keeps its state with its cell, not with
+                      // its position in the grid.
+                      key: ValueKey('cell-${variant.uid}-${size.uid}'),
                       width: 72,
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: TextFormField(
-                          controller: controllerFor(variantIndexes[r], size),
-                          decoration: const InputDecoration(
-                            isDense: true,
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 8,
+                        child: Semantics(
+                          label:
+                              'Stock for ${variant.labelCtrl.text.trim()}, '
+                              '${size.label}',
+                          child: TextFormField(
+                            controller: controllerFor(variant, size),
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
                             ),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            textAlign: TextAlign.center,
                           ),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          textAlign: TextAlign.center,
                         ),
                       ),
                     ),
                 ],
               ),
-              if (r < variantLabels.length - 1)
+              if (variant != variants.last)
                 const SizedBox(height: AppSpacing.sm),
             ],
           ],
@@ -2132,6 +2277,15 @@ String? _validatePrice(String? value, {bool required = true}) {
   if (text.isEmpty) return required ? 'Enter a price' : null;
   if (!_money.hasMatch(text)) return 'Enter an amount like 12.50';
   return double.parse(text) > 0 ? null : 'Price must be more than 0';
+}
+
+String? _validateSizeCm(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return null;
+  final cm = double.tryParse(text);
+  return cm == null || !cm.isFinite || cm <= 0
+      ? 'Enter the length in cm, e.g. 45'
+      : null;
 }
 
 String? _validateShippingWeight(String? value) {

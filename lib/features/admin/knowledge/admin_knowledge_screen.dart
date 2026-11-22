@@ -50,7 +50,15 @@ class _AdminVarieties extends ConsumerWidget {
         child: const Icon(Icons.add, color: AppColors.white),
       ),
       body: varietiesAsync.when(
-        data: (varieties) => ListView.builder(
+        data: (varieties) => varieties.isEmpty
+            ? const EmptyState(
+                icon: Icons.water,
+                title: 'No varieties yet',
+                subtitle:
+                    'Tap + to add a koi or arowana variety for the '
+                    "customers' Guide tab.",
+              )
+            : ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: varieties.length,
           itemBuilder: (context, i) {
@@ -166,7 +174,15 @@ class _AdminArticles extends ConsumerWidget {
         child: const Icon(Icons.add, color: AppColors.white),
       ),
       body: articlesAsync.when(
-        data: (articles) => ListView.builder(
+        data: (articles) => articles.isEmpty
+            ? const EmptyState(
+                icon: Icons.menu_book_outlined,
+                title: 'No guides yet',
+                subtitle:
+                    'Tap + to write a care guide. Customers see it in '
+                    'their Guide tab once it is published.',
+              )
+            : ListView.builder(
           padding: const EdgeInsets.all(16),
           itemCount: articles.length,
           itemBuilder: (context, i) {
@@ -190,49 +206,68 @@ class _AdminArticles extends ConsumerWidget {
                     color: a.active ? null : AppPalette.of(context).error,
                   ),
                 ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: a.active
-                          ? 'Hide from customers'
-                          : 'Show to customers',
-                      icon: Icon(
-                        a.active
-                            ? Icons.visibility_outlined
-                            : Icons.visibility_off_outlined,
-                        color: a.active
-                            ? AppPalette.of(context).textMuted
-                            : AppPalette.of(context).error,
+                // One write at a time, and a failure is shown, exactly as
+                // for varieties above.
+                trailing: GuardedWrite(
+                  errorFallback: 'Could not update the guide.',
+                  errorContext: 'admin.knowledge',
+                  builder: (context, busy, run) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: a.active
+                            ? 'Hide from customers'
+                            : 'Show to customers',
+                        icon: Icon(
+                          a.active
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          color: a.active
+                              ? AppPalette.of(context).textMuted
+                              : AppPalette.of(context).error,
+                        ),
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                await ref
+                                    .read(knowledgeRepositoryProvider)
+                                    .upsertArticle({
+                                      'active': !a.active,
+                                    }, id: a.id);
+                                ref.invalidate(articlesProvider);
+                              }),
                       ),
-                      onPressed: () async {
-                        await ref
-                            .read(knowledgeRepositoryProvider)
-                            .upsertArticle({'active': !a.active}, id: a.id);
-                        ref.invalidate(articlesProvider);
-                      },
-                    ),
-                    IconButton(
-                      tooltip: 'Delete',
-                      icon: Icon(
-                        Icons.delete_outline,
-                        color: AppPalette.of(context).error,
+                      IconButton(
+                        tooltip: 'Delete',
+                        icon: Icon(
+                          Icons.delete_outline,
+                          color: AppPalette.of(context).error,
+                        ),
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                final container = ProviderScope.containerOf(
+                                  context,
+                                  listen: false,
+                                );
+                                final confirmed =
+                                    await confirmDestructiveAction(
+                                      context,
+                                      title: 'Delete guide?',
+                                      message:
+                                          'This permanently removes "${a.title}". This cannot be undone.',
+                                    );
+                                if (!confirmed) return;
+                                await run(() async {
+                                  await container
+                                      .read(knowledgeRepositoryProvider)
+                                      .deleteArticle(a.id);
+                                  container.invalidate(articlesProvider);
+                                });
+                              },
                       ),
-                      onPressed: () async {
-                        final confirmed = await confirmDestructiveAction(
-                          context,
-                          title: 'Delete article?',
-                          message:
-                              'This permanently removes "${a.title}". This cannot be undone.',
-                        );
-                        if (!confirmed) return;
-                        await ref
-                            .read(knowledgeRepositoryProvider)
-                            .deleteArticle(a.id);
-                        ref.invalidate(articlesProvider);
-                      },
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 onTap: () => showArticleForm(context, ref, existing: a),
               ),

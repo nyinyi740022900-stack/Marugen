@@ -32,6 +32,7 @@ import '../../shop/presentation/shell_tab_provider.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../../../shared/utils/error_message.dart';
 import '../data/payment_repository.dart';
+import '../utils/checkout_totals.dart';
 import '../utils/invoice_pdf.dart';
 import '../utils/payment_confirmation.dart';
 import '../utils/payment_sheet.dart';
@@ -41,6 +42,8 @@ import 'purchase_intent.dart';
 import 'order_pull_to_refresh.dart';
 import 'order_cancellation_panel.dart';
 import 'order_payment_section.dart';
+import 'staff_order_actions.dart';
+import '../../../shared/widgets/support_contact_picker.dart';
 import '../../../shared/widgets/section_label.dart';
 
 /// Router extras provide a preview while the current session fetches the order.
@@ -87,6 +90,26 @@ class OrderDetailScreen extends ConsumerWidget {
     final preview = previewSource != null && canView(previewSource)
         ? previewSource
         : null;
+    // Reached with `go` (after checkout) there is nothing underneath to go
+    // back to, and iOS has no system back: the page must offer its own exit.
+    final canPop = ModalRoute.of(context)?.impliesAppBarDismissal ?? false;
+    // Any fresh read of the order settles a payment that was still being
+    // confirmed: a pull-to-refresh, or reopening the order after a restart.
+    if (sessionReady) {
+      ref.listen(orderByIdProvider(orderId), (_, next) {
+        final awaiting = ref.read(paymentAwaitingConfirmationProvider);
+        final fresh = next.isLoading || next.hasError ? null : next.valueOrNull;
+        if (awaiting == null ||
+            fresh == null ||
+            awaiting.orderId != orderId ||
+            fresh.id != orderId) {
+          return;
+        }
+        if (settlePaymentAwaiting(ref.read, awaiting, fresh)) {
+          ref.invalidate(myOrdersProvider);
+        }
+      });
+    }
 
     return _PaymentConfirmationPoller(
       orderId: orderId,
@@ -101,6 +124,13 @@ class OrderDetailScreen extends ConsumerWidget {
               : 'Order #${authoritative.displayNumber}',
         ),
         automaticallyImplyLeading: !justPlaced,
+        leading: canPop
+            ? null
+            : IconButton(
+                tooltip: 'Back to shop',
+                icon: const Icon(Icons.close),
+                onPressed: () => _backToShop(context, ref),
+              ),
         actions: [
           if (authoritative != null) _OrderAppBarActions(order: authoritative),
         ],
@@ -155,6 +185,7 @@ class OrderDetailScreen extends ConsumerWidget {
                     child: _OrderDetailBody(
                       order: authoritative,
                       justPlaced: justPlaced,
+                      canPop: canPop,
                     ),
                   );
                 },
@@ -193,23 +224,31 @@ class OrderDetailScreen extends ConsumerWidget {
   }
 }
 
-/// True while [order] is this customer's just-paid order that the server has
-/// not confirmed yet (see [paymentAwaitingConfirmationProvider]).
-bool _awaitingPaymentConfirmation(WidgetRef ref, Order order) {
-  final awaiting = ref.watch(paymentAwaitingConfirmationProvider);
-  return awaiting != null &&
-      awaiting.orderId == order.id &&
-      awaiting.ownerId == order.userId &&
-      awaiting.ownerId == ref.watch(currentUserIdProvider) &&
-      order.status == OrderStatus.pending;
+/// The Shop tab of the customer shell — the way out of an order page that
+/// has nothing underneath it.
+void _backToShop(BuildContext context, WidgetRef ref) {
+  ref.read(customerTabIndexProvider.notifier).state = 0;
+  context.go('/');
 }
+
+/// This customer's just-paid order that the server has not confirmed yet
+/// (see [paymentAwaitingConfirmationProvider]), or null.
+PaymentAwaitingConfirmation? _awaitingPaymentConfirmation(
+  WidgetRef ref,
+  Order order,
+) => paymentAwaitingFor(
+  ref.watch(paymentAwaitingConfirmationProvider),
+  order,
+  ref.watch(currentUserIdProvider),
+);
 
 /// Keeps asking the server about an order whose payment sheet succeeded but
 /// whose webhook has not landed, for a bounded window (see
 /// [paymentConfirmationBackoff]). It only ever reads: when the server says
 /// the order is paid the purchased cart lines are removed and the order is
 /// re-fetched so the normal paid screen appears; when the window runs out
-/// the hint is dropped and the ordinary pending screen comes back.
+/// the order stays "still confirming" (never back to "Complete payment")
+/// until a later read of the order settles it.
 ///
 /// Sits above the order's loading/data switch so a refresh of the order does
 /// not restart it, and stops with the screen.
@@ -254,7 +293,12 @@ class _PaymentConfirmationPollerState
 
   void _scheduleNext() {
     _timer?.cancel();
-    if (_awaiting == null) return;
+    final awaiting = _awaiting;
+    if (awaiting == null ||
+        awaiting.windowElapsed ||
+        _attempt >= paymentConfirmationBackoff.length) {
+      return;
+    }
     _timer = Timer(paymentConfirmationBackoff[_attempt], _check);
   }
 
@@ -262,36 +306,27 @@ class _PaymentConfirmationPollerState
     final awaiting = _awaiting;
     if (awaiting == null) return;
     Order? order;
+    var fetched = false;
     try {
       order = await ref
           .read(orderRepositoryProvider)
           .fetchOrderById(widget.orderId);
+      fetched = true;
     } catch (_) {
       // A failed read is just another "not confirmed yet".
     }
     // Left the screen, switched account, or already settled meanwhile.
     if (!mounted || !identical(_awaiting, awaiting)) return;
     final settled =
-        order != null &&
-        order.id == awaiting.orderId &&
-        order.userId == awaiting.ownerId &&
-        order.status != OrderStatus.pending;
-    _attempt++;
-    if (!settled && _attempt < paymentConfirmationBackoff.length) {
-      _scheduleNext();
-      return;
-    }
-    if (settled && paidOrderStatuses.contains(order.status)) {
-      final cart = ref.read(cartProvider.notifier);
-      for (final line in awaiting.cartLines) {
-        cart.remove(
-          line.product.id,
-          variantId: line.selectedVariant?.id,
-          size: line.selectedSize,
-        );
+        fetched && settlePaymentAwaiting(ref.read, awaiting, order);
+    if (!settled) {
+      _attempt++;
+      if (_attempt < paymentConfirmationBackoff.length) {
+        _scheduleNext();
+        return;
       }
+      markPaymentAwaitingWindowElapsed(ref.read, awaiting);
     }
-    ref.read(paymentAwaitingConfirmationProvider.notifier).state = null;
     ref.invalidate(orderByIdProvider(widget.orderId));
     ref.invalidate(myOrdersProvider);
   }
@@ -302,12 +337,68 @@ class _PaymentConfirmationPollerState
     // window while the poller is already mounted.
     ref.listen(paymentAwaitingConfirmationProvider, (previous, next) {
       if (identical(previous, next)) return;
+      if (next == null || next.windowElapsed) {
+        _timer?.cancel();
+        return;
+      }
       _attempt = 0;
       _scheduleNext();
     });
     return widget.child;
   }
 }
+
+/// Shown once the minute of automatic re-checking is over and the server
+/// still has the order as unpaid. The sheet reported success, so this never
+/// offers to pay again; it says what to do instead.
+class _StillConfirmingPaymentBanner extends StatelessWidget {
+  final Order order;
+  const _StillConfirmingPaymentBanner({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = AppPalette.of(context);
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: palette.warning.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: palette.warning.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              stillConfirmingPaymentCopy,
+              style: TextStyle(fontWeight: FontWeight.w600, height: 1.35),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            OutlinedButton.icon(
+              onPressed: () => showSupportContactPicker(
+                context,
+                message:
+                    'Hi, I paid for order #${order.displayNumber} but the app '
+                    'still shows it as unpaid. Could you check it?',
+              ),
+              icon: const Icon(Icons.chat_bubble_outline, size: 16),
+              label: const Text('Contact support'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Banner copy of the "still confirming" state.
+const stillConfirmingPaymentCopy =
+    "We're still confirming your payment. You have not been charged twice — "
+    "please don't pay again. Pull down to refresh, or contact us if this "
+    "hasn't updated in 10 minutes.";
 
 class _ConfirmingPaymentBanner extends StatelessWidget {
   const _ConfirmingPaymentBanner();
@@ -356,7 +447,14 @@ class _ConfirmingPaymentBanner extends StatelessWidget {
 class _OrderDetailBody extends ConsumerWidget {
   final Order order;
   final bool justPlaced;
-  const _OrderDetailBody({required this.order, this.justPlaced = false});
+
+  /// Whether a page lies underneath to go back to (see [OrderDetailScreen]).
+  final bool canPop;
+  const _OrderDetailBody({
+    required this.order,
+    this.justPlaced = false,
+    this.canPop = true,
+  });
 
   void _copyAddress(BuildContext context, Map<String, dynamic> shipping) {
     final text = [
@@ -375,13 +473,24 @@ class _OrderDetailBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final shipping = order.shippingAddress;
-    final confirmingPayment = _awaitingPaymentConfirmation(ref, order);
+    final awaitingPayment = _awaitingPaymentConfirmation(ref, order);
+    // Inside the minute of automatic re-checking, or past it.
+    final confirmingPayment =
+        awaitingPayment != null && !awaitingPayment.windowElapsed;
+    final stillConfirmingPayment =
+        awaitingPayment != null && awaitingPayment.windowElapsed;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         if (confirmingPayment) ...[
-          const _ConfirmingPaymentBanner(),
+          // Paid, so worth telling them when it ships — the same one-time
+          // question the "order placed" banner asks.
+          const AskPushPermissionOnce(child: _ConfirmingPaymentBanner()),
+          const SizedBox(height: AppSpacing.lg),
+        ],
+        if (stillConfirmingPayment) ...[
+          _StillConfirmingPaymentBanner(order: order),
           const SizedBox(height: AppSpacing.lg),
         ],
         if (justPlaced) ...[
@@ -741,6 +850,15 @@ class _OrderDetailBody extends ConsumerWidget {
                     ],
                   ),
                 ),
+              // GST charged on top is one of the rows that add up.
+              if (order.hasGstSnapshot &&
+                  !order.gstIncludedInPrice! &&
+                  order.gstPercent! > 0 &&
+                  order.gstAmountCents! > 0)
+                _MoneyLine(
+                  label: 'GST (${gstPercentText(order.gstPercent!)}%)',
+                  amount: formatPrice(order.gstAmountCents! / 100),
+                ),
               Padding(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Wrap(
@@ -767,32 +885,65 @@ class _OrderDetailBody extends ConsumerWidget {
                   ],
                 ),
               ),
+              // GST already inside the prices is a note under the total,
+              // not a row: the rows above add up to the total without it.
+              if (order.hasGstSnapshot &&
+                  order.gstIncludedInPrice! &&
+                  order.gstPercent! > 0 &&
+                  order.gstAmountCents! > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.lg,
+                  ),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: Text(
+                      includesGstLine(
+                        percent: order.gstPercent!,
+                        amount: order.gstAmountCents! / 100,
+                      ),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppPalette.of(context).textMuted,
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        // Cancel/Reorder are shopper actions on their own order — an admin
-        // viewing any customer's order manages its lifecycle from the
-        // Orders status dropdown instead, not from these buttons.
+        // Cancel/Reorder are shopper actions on their own order. Staff get
+        // the order's next fulfilment step instead.
         Builder(
           builder: (context) {
             final isAdmin =
                 ref.watch(currentAppUserProvider).valueOrNull?.role.isAdmin ??
                 false;
-            if (isAdmin) return const SizedBox.shrink();
+            if (isAdmin) return StaffOrderActionBar(order: order);
             if (justPlaced) return const _ContinueShoppingButton();
             return Column(
               children: [
-                // Already charged and being confirmed: paying again or
-                // cancelling here would be acting on stale information.
+                // The sheet reported success: paying again or cancelling
+                // here would be acting on stale information, for as long
+                // as the server has not answered.
                 if (order.status == OrderStatus.pending &&
-                    !confirmingPayment) ...[
+                    awaitingPayment == null) ...[
                   _CompletePaymentButton(order: order),
                   const SizedBox(height: AppSpacing.md),
                   _CancelOrderButton(order: order),
                   const SizedBox(height: AppSpacing.lg),
                 ],
-                ReorderButton(order: order),
+                if (awaitingPayment == null) ReorderButton(order: order),
+                // The only way out when there is no page to go back to.
+                if (awaitingPayment != null || !canPop) ...[
+                  if (awaitingPayment == null)
+                    const SizedBox(height: AppSpacing.md),
+                  const _ContinueShoppingButton(),
+                ],
               ],
             );
           },
@@ -938,8 +1089,9 @@ class _ReviewAffordance extends ConsumerWidget {
           return OutlinedButton.icon(
             onPressed: () => openReviewForm(context, ref, productId),
             style: OutlinedButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: const Size(48, 48),
+              tapTargetSize: MaterialTapTargetSize.padded,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
             ),
             icon: const Icon(Icons.star_border, size: 15),
             label: const Text(
@@ -949,9 +1101,12 @@ class _ReviewAffordance extends ConsumerWidget {
           );
         }
         return InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
           onTap: () =>
               openReviewForm(context, ref, productId, existing: myReview),
-          child: Row(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               for (var i = 1; i <= 5; i++)
@@ -961,14 +1116,17 @@ class _ReviewAffordance extends ConsumerWidget {
                   color: AppPalette.of(context).warning,
                 ),
               const SizedBox(width: 6),
-              Text(
-                'Edit your review',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: AppPalette.of(context).textMuted,
+              Flexible(
+                child: Text(
+                  'Edit your review',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: AppPalette.of(context).textMuted,
+                  ),
                 ),
               ),
             ],
+            ),
           ),
         );
       },
@@ -989,10 +1147,7 @@ class _ContinueShoppingButton extends ConsumerWidget {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
-        onPressed: () {
-          ref.read(customerTabIndexProvider.notifier).state = 0;
-          context.go('/');
-        },
+        onPressed: () => _backToShop(context, ref),
         icon: const Icon(Icons.storefront_outlined, size: 18),
         label: const Text('Continue Shopping'),
       ),
@@ -1206,11 +1361,12 @@ class _CompletePaymentButtonState
         fetchOrder: ref.read(orderRepositoryProvider).fetchOrderById,
       );
       if (!paid && sheetReportedSuccess && stillOwner()) {
-        ref
-            .read(paymentAwaitingConfirmationProvider.notifier)
-            .state = PaymentAwaitingConfirmation(
-          orderId: widget.order.id,
-          ownerId: ownerId,
+        setPaymentAwaiting(
+          ref.read,
+          PaymentAwaitingConfirmation(
+            orderId: widget.order.id,
+            ownerId: ownerId,
+          ),
         );
       }
       message = paid
@@ -1346,7 +1502,11 @@ class _CancelOrderButtonState extends ConsumerState<_CancelOrderButton> {
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Order cancelled.')));
-        context.pop();
+        // Reached straight from checkout there is no page to return to; the
+        // refreshed order (now Cancelled) stays on screen instead.
+        if (ModalRoute.of(context)?.impliesAppBarDismissal ?? false) {
+          context.pop();
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -1415,7 +1575,7 @@ class _OrderAppBarActions extends ConsumerWidget {
   }
 }
 
-/// Shares a plain-text receipt/tax invoice for [order] via the platform
+/// Shares the invoice for [order] via the platform
 /// share sheet.
 class _ShareReceiptButton extends ConsumerWidget {
   final Order order;

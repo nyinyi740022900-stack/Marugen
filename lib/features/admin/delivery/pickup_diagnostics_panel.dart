@@ -87,7 +87,7 @@ class _PickupDiagnosticsPanelState
         : result?['title'] as String? ??
               (order.needsBookingAttention
                   ? 'Booking needs checking'
-                  : order.fulfillmentStatusLabel);
+                  : order.staffFulfillmentStatusLabel);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

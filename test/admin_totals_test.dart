@@ -103,7 +103,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('2'), findsOneWidget);
-    expect(find.text('S\$1850'), findsOneWidget);
-    expect(find.text('S\$150'), findsOneWidget);
+    expect(find.text('S\$1850.00'), findsOneWidget);
+    expect(find.text('Last 7 days: S\$150.00'), findsOneWidget);
   });
 }

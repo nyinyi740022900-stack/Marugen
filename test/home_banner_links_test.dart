@@ -82,6 +82,13 @@ bool _selected(WidgetTester tester, String label) =>
 Future<void> _save(WidgetTester tester) async {
   await tester.tap(find.widgetWithText(ElevatedButton, 'Save Changes'));
   await tester.pumpAndSettle();
+  // A failed check is also named in a snackbar (see
+  // admin_banner_form_review_test.dart); these tests read the inline text.
+  final form = find.byType(BannerFormScreen);
+  if (form.evaluate().isNotEmpty) {
+    ScaffoldMessenger.of(tester.element(form)).clearSnackBars();
+    await tester.pumpAndSettle();
+  }
 }
 
 Finder _field(String label) => find.byWidgetPredicate(

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/undo_snack_bar.dart';
@@ -15,6 +16,34 @@ import '../../auth/presentation/auth_providers.dart';
 import '../../orders/presentation/purchase_intent.dart';
 import '../domain/cart_item.dart';
 import 'cart_providers.dart';
+
+/// The line under the cart total: what the total does and does not include,
+/// from the shop's GST setting and what is in the cart. A cart with a live
+/// fish is delivered by the shop for free (the whole order travels with it);
+/// anything else gets a courier price at checkout.
+///
+/// [settings] is null while the shop settings are loading or failed; the
+/// note then says nothing about GST rather than guess.
+String cartTotalNote({
+  required Map<String, dynamic>? settings,
+  required bool hasLiveFish,
+}) {
+  final gstPercent = (settings?['gst_percent'] as num?)?.toDouble() ?? 0;
+  final gstIncluded = settings?['gst_included_in_price'] as bool? ?? true;
+  if (settings == null || gstPercent <= 0) {
+    return hasLiveFish
+        ? 'Free delivery by Marugen.'
+        : 'Delivery is calculated at checkout.';
+  }
+  if (gstIncluded) {
+    return hasLiveFish
+        ? 'Prices include GST. Free delivery by Marugen.'
+        : 'Prices include GST. Delivery is calculated at checkout.';
+  }
+  return hasLiveFish
+      ? 'GST is added at checkout. Free delivery by Marugen.'
+      : 'GST and delivery are added at checkout.';
+}
 
 class CartScreen extends ConsumerStatefulWidget {
   const CartScreen({super.key});
@@ -80,6 +109,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   Widget build(BuildContext context) {
     final items = ref.watch(cartProvider);
     final total = ref.watch(cartTotalProvider);
+    final settingsAsync = ref.watch(shopSettingsProvider);
+    final totalNote = cartTotalNote(
+      settings: settingsAsync.isLoading || settingsAsync.hasError
+          ? null
+          : settingsAsync.valueOrNull,
+      hasLiveFish: items.any((item) => item.product.isLiveFish),
+    );
 
     return Scaffold(
       backgroundColor: AppPalette.of(context).background,
@@ -309,7 +345,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: Text(
-                        'Delivery and GST are added at checkout.',
+                        totalNote,
+                        textAlign: TextAlign.end,
                         style: TextStyle(
                           fontSize: 12,
                           color: AppPalette.of(context).textMuted,

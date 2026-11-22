@@ -87,10 +87,26 @@ class _StageCard extends StatelessWidget {
   final VoidCallback? onTap;
   const _StageCard({required this.stage, this.onTap});
 
+  static const double width = 140;
+
+  /// Height of the horizontal list holding these cards: the square photo,
+  /// the padding, one label line and two description lines at the reader's
+  /// text size. A fixed height clipped the text as soon as it grew.
+  ///
+  /// 1.45 covers the theme's body line height (20/14); the last 2 dp are
+  /// rounding room.
+  static double heightFor(TextScaler scaler) =>
+      width +
+      16 +
+      scaler.scale(12.5) * 1.45 +
+      2 +
+      scaler.scale(11) * 1.45 * 2 +
+      2;
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 140,
+      width: width,
       decoration: BoxDecoration(
         color: AppPalette.of(context).background,
         borderRadius: BorderRadius.circular(AppRadius.md),
@@ -259,7 +275,9 @@ class _VarietiesTabState extends ConsumerState<_VarietiesTab> {
                             const SectionLabel('GROWTH STAGES'),
                             const SizedBox(height: AppSpacing.sm),
                             SizedBox(
-                              height: 190,
+                              height: _StageCard.heightFor(
+                                MediaQuery.textScalerOf(context),
+                              ),
                               child: ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 itemCount: v.stages.length,

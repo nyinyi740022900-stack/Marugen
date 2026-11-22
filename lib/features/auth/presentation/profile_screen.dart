@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/notifications/push_permission_controller.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/appearance_tile.dart';
 import '../../../shared/utils/error_message.dart';
@@ -16,6 +17,9 @@ import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/guest_account_state.dart';
 import '../../../shared/widgets/content_width.dart';
+import '../../../shared/widgets/support_contact_picker.dart';
+import '../../orders/data/order_repository.dart' show OrderInProgress;
+import '../../orders/presentation/orders_providers.dart';
 import '../../shop/presentation/shell_tab_provider.dart';
 import 'account_details_tiles.dart';
 import 'auth_providers.dart';
@@ -28,7 +32,11 @@ class ProfileScreen extends ConsumerStatefulWidget {
   ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+/// What the customer chose when warned that an order is still on its way.
+enum _InProgressChoice { keep, contact, delete }
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen>
+    with WidgetsBindingObserver {
   // Optimistic override for the notification switch — null means "trust
   // the server value from currentAppUserProvider". Toggling used to call
   // ref.invalidate(currentAppUserProvider), which is also what GoRouter's
@@ -47,6 +55,43 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   // ref.invalidate(currentAppUserProvider) (router-rebuild jank) for a
   // change that only needs this screen's own avatar to update instantly.
   String? _avatarUrlOverride;
+
+  /// What the phone says about notifications for this app. The switch is
+  /// only "on" when the account setting and the phone both allow them.
+  PushPermission _osPermission = PushPermission.unknown;
+  bool _requestingPermission = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _readOsPermission();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from the phone's Settings: the answer may have changed there.
+    if (state == AppLifecycleState.resumed) _readOsPermission();
+  }
+
+  Future<void> _readOsPermission() async {
+    final permission = await ref
+        .read(pushPermissionControllerProvider)
+        .current();
+    if (mounted && permission != _osPermission) {
+      setState(() => _osPermission = permission);
+    }
+  }
+
+  bool get _osAllowsPush =>
+      _osPermission == PushPermission.authorized ||
+      _osPermission == PushPermission.unknown;
 
   Future<void> _pickAvatar() async {
     final picked = await ImagePicker().pickImage(
@@ -107,7 +152,76 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
+  /// The customer's order that is still in progress, if any. A failed
+  /// check never blocks deletion: the server decides that.
+  Future<OrderInProgress?> _orderInProgress() async {
+    final userId = ref.read(currentUserIdProvider);
+    if (userId == null) return null;
+    try {
+      return await ref
+          .read(orderRepositoryProvider)
+          .fetchNewestOrderInProgress(userId);
+    } catch (_) {
+      // Fall through to the ordinary confirmation.
+      return null;
+    }
+  }
+
   Future<void> _confirmDeleteAccount() async {
+    if (_deletingAccount) return;
+    setState(() => _deletingAccount = true);
+    final inProgress = await _orderInProgress();
+    if (!mounted) return;
+    setState(() => _deletingAccount = false);
+    if (inProgress != null) {
+      // A warning, never a refusal: the account can always be deleted here.
+      final choice = await showAdaptiveDialog<_InProgressChoice>(
+        context: context,
+        builder: (dialogContext) => AlertDialog.adaptive(
+          title: const Text('You have an order in progress'),
+          content: Text(
+            'Order #${inProgress.displayNumber} is still on its way. If you '
+            "delete your account now you won't be able to track it or "
+            'request a cancellation in the app. The order itself is not '
+            'cancelled.',
+          ),
+          actions: [
+            adaptiveDialogAction(
+              dialogContext,
+              label: 'Keep my account',
+              primary: true,
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _InProgressChoice.keep),
+            ),
+            adaptiveDialogAction(
+              dialogContext,
+              label: 'Contact support',
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _InProgressChoice.contact),
+            ),
+            adaptiveDialogAction(
+              dialogContext,
+              label: 'Delete anyway',
+              destructive: true,
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _InProgressChoice.delete),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (choice == _InProgressChoice.contact) {
+        await showSupportContactPicker(
+          context,
+          message:
+              'Hi, I would like to delete my account but order '
+              '#${inProgress.displayNumber} is still in progress.',
+        );
+        return;
+      }
+      // Dismissed, or "Keep my account".
+      if (choice != _InProgressChoice.delete) return;
+    }
     final confirmed = await confirmDestructiveAction(
       context,
       title: 'Delete your account?',
@@ -129,14 +243,61 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Your account was not deleted. Check your connection and try again, or contact support.',
+            friendlyErrorMessage(
+              e,
+              fallback:
+                  'Your account was not deleted. Check your connection and try again, or contact support.',
+              context: 'profile.deleteAccount',
+            ),
           ),
         ),
       );
     }
   }
 
+  /// "Notifications are off on this phone" cannot be fixed by a switch in
+  /// the app: say where it is fixed, and open it where the platform lets us.
+  void _showTurnOnInSettings() {
+    final controller = ref.read(pushPermissionControllerProvider);
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Turn on notifications for Marugen in Settings',
+          ),
+          action: controller.canOpenSettings
+              ? SnackBarAction(
+                  label: 'Open Settings',
+                  onPressed: controller.openSettings,
+                )
+              : null,
+        ),
+      );
+  }
+
   Future<void> _toggleNotifications(bool value) async {
+    if (value && !_osAllowsPush) {
+      // The account may well say "on" already; the phone is what is off.
+      if (_requestingPermission) return;
+      if (_osPermission == PushPermission.blocked) {
+        _showTurnOnInSettings();
+        return;
+      }
+      setState(() => _requestingPermission = true);
+      final granted = await ref
+          .read(pushPermissionControllerProvider)
+          .request();
+      if (!mounted) return;
+      setState(() {
+        _requestingPermission = false;
+        _osPermission = granted;
+      });
+      if (granted != PushPermission.authorized) {
+        _showTurnOnInSettings();
+        return;
+      }
+    }
     setState(() => _notificationsOverride = value);
     try {
       await ref.read(authRepositoryProvider).updateNotificationsEnabled(value);
@@ -289,15 +450,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ),
                     Builder(
                       builder: (context) {
-                        final notificationsEnabled =
+                        final accountEnabled =
                             _notificationsOverride ??
                             user?.notificationsEnabled ??
                             true;
+                        // Never "on" while the phone would not show them.
+                        final notificationsEnabled =
+                            accountEnabled && _osAllowsPush;
                         return SwitchListTile(
                           secondary: const Icon(Icons.notifications_outlined),
                           title: const Text('Notifications'),
                           subtitle: Text(
-                            notificationsEnabled
+                            !_osAllowsPush
+                                ? 'Notifications are off on this phone'
+                                : notificationsEnabled
                                 ? 'Push alerts for order updates are on'
                                 : 'Push alerts are off — order status still shows in-app',
                             style: TextStyle(

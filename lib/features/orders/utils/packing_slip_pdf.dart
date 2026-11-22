@@ -10,16 +10,44 @@ import 'print_document.dart';
 
 import '../../../shared/models/order.dart';
 
+/// The words on a packing label that depend on how the order travels.
+typedef PackingLabelCopy = ({
+  String heading,
+  String reference,
+  bool showBarcode,
+  String? footerNote,
+});
+
+/// Fish the shop delivers itself never meets a courier, so its label says
+/// HAND DELIVERY with the order number, and has no "not booked" wording,
+/// barcode or AWB reminder.
+PackingLabelCopy packingLabelCopy(Order order) {
+  final tracking = order.qxpressTrackingNo?.trim();
+  final hasTracking = tracking != null && tracking.isNotEmpty;
+  if (order.isShopDelivery) {
+    return (
+      heading: 'HAND DELIVERY',
+      reference: order.displayNumber,
+      showBarcode: false,
+      footerNote: null,
+    );
+  }
+  return (
+    heading: hasTracking ? 'TRACKING NUMBER' : 'ORDER REFERENCE - NOT BOOKED',
+    reference: hasTracking ? tracking : order.displayNumber,
+    showBarcode: hasTracking && RegExp(r'^[\x20-\x7E]+$').hasMatch(tracking),
+    footerNote: 'Attach official courier AWB separately.',
+  );
+}
+
 /// Shop packing label. The carrier's official AWB remains a separate document.
 Future<Uint8List> buildPackingSlipPdf(
   Order order, {
   Map<String, dynamic> settings = const {},
 }) async {
   final shipping = order.shippingAddress ?? {};
-  final tracking = order.qxpressTrackingNo?.trim();
-  final hasTracking = tracking != null && tracking.isNotEmpty;
-  final barcodeSafe =
-      hasTracking && RegExp(r'^[\x20-\x7E]+$').hasMatch(tracking);
+  final copy = packingLabelCopy(order);
+  final handDelivery = order.isShopDelivery;
   final address = [shipping['line1'], shipping['line2']]
       .where((value) => value != null && value.toString().trim().isNotEmpty)
       .join(', ');
@@ -85,7 +113,9 @@ Future<Uint8List> buildPackingSlipPdf(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
             pw.Expanded(
-              child: text('Attach official courier AWB separately.', size: 6),
+              child: copy.footerNote == null
+                  ? pw.SizedBox()
+                  : text(copy.footerNote!, size: 6),
             ),
             text('${context.pageNumber} / ${context.pagesCount}', size: 6),
           ],
@@ -93,21 +123,14 @@ Future<Uint8List> buildPackingSlipPdf(
       ),
       build: (_) => [
         box([
-          text(
-            hasTracking ? 'TRACKING NUMBER' : 'ORDER REFERENCE - NOT BOOKED',
-            size: 7,
-          ),
+          text(copy.heading, size: handDelivery ? 9 : 7, bold: handDelivery),
           pw.SizedBox(height: 4),
-          text(
-            hasTracking ? tracking : order.displayNumber,
-            size: 12,
-            bold: true,
-          ),
-          if (barcodeSafe) ...[
+          text(copy.reference, size: 12, bold: true),
+          if (copy.showBarcode) ...[
             pw.SizedBox(height: 7),
             pw.BarcodeWidget(
               barcode: pw.Barcode.code128(),
-              data: tracking,
+              data: copy.reference,
               width: 250,
               height: 36,
               drawText: false,

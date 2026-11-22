@@ -16,6 +16,7 @@ import '../../../shared/widgets/shipping_cost_summary.dart';
 import '../../auth/presentation/auth_providers.dart';
 import '../../orders/presentation/orders_providers.dart';
 import '../../orders/presentation/order_pull_to_refresh.dart';
+import '../../orders/presentation/staff_order_confirmations.dart';
 import '../../orders/utils/print_document.dart';
 import '../../orders/utils/packing_slip_pdf.dart';
 import 'delivery_repository.dart';
@@ -299,6 +300,9 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
         ref.invalidate(adminOrdersPagedProvider);
         ref.invalidate(orderByIdProvider(widget.order.id));
         ref.invalidate(myOrdersProvider);
+        // Home counts open orders and lists the newest ones by status.
+        ref.invalidate(adminOrderSummaryProvider);
+        ref.invalidate(adminRecentOrdersProvider);
         setState(() => _working = false);
       }
     }
@@ -349,16 +353,19 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
     );
   }
 
-  Future<void> _moveTo(OrderStatus status) async {
+  /// [carrierOverride] is the by-hand route for a courier order whose
+  /// carrier never reported the delivery.
+  Future<void> _moveTo(
+    OrderStatus status, {
+    bool carrierOverride = false,
+  }) async {
     if (_busy) return;
+    final number = widget.order.displayNumber;
     if (status == OrderStatus.delivered) {
-      final confirmed = await confirmAction(
+      final confirmed = await confirmMarkDelivered(
         context,
-        title: 'Mark as delivered?',
-        message:
-            'Confirm that order #${widget.order.displayNumber} has actually been handed to the recipient. '
-            'The customer will be notified. This cannot be undone.',
-        confirmLabel: 'Mark Delivered',
+        widget.order,
+        carrierOverride: carrierOverride,
       );
       if (!confirmed || !mounted) return;
     } else if (status == OrderStatus.shipped) {
@@ -373,6 +380,12 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
       if (!confirmed || !mounted) return;
     }
     await _run(
+      success: switch (status) {
+        OrderStatus.packing => 'Order #$number is now packing.',
+        OrderStatus.shipped => 'Order #$number is out for delivery.',
+        OrderStatus.delivered => 'Order #$number marked as delivered.',
+        _ => null,
+      },
       () => ref
           .read(orderRepositoryProvider)
           .updateOrderStatus(widget.order.id, status),
@@ -600,7 +613,7 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
           ),
           const SizedBox(height: 4),
           Text(
-            '${DateFormat.yMMMd().format(order.createdAt)} · ${order.fulfillmentStatusLabel}',
+            '${DateFormat.yMMMd().format(order.createdAt)} · ${order.staffFulfillmentStatusLabel}',
             style: TextStyle(color: palette.textMuted),
           ),
           const SizedBox(height: 12),
@@ -699,7 +712,7 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
               ),
           ],
           const SizedBox(height: 12),
-          // Secondary: open, label, packing slip — one compact row.
+          // Secondary: open, label, packing label — one compact row.
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.xs,
@@ -735,8 +748,31 @@ class _FulfillmentCardState extends ConsumerState<_FulfillmentCard> {
                         }
                       }),
                 icon: const Icon(Icons.print_outlined, size: 18),
-                label: const Text('Packing slip'),
+                label: const Text('Packing label'),
               ),
+              // A courier order normally becomes Delivered when the carrier
+              // reports it. This is the way out when the carrier never does.
+              if (order.status == OrderStatus.shipped &&
+                  !order.isShopDelivery &&
+                  !order.hasParcelPlan &&
+                  !order.hasCancellationHold)
+                PopupMenuButton<OrderStatus>(
+                  tooltip: 'More delivery actions',
+                  enabled: !_busy,
+                  onSelected: (status) =>
+                      _moveTo(status, carrierOverride: true),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: OrderStatus.delivered,
+                      child: Text('Mark as delivered…'),
+                    ),
+                  ],
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Icon(Icons.more_horiz, color: palette.text),
+                  ),
+                ),
             ],
           ),
           if (_working)
@@ -772,13 +808,23 @@ class _EasyParcelRateSheetState extends ConsumerState<_EasyParcelRateSheet> {
   final _width = TextEditingController();
   final _height = TextEditingController();
   DateTime? _date;
+  bool _dateMissing = false;
   ParcelDetails? _quotedParcel;
   Future<List<EasyParcelRate>>? _rates;
   EasyParcelRate? _selected;
 
+  /// Tomorrow in Singapore: the earliest day a courier can be booked for.
+  static DateTime _tomorrowSgt() {
+    final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+    return DateTime(now.year, now.month, now.day + 1);
+  }
+
   @override
   void initState() {
     super.initState();
+    // Most pickups are for the next day; one tap less, and "Get courier
+    // rates" is never a button that silently does nothing.
+    _date = _tomorrowSgt();
     final parcel = widget.acceptedParcel;
     if (parcel != null) {
       _weight.text = parcel['weight_kg']?.toString() ?? '';
@@ -820,12 +866,20 @@ class _EasyParcelRateSheetState extends ConsumerState<_EasyParcelRateSheet> {
     );
     if (date != null && mounted) {
       _changed();
-      setState(() => _date = date);
+      setState(() {
+        _date = date;
+        _dateMissing = false;
+      });
     }
   }
 
   void _getRates() {
-    if (!_form.currentState!.validate() || _date == null) return;
+    final valid = _form.currentState!.validate();
+    if (_date == null) {
+      setState(() => _dateMissing = true);
+      return;
+    }
+    if (!valid) return;
     final parcel = ParcelDetails(
       weightKg: double.parse(_weight.text.trim()),
       lengthCm: double.parse(_length.text.trim()),
@@ -912,6 +966,16 @@ class _EasyParcelRateSheetState extends ConsumerState<_EasyParcelRateSheet> {
                                 : 'Pickup: ${DateFormat.yMMMd().format(_date!)}',
                           ),
                         ),
+                        if (_dateMissing && _date == null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Choose a pickup date first.',
+                              style: TextStyle(
+                                color: AppPalette.of(context).error,
+                              ),
+                            ),
+                          ),
                         const Text(
                           'Pickup date uses Singapore time. Courier availability will be checked when booking.',
                         ),

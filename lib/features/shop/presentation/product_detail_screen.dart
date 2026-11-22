@@ -8,9 +8,11 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/contact_launcher.dart';
+import '../../../shared/utils/delivery_estimate.dart';
 import '../../../shared/widgets/support_contact_picker.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/utils/view_tracker.dart';
+import '../../../shared/widgets/cart_badge_button.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/fullscreen_image_gallery.dart';
 import '../../../shared/widgets/heart_icon.dart';
@@ -286,7 +288,27 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   Widget build(BuildContext context) {
     final productAsync = ref.watch(productDetailProvider(widget.productId));
 
+    // Back to wherever the customer came from; from a shared link there is
+    // nothing underneath, so the Shop itself.
+    void backToShop() => context.canPop() ? context.pop() : context.go('/');
+    // The loaded page brings its own collapsing app bar. Loading, error and
+    // not-found have no content to carry one, and on iOS no system back.
+    final showPlainAppBar = productAsync.maybeWhen(
+      data: (product) => product == null,
+      orElse: () => true,
+    );
+
     return Scaffold(
+      appBar: showPlainAppBar
+          ? AppBar(
+              leading: IconButton(
+                tooltip: 'Back',
+                icon: const BackButtonIcon(),
+                onPressed: backToShop,
+              ),
+              title: const Text('Product'),
+            )
+          : null,
       body: productAsync.when(
         data: (product) {
           if (product == null) {
@@ -295,8 +317,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               title: 'Product not found',
               subtitle: 'It may have been removed or is no longer available.',
               actionLabel: 'Back to Shop',
-              onAction: () =>
-                  context.canPop() ? context.pop() : context.go('/'),
+              onAction: backToShop,
             );
           }
           // Reset the selection if we've navigated to a different product
@@ -392,6 +413,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       ),
                     ),
                     _FavoriteAppBarButton(productId: product.id),
+                    // The only page an item is added from needs its own
+                    // way to the cart.
+                    const CartBadgeButton(),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
                     background: slideCount > 0
@@ -776,7 +800,15 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                           ),
                         ],
                         const SizedBox(height: AppSpacing.xl),
-                        _DeliveryInfoCard(isLiveFish: product.isLiveFish),
+                        _DeliveryInfoCard(
+                          isLiveFish: product.isLiveFish,
+                          // Courier goods someone can order today. The
+                          // listing card no longer carries this.
+                          showEstimate:
+                              !product.isLiveFish &&
+                              product.isPurchasable &&
+                              !product.isOutOfStock,
+                        ),
                         const SizedBox(height: AppSpacing.xl),
                         // A live fish's video is in the gallery above.
                         if (galleryVideoUrl == null &&
@@ -898,6 +930,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
         error: (e, _) => ErrorState(
           onRetry: () =>
               ref.invalidate(productDetailProvider(widget.productId)),
+          secondaryLabel: 'Back to Shop',
+          onSecondary: backToShop,
         ),
       ),
       bottomNavigationBar: productAsync.maybeWhen(
@@ -1280,10 +1314,28 @@ class _StepButton extends StatelessWidget {
 /// self-collection/pickup option — every order is delivered.
 class _DeliveryInfoCard extends ConsumerWidget {
   final bool isLiveFish;
-  const _DeliveryInfoCard({required this.isLiveFish});
+
+  /// Whether to add the estimated arrival window from the shop's lead time
+  /// (`settings.delivery_lead_days_min/max`).
+  final bool showEstimate;
+  const _DeliveryInfoCard({
+    required this.isLiveFish,
+    this.showEstimate = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Nothing is shown until the lead time is known: a guessed date would
+    // be worse than none.
+    final settings = showEstimate
+        ? ref.watch(shopSettingsProvider).valueOrNull
+        : null;
+    final estimate = settings == null
+        ? null
+        : formatDeliveryEstimate(
+            minDays: settings['delivery_lead_days_min'] as int? ?? 2,
+            maxDays: settings['delivery_lead_days_max'] as int? ?? 5,
+          );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1311,6 +1363,15 @@ class _DeliveryInfoCard extends ConsumerWidget {
                     ? "Our team brings your fish to your door. We'll message you after payment to agree a time."
                     : 'Shipped by courier; tracking number appears on your order.',
               ),
+              if (estimate != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                _InfoRow(
+                  icon: Icons.event_available_outlined,
+                  title: 'Estimated ${estimate.replaceFirst('D', 'd')}',
+                  subtitle:
+                      'If you order today. An estimate, not a guaranteed date.',
+                ),
+              ],
               if (isLiveFish) ...[
                 const SizedBox(height: AppSpacing.md),
                 const _InfoRow(
@@ -1372,8 +1433,9 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-/// Heart toggle in the product detail app bar. Mirrors [ProductCard]'s
-/// favorite button, including the guest login gate.
+/// Heart toggle in the product detail app bar — the one place a product is
+/// saved, now that listing cards carry no buttons. Guests are sent to log
+/// in and come back to this product.
 class _FavoriteAppBarButton extends ConsumerWidget {
   final String productId;
   const _FavoriteAppBarButton({required this.productId});

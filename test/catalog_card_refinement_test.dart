@@ -166,7 +166,7 @@ void main() {
     for (final scale in [1.0, 2.0]) {
       for (final dark in [false, true]) {
         testWidgets(
-          'complete prices and usable actions at $width/$scale/dark=$dark',
+          'complete prices and no leftover band at $width/$scale/dark=$dark',
           (tester) async {
             tester.view.physicalSize = Size(width, 1200);
             tester.view.devicePixelRatio = 1;
@@ -212,18 +212,24 @@ void main() {
               isFalse,
               reason: 'The full variant price must remain visible',
             );
+            final card = tester.getRect(find.byType(ProductCard).first);
             final priceRect = tester.getRect(price);
-            final action = find.byTooltip('Choose options for ${_food.name}');
-            final actionRect = tester.getRect(action);
-            expect(priceRect.overlaps(actionRect), isFalse);
-            expect(actionRect.width, greaterThanOrEqualTo(48));
-            expect(actionRect.height, greaterThanOrEqualTo(48));
-            expect(
-              tester
-                  .getSize(find.byTooltip('Save ${_food.name} to wishlist'))
-                  .width,
-              greaterThanOrEqualTo(48),
+            expect(priceRect.left, greaterThanOrEqualTo(card.left));
+            expect(priceRect.right, lessThanOrEqualTo(card.right));
+            // The cell ends where the card's content ends: a square photo
+            // and the body, with nothing spare underneath.
+            final photo = tester.getRect(
+              find
+                  .descendant(
+                    of: find.byType(ProductCard).first,
+                    matching: find.byType(AspectRatio),
+                  )
+                  .first,
             );
+            expect(photo.width, closeTo(photo.height, 0.01));
+            final proof = tester.getRect(find.textContaining('5.0 (1)'));
+            expect(card.bottom - proof.bottom, inInclusiveRange(10, 12));
+            expect(find.byType(Tooltip), findsNothing);
             expect(tester.takeException(), isNull);
             if (Platform.environment['CATALOG_CAPTURE'] == '1') {
               await tester.runAsync(() async {

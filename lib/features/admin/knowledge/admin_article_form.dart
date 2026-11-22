@@ -36,7 +36,8 @@ class _ArticleFormSheet extends ConsumerStatefulWidget {
   ConsumerState<_ArticleFormSheet> createState() => _ArticleFormSheetState();
 }
 
-class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
+class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet>
+    with DirtyFormState {
   late final _titleCtrl = TextEditingController(text: widget.existing?.title);
   late final _bodyCtrl = TextEditingController(
     text: widget.existing?.bodyMarkdown,
@@ -49,17 +50,26 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
   late String? _savedId = widget.existing?.id;
   String? _baseline;
 
+  /// "Show to customers": the guide's `active` flag. On for a new guide.
+  late bool _active = widget.existing?.active ?? true;
+
   String _fingerprint() => [
     _titleCtrl.text,
     _bodyCtrl.text,
     _existingCoverUrl,
     _newCoverImage?.path,
+    _active,
   ].join('\u0001');
+
+  @override
+  bool get formDirty => _baseline != null && _fingerprint() != _baseline;
 
   @override
   void initState() {
     super.initState();
     _existingCoverUrl = widget.existing?.coverImageUrl;
+    trackDirty(_titleCtrl);
+    trackDirty(_bodyCtrl);
   }
 
   @override
@@ -93,6 +103,7 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
       final payload = <String, dynamic>{
         'title': _titleCtrl.text.trim(),
         'body_markdown': _bodyCtrl.text.trim(),
+        'active': _active,
       };
       // Only stamp published_at on first publish — editing shouldn't bump
       // it back to the top of the "newest first" guide list.
@@ -130,7 +141,7 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
   Widget build(BuildContext context) {
     _baseline ??= _fingerprint();
     return DiscardChangesGuard(
-      dirty: _fingerprint() != _baseline,
+      dirty: guardDirty,
       busy: _saving,
       child: Padding(
         padding: EdgeInsets.only(
@@ -195,7 +206,19 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
                 ),
                 maxLines: 8,
               ),
-              const SizedBox(height: AppSpacing.lg),
+              const SizedBox(height: AppSpacing.sm),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Show to customers'),
+                subtitle: Text(
+                  _active
+                      ? 'Customers can read this guide.'
+                      : 'Hidden: only staff can see it.',
+                ),
+                value: _active,
+                onChanged: _saving ? null : (v) => setState(() => _active = v),
+              ),
+              const SizedBox(height: AppSpacing.sm),
               if (_saveError != null) ...[
                 Text(
                   _saveError!,
@@ -214,7 +237,13 @@ class _ArticleFormSheetState extends ConsumerState<_ArticleFormSheet> {
                           color: AppColors.white,
                         ),
                       )
-                    : const Text('Publish'),
+                    // "Publish" only when that is what happens: a new
+                    // guide that customers will see.
+                    : Text(
+                        widget.existing == null && _savedId == null && _active
+                            ? 'Publish'
+                            : 'Save',
+                      ),
               ),
             ],
           ),

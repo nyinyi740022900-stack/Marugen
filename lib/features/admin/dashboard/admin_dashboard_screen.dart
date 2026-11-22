@@ -5,12 +5,18 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/models/product.dart';
+import '../../../shared/providers/settings_providers.dart';
 import '../../../shared/utils/price_format.dart';
-import '../../../shared/widgets/confirm_dialog.dart';
 import '../../../shared/widgets/notification_bell_button.dart';
 import '../../orders/data/order_repository.dart'
-    show AdminPaymentsSummary, StuckPendingOrders, TopProductSales;
+    show
+        AdminOrderSummary,
+        AdminPaymentsSummary,
+        StuckPendingOrders,
+        TopProductSales;
 import '../../orders/presentation/orders_providers.dart';
+import '../../orders/presentation/staff_order_confirmations.dart';
+import '../../orders/utils/checkout_totals.dart';
 import '../../shop/presentation/shop_providers.dart';
 import '../admin_shell.dart';
 import '../delivery/admin_delivery_screen.dart'
@@ -66,7 +72,8 @@ class AdminDashboardScreen extends ConsumerWidget {
                     icon: Icons.inventory_2_outlined,
                     // Products tab.
                     onTap: () =>
-                        ref.read(adminTabIndexProvider.notifier).state = 1,
+                        ref.read(adminTabIndexProvider.notifier).state =
+                            kAdminProductsTab,
                   ),
                 ),
                 const SizedBox(width: AppSpacing.md),
@@ -82,49 +89,22 @@ class AdminDashboardScreen extends ConsumerWidget {
                     accent: true,
                     // Orders tab.
                     onTap: () =>
-                        ref.read(adminTabIndexProvider.notifier).state = 2,
+                        ref.read(adminTabIndexProvider.notifier).state =
+                            kAdminOrdersTab,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                Expanded(
-                  child: _StatCard(
-                    label: 'Total Revenue',
-                    value: summaryAsync.maybeWhen(
-                      data: (summary) =>
-                          'S\$${summary.totalRevenue.toStringAsFixed(0)}',
-                      orElse: () => '—',
-                    ),
-                    icon: Icons.account_balance_wallet_outlined,
-                    // Analytics tab (index 7, under More).
-                    onTap: () =>
-                        ref.read(adminTabIndexProvider.notifier).state = 7,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: _StatCard(
-                    label: 'Revenue This Week',
-                    value: summaryAsync.maybeWhen(
-                      data: (summary) =>
-                          'S\$${summary.weekRevenue.toStringAsFixed(0)}',
-                      orElse: () => '—',
-                    ),
-                    icon: Icons.trending_up,
-                    accent: true,
-                    onTap: () =>
-                        ref.read(adminTabIndexProvider.notifier).state = 7,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            _StripeCollectedCard(
-              summaryAsync: paymentsAsync,
+            _SalesCard(
+              summaryAsync: summaryAsync,
+              paymentsAsync: paymentsAsync,
+              // Orders tab: the orders are what the figure is made of.
+              onOpenOrders: () =>
+                  ref.read(adminTabIndexProvider.notifier).state =
+                      kAdminOrdersTab,
               onRetry: () {
+                ref.invalidate(adminOrderSummaryProvider);
                 ref.invalidate(adminAllOrdersProvider);
                 ref.invalidate(adminPaymentsSummaryProvider);
               },
@@ -218,14 +198,17 @@ class AdminDashboardScreen extends ConsumerWidget {
                     boxShadow: AppShadows.card,
                   ),
                   clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    children: [
-                      for (var i = 0; i < recent.length; i++) ...[
-                        if (i > 0)
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                        _OrderRow(order: recent[i]),
+                  child: Material(
+                    color: AppPalette.of(context).surface,
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < recent.length; i++) ...[
+                          if (i > 0)
+                            const Divider(height: 1, indent: 16, endIndent: 16),
+                          _OrderRow(order: recent[i]),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 );
               },
@@ -249,38 +232,69 @@ class AdminDashboardScreen extends ConsumerWidget {
   }
 }
 
-/// What Stripe collected after refunds, and from how many orders. Shown
-/// under the revenue cards and labelled as its own figure: Total Revenue
-/// (`admin_order_summary`) also counts orders with no Stripe payment and
-/// does not clamp refunds, so the two numbers can differ.
-class _StripeCollectedCard extends StatelessWidget {
-  final AsyncValue<AdminPaymentsSummary> summaryAsync;
+/// The one money card on Home: sales after refunds, the last seven days,
+/// and how much of it came through Stripe from how many paid orders.
+///
+/// The total is `admin_order_summary`; the Stripe line is
+/// `admin_payments_summary`, shown as its own amount only when it differs
+/// (an order paid outside Stripe), so a Stripe-only shop does not read the
+/// same number twice. Opens Orders. When the total cannot be loaded the
+/// card says so and offers Retry instead of a bare dash.
+class _SalesCard extends ConsumerWidget {
+  final AsyncValue<AdminOrderSummary> summaryAsync;
+  final AsyncValue<AdminPaymentsSummary> paymentsAsync;
+  final VoidCallback onOpenOrders;
   final VoidCallback onRetry;
-  const _StripeCollectedCard({
+  const _SalesCard({
     required this.summaryAsync,
+    required this.paymentsAsync,
+    required this.onOpenOrders,
     required this.onRetry,
   });
 
+  static String paidOrders(int count) =>
+      count == 1 ? '1 paid order' : '$count paid orders';
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(shopSettingsProvider).valueOrNull;
     final palette = AppPalette.of(context);
-    final failed = summaryAsync.hasError && !summaryAsync.isLoading;
-    final summary = failed ? null : summaryAsync.valueOrNull;
-    final count = summary?.transactionCount;
-    final caption = failed
-        ? 'Could not load. Tap to retry.'
-        : summary == null
-        ? 'After refunds'
-        : 'After refunds · $count Stripe '
-              '${count == 1 ? 'transaction' : 'transactions'}';
+    final summaryFailed = summaryAsync.hasError && !summaryAsync.isLoading;
+    final summary = summaryFailed ? null : summaryAsync.valueOrNull;
+    final paymentsFailed = paymentsAsync.hasError && !paymentsAsync.isLoading;
+    final payments = paymentsFailed ? null : paymentsAsync.valueOrNull;
+    final muted = TextStyle(fontSize: 12, color: palette.textMuted);
+
+    final String? stripeLine;
+    if (summary == null || payments == null) {
+      stripeLine = null;
+    } else if ((payments.collected - summary.totalRevenue).abs() >= 0.005) {
+      stripeLine =
+          '${formatPrice(payments.collected)} of this was collected through '
+          'Stripe · ${paidOrders(payments.transactionCount)}';
+    } else {
+      stripeLine = paidOrders(payments.transactionCount);
+    }
+
+    Widget retryRow(String message) => Row(
+      children: [
+        Expanded(
+          child: Text(
+            message,
+            style: TextStyle(fontSize: 12.5, color: palette.error),
+          ),
+        ),
+        TextButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
+    );
+
     return Semantics(
       container: true,
-      button: failed,
       child: Material(
         color: palette.surface,
         borderRadius: BorderRadius.circular(AppRadius.md),
         child: InkWell(
-          onTap: failed ? onRetry : null,
+          onTap: onOpenOrders,
           borderRadius: BorderRadius.circular(AppRadius.md),
           child: Container(
             constraints: const BoxConstraints(
@@ -292,6 +306,7 @@ class _StripeCollectedCard extends StatelessWidget {
               boxShadow: AppShadows.card,
             ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -300,7 +315,7 @@ class _StripeCollectedCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(AppRadius.sm),
                   ),
                   child: Icon(
-                    Icons.credit_card_outlined,
+                    Icons.account_balance_wallet_outlined,
                     color: palette.accent,
                     size: 20,
                   ),
@@ -311,34 +326,54 @@ class _StripeCollectedCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Collected through Stripe',
+                        'Sales after refunds',
                         style: TextStyle(
                           fontSize: 12.5,
                           color: palette.textMuted,
                         ),
                       ),
                       const SizedBox(height: 2),
-                      Text(
-                        summary == null ? '—' : formatPrice(summary.collected),
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: palette.text,
+                      if (summaryFailed)
+                        retryRow(
+                          'Could not load sales. Check your connection and '
+                          'try again.',
+                        )
+                      else ...[
+                        Text(
+                          summary == null
+                              ? '—'
+                              : formatPrice(summary.totalRevenue),
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: palette.text,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        caption,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: failed ? palette.error : palette.textMuted,
-                        ),
-                      ),
+                        if (summary != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            'Last 7 days: ${formatPrice(summary.weekRevenue)}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: palette.text,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(salesIncludesCaption(settings), style: muted),
+                        ],
+                        if (stripeLine != null) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(stripeLine, style: muted),
+                        ],
+                        if (paymentsFailed)
+                          retryRow('Could not load the Stripe figure.'),
+                      ],
                     ],
                   ),
                 ),
-                if (failed)
-                  Icon(Icons.refresh, size: 20, color: palette.textMuted),
+                if (!summaryFailed)
+                  Icon(Icons.chevron_right, size: 20, color: palette.textMuted),
               ],
             ),
           ),
@@ -499,13 +534,7 @@ class _StuckPendingSection extends ConsumerWidget {
     Widget cancelButton(Order order) => TextButton(
       onPressed: () async {
         final messenger = ScaffoldMessenger.of(context);
-        final confirmed = await confirmDestructiveAction(
-          context,
-          title: 'Cancel this order?',
-          message:
-              'Order #${order.displayNumber} will be cancelled and any reserved stock released. This cannot be undone.',
-          confirmLabel: 'Cancel Order',
-        );
+        final confirmed = await confirmCancelOrder(context, order);
         if (!confirmed) return;
         try {
           await ref
@@ -528,7 +557,7 @@ class _StuckPendingSection extends ConsumerWidget {
     );
     Widget age(Order order) => Text(
       '${formatPrice(order.total)} · created '
-      '${DateTime.now().difference(order.createdAt).inMinutes} min ago',
+      '${timeAgoLabel(DateTime.now().difference(order.createdAt))}',
       style: const TextStyle(fontSize: 12),
     );
     return Column(
@@ -619,7 +648,8 @@ class _StuckPendingSection extends ConsumerWidget {
                       ref.read(adminOrderStatusFilterProvider.notifier).state =
                           OrderStatus.pending;
                       ref.read(requestedOrdersTabProvider.notifier).state = 0;
-                      ref.read(adminTabIndexProvider.notifier).state = 2;
+                      ref.read(adminTabIndexProvider.notifier).state =
+                          kAdminOrdersTab;
                     },
                     title: Text(
                       '+$notShown more in Orders',
@@ -748,6 +778,17 @@ class _TopProductsCard extends StatelessWidget {
   }
 }
 
+/// "40 min ago", "5 hours ago", "3 days ago": how long ago, in the largest
+/// unit that fits, for rows where the age is the point.
+String timeAgoLabel(Duration age) {
+  if (age.inMinutes < 1) return 'just now';
+  if (age.inMinutes < 60) return '${age.inMinutes} min ago';
+  if (age.inHours < 24) {
+    return age.inHours == 1 ? '1 hour ago' : '${age.inHours} hours ago';
+  }
+  return age.inDays == 1 ? '1 day ago' : '${age.inDays} days ago';
+}
+
 class _StatCard extends StatelessWidget {
   final String label;
   final String value;
@@ -820,74 +861,95 @@ class _StatCard extends StatelessWidget {
   }
 }
 
+/// One recent order: opens the order, and says who it is for and where
+/// it stands in the same words as the Orders tab.
 class _OrderRow extends StatelessWidget {
   final Order order;
   const _OrderRow({required this.order});
 
   @override
   Widget build(BuildContext context) {
-    final status = order.status.name;
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppPalette.of(context).surfaceMuted,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              Icons.receipt_long_outlined,
-              size: 18,
-              color: AppPalette.of(context).textMuted,
-            ),
+    final palette = AppPalette.of(context);
+    final recipient =
+        (order.shippingAddress?['recipient_name'] as String?)?.trim() ?? '';
+    final title = recipient.isEmpty
+        ? '#${order.displayNumber}'
+        : '#${order.displayNumber} · $recipient';
+    final status = order.staffFulfillmentStatusLabel;
+    return Semantics(
+      button: true,
+      child: InkWell(
+        onTap: () => context.push('/orders/${order.id}'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.md,
           ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '#${order.displayNumber}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                  ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: palette.surfaceMuted,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  formatPrice(order.total),
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    color: AppPalette.of(context).textMuted,
-                  ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.receipt_long_outlined,
+                  size: 18,
+                  color: palette.textMuted,
                 ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: AppPalette.of(context).accentSoft,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-            ),
-            child: Text(
-              status.toUpperCase(),
-              style: TextStyle(
-                fontSize: 10.5,
-                color: AppPalette.of(context).accent,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.3,
               ),
-            ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      formatPrice(order.total),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: palette.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    // Under the title, not beside it: the label can be a
+                    // phrase ("Awaiting courier pickup") and must not
+                    // squeeze the name at large text sizes.
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.accentSoft,
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                      ),
+                      child: Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: palette.accent,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: palette.textMuted),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -919,7 +981,7 @@ class _TodayQueue extends ConsumerWidget {
     void open(FulfillmentSegment s) {
       ref.read(fulfillmentSegmentProvider.notifier).state = s;
       ref.read(requestedOrdersTabProvider.notifier).state = 1;
-      ref.read(adminTabIndexProvider.notifier).state = 2;
+      ref.read(adminTabIndexProvider.notifier).state = kAdminOrdersTab;
     }
 
     return Column(

@@ -438,12 +438,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         // success, and the cart is emptied there once the server agrees.
         final ownerId = _checkoutOwner;
         if (sheetReportedSuccess && ownerId != null) {
-          ref
-              .read(paymentAwaitingConfirmationProvider.notifier)
-              .state = PaymentAwaitingConfirmation(
-            orderId: pendingOrderId,
-            ownerId: ownerId,
-            cartLines: _isBuyNow ? const [] : List.of(freshItems),
+          // Saved on the device too: if the app is closed before the
+          // webhook lands, the next launch settles it (and the cart).
+          setPaymentAwaiting(
+            ref.read,
+            PaymentAwaitingConfirmation(
+              orderId: pendingOrderId,
+              ownerId: ownerId,
+              cartLines: _isBuyNow ? const [] : List.of(freshItems),
+            ),
           );
         }
         ref.invalidate(myOrdersProvider);
@@ -798,9 +801,17 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
         ? totals!.payableCents(quote.buyerShippingCents) / 100
         : null;
 
-    return Scaffold(
+    // Leaving mid-payment would land a customer who has just been charged
+    // on a full cart with nothing saying so: back waits for the outcome.
+    return PopScope(
+      canPop: !_processing,
+      child: Scaffold(
       backgroundColor: AppPalette.of(context).background,
-      appBar: AppBar(title: const Text('Checkout')),
+      appBar: AppBar(
+        title: const Text('Checkout'),
+        // The arrow would do nothing while back is held; hide it.
+        automaticallyImplyLeading: !_processing,
+      ),
       body: ContentWidth(
         maxWidth: 760,
         child: SafeArea(
@@ -1258,6 +1269,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -1298,6 +1310,10 @@ class _InlineRetryError extends StatelessWidget {
     );
   }
 }
+
+/// Pay button label while a payment is being taken and confirmed.
+const checkoutProcessingLabel =
+    'Confirming payment… please keep this screen open';
 
 class _PayButton extends StatelessWidget {
   final bool shippingFailed;
@@ -1361,12 +1377,28 @@ class _PayButton extends StatelessWidget {
               ? () => onPayDelivery(selectedAddress!)
               : null,
           child: processing
-              ? const SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.white,
+              // Says what is happening and what to do; a bare spinner on
+              // the pay button reads as "stuck".
+              ? Semantics(
+                  liveRegion: true,
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: ExcludeSemantics(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                      SizedBox(width: AppSpacing.sm),
+                      Flexible(
+                        child: Text(
+                          checkoutProcessingLabel,
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
                   ),
                 )
               : Text(
@@ -1448,17 +1480,21 @@ class _TotalsCard extends StatelessWidget {
               amountColor: AppPalette.of(context).accent,
             ),
           ],
-          // A zero-GST shop should not show a S$0.00 tax line.
-          if (gstAmount > 0) ...[
+          // A zero-GST shop should not show a S$0.00 tax line. GST that is
+          // added on top is one of the rows that sum to the total.
+          if (gstPercent > 0 && gstAmount > 0 && !gstIncluded) ...[
             const SizedBox(height: 6),
             _SummaryLine(
-              label: 'GST (${gstPercent.toStringAsFixed(0)}%)',
+              label: 'GST (${gstPercentText(gstPercent)}%)',
               amount: formatPrice(gstAmount),
             ),
           ],
           const Divider(height: AppSpacing.lg),
           _SummaryLine(
-            label: gstIncluded ? 'Total (incl. GST)' : 'Total',
+            label: checkoutTotalLabel(
+              gstPercent: gstPercent,
+              gstIncluded: gstIncluded,
+            ),
             amount: shippingFailed
                 ? 'Delivery unavailable'
                 : payableTotal == null
@@ -1466,6 +1502,21 @@ class _TotalsCard extends StatelessWidget {
                 : formatPrice(payableTotal!),
             isTotal: true,
           ),
+          // GST already inside the prices is a note under the total, so the
+          // rows above add up to it.
+          if (gstPercent > 0 && gstAmount > 0 && gstIncluded) ...[
+            const SizedBox(height: 4),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: Text(
+                includesGstLine(percent: gstPercent, amount: gstAmount),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppPalette.of(context).textMuted,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

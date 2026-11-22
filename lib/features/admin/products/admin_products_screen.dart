@@ -213,8 +213,9 @@ class _ProductGrid extends ConsumerWidget {
                     // the numeric stock field in the edit form.
                     if (product.isLiveFish && !product.hasVariants)
                       Positioned(
-                        top: 6,
-                        right: 6,
+                        // 48pt target; the pill inside sits 10 from the corner.
+                        top: 0,
+                        right: 0,
                         child: _AvailabilityToggle(product: product, ref: ref),
                       ),
                   ],
@@ -349,24 +350,37 @@ class _AvailabilityToggle extends StatelessWidget {
       errorContext: 'admin.products',
       builder: (context, busy, run) => Tooltip(
         message: available ? 'Mark as sold' : 'Mark as available',
+        // The pill stays small; the target around it is a full 48 x 48.
         child: Material(
-          // Red once sold — a "SOLD" tag reads at a glance, unlike a
-          // same-color eye icon that just says "something toggled".
-          color: available
-              ? AppColors.black.withValues(alpha: 0.55)
-              : AppColors.red,
-          shape: const CircleBorder(),
+          type: MaterialType.transparency,
           child: InkWell(
             customBorder: const CircleBorder(),
             // One write at a time: a second tap while the first is still
             // saving would flip the fish straight back.
             onTap: busy ? null : () => run(() => _toggle(context, available)),
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Icon(
-                available ? Icons.sell_outlined : Icons.sell,
-                size: 16,
-                color: AppColors.white.withValues(alpha: busy ? 0.5 : 1),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: Center(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    // Red once sold — a "SOLD" tag reads at a glance,
+                    // unlike a same-color eye icon that just says
+                    // "something toggled".
+                    color: available
+                        ? AppColors.black.withValues(alpha: 0.55)
+                        : AppColors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(
+                      available ? Icons.sell_outlined : Icons.sell,
+                      size: 16,
+                      color: AppColors.white.withValues(alpha: busy ? 0.5 : 1),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

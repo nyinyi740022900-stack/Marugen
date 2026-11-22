@@ -81,6 +81,24 @@ class OrderRepository {
         .toList();
   }
 
+  /// The newest order of [userId] that is paid for and still on its way
+  /// (paid / packing / shipped), or null. One row, three columns, no items:
+  /// it only backs the warning shown before an account is deleted. An
+  /// unpaid `pending` order is an abandoned checkout and does not count.
+  Future<OrderInProgress?> fetchNewestOrderInProgress(String userId) async {
+    final data = await _client
+        .from('orders')
+        .select('id, order_number, status')
+        .eq('user_id', userId)
+        .inFilter('status', [
+          for (final status in OrderInProgress.statuses) status.name,
+        ])
+        .order('created_at', ascending: false)
+        .limit(1);
+    if (data.isEmpty) return null;
+    return OrderInProgress.fromMap(data.first);
+  }
+
   /// Admin: a specific customer's full order history — for the "view
   /// customer" screen. Works under the existing "Admins can view all
   /// orders" RLS policy (0001_init.sql), no new migration needed.
@@ -336,6 +354,45 @@ class OrderRepository {
   }
 }
 
+/// The little that is known about an order still on its way to the
+/// customer (see [OrderRepository.fetchNewestOrderInProgress]).
+class OrderInProgress {
+  /// Paid for and not yet delivered.
+  static const statuses = {
+    OrderStatus.paid,
+    OrderStatus.packing,
+    OrderStatus.shipped,
+  };
+
+  final String id;
+  final String? orderNumber;
+  final OrderStatus status;
+
+  const OrderInProgress({
+    required this.id,
+    this.orderNumber,
+    required this.status,
+  });
+
+  /// Same rule as [Order.displayNumber].
+  String get displayNumber =>
+      orderNumber ?? (id.length > 8 ? id.substring(0, 8) : id).toUpperCase();
+
+  /// Null when the row is not one of [statuses] after all.
+  static OrderInProgress? fromMap(Map<String, dynamic> map) {
+    final id = map['id'];
+    final status = OrderStatus.values.asNameMap()[map['status']];
+    if (id is! String || status == null || !statuses.contains(status)) {
+      return null;
+    }
+    return OrderInProgress(
+      id: id,
+      orderNumber: map['order_number'] as String?,
+      status: status,
+    );
+  }
+}
+
 /// True when PostgREST could not find the function that was called: the
 /// migration that adds it has not been applied to this database yet.
 /// Anything else (permission, network, a failing function) is a real error.
@@ -343,9 +400,11 @@ bool isMissingRpc(Object error) =>
     error is PostgrestException &&
     const {'PGRST202', '42883', '404'}.contains(error.code);
 
-/// Payments made through Stripe: how many orders reached Stripe (whatever
-/// became of them), and what was collected from them after refunds.
+/// Payments made through Stripe: how many paid orders the money came from,
+/// and what was collected from them after refunds.
 class AdminPaymentsSummary {
+  /// Orders that contribute to [collected]; an abandoned or cancelled
+  /// checkout that merely reached Stripe is not one of them.
   final int transactionCount;
   final double collected;
 
@@ -354,13 +413,26 @@ class AdminPaymentsSummary {
     required this.collected,
   });
 
-  /// The app's copy of `admin_payments_summary`, used until migration 0078
-  /// is applied: the same figures added up from every order.
+  /// The app's copy of `admin_payments_summary`, used until the function
+  /// exists in the database: the same figures added up from every order.
+  /// An order counts when it has a Stripe payment and is paid / packing /
+  /// shipped / delivered, or is refunded with a refund that has not
+  /// succeeded (the rule behind [Order.netPaidAmount], and the server's
+  /// since migration 0081).
   factory AdminPaymentsSummary.fromOrders(Iterable<Order> orders) {
     var count = 0;
     var collected = 0.0;
     for (final order in orders) {
       if (order.stripePaymentIntentId?.isEmpty ?? true) continue;
+      final contributes =
+          const {
+            OrderStatus.paid,
+            OrderStatus.packing,
+            OrderStatus.shipped,
+            OrderStatus.delivered,
+          }.contains(order.status) ||
+          order.needsRefundReview;
+      if (!contributes) continue;
       count++;
       collected += order.netPaidAmount;
     }

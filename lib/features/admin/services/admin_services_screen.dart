@@ -144,7 +144,8 @@ class _ServiceFormSheet extends ConsumerStatefulWidget {
   ConsumerState<_ServiceFormSheet> createState() => _ServiceFormSheetState();
 }
 
-class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
+class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet>
+    with DirtyFormState {
   late final _nameCtrl = TextEditingController(text: widget.existing?.name);
   late final _descCtrl = TextEditingController(
     text: widget.existing?.description,
@@ -178,9 +179,15 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
   ].join('\u0001');
 
   @override
+  bool get formDirty => _baseline != null && _fingerprint() != _baseline;
+
+  @override
   void initState() {
     super.initState();
     _existingImageUrls.addAll(widget.existing?.imageUrls ?? const []);
+    for (final c in [_nameCtrl, _descCtrl, _priceCtrl, _categoryCtrl]) {
+      trackDirty(c);
+    }
   }
 
   @override
@@ -279,7 +286,7 @@ class _ServiceFormSheetState extends ConsumerState<_ServiceFormSheet> {
   Widget build(BuildContext context) {
     _baseline ??= _fingerprint();
     return DiscardChangesGuard(
-      dirty: _fingerprint() != _baseline,
+      dirty: guardDirty,
       busy: _saving,
       child: Padding(
         padding: EdgeInsets.only(

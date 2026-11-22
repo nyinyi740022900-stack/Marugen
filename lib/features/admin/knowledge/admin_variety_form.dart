@@ -57,7 +57,8 @@ class _VarietyFormSheet extends ConsumerStatefulWidget {
   ConsumerState<_VarietyFormSheet> createState() => _VarietyFormSheetState();
 }
 
-class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
+class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet>
+    with DirtyFormState {
   late final _nameCtrl = TextEditingController(text: widget.existing?.name);
   late final _descCtrl = TextEditingController(
     text: widget.existing?.description,
@@ -92,15 +93,29 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   ].join('\u0001');
 
   @override
+  bool get formDirty => _baseline != null && _fingerprint() != _baseline;
+
+  _StageDraft _trackStage(_StageDraft stage) {
+    trackDirty(stage.labelCtrl);
+    trackDirty(stage.descCtrl);
+    return stage;
+  }
+
+  @override
   void initState() {
     super.initState();
     _existingCoverUrl = widget.existing?.imageUrl;
+    for (final c in [_nameCtrl, _descCtrl, _traitsCtrl]) {
+      trackDirty(c);
+    }
     for (final s in widget.existing?.stages ?? const <VarietyStage>[]) {
       _stages.add(
-        _StageDraft(
-          label: s.label,
-          description: s.description,
-          existingImageUrl: s.imageUrl,
+        _trackStage(
+          _StageDraft(
+            label: s.label,
+            description: s.description,
+            existingImageUrl: s.imageUrl,
+          ),
         ),
       );
     }
@@ -137,7 +152,7 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
     if (mounted && picked != null) setState(() => stage.newImage = picked);
   }
 
-  void _addStage() => setState(() => _stages.add(_StageDraft()));
+  void _addStage() => setState(() => _stages.add(_trackStage(_StageDraft())));
 
   void _removeStage(int i) => setState(() => _stages.removeAt(i).dispose());
 
@@ -223,7 +238,7 @@ class _VarietyFormSheetState extends ConsumerState<_VarietyFormSheet> {
   Widget build(BuildContext context) {
     _baseline ??= _fingerprint();
     return DiscardChangesGuard(
-      dirty: _fingerprint() != _baseline,
+      dirty: guardDirty,
       busy: _saving,
       child: Padding(
         padding: EdgeInsets.only(

@@ -134,9 +134,112 @@ void main() {
     await pumpPanel(tester, order, repo, admin: true);
     await tester.tap(find.text('Approve & refund'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('original payment method'), findsWidgets);
-    await tester.tap(find.text('Confirm refund'));
+    // The amount is on the message and on the button; the other button
+    // only closes the dialog, so it does not read as a decision.
+    expect(
+      find.text(
+        "Refund S\$20.00 to the customer's original payment method? "
+        'Delivery stays paused until Stripe confirms.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Keep order'), findsNothing);
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(repo.calls, isEmpty);
+
+    await tester.tap(find.text('Approve & refund'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refund S\$20.00'));
     await tester.pumpAndSettle();
     expect(repo.calls, ['approve']);
+  });
+
+  testWidgets('declining is dismissed with Back, not "Keep order"', (
+    tester,
+  ) async {
+    final repo = CancellationRepository();
+    final order = Order.fromMap(
+      orderMap({
+        'order_cancellation_requests': {'status': 'requested'},
+      }),
+    );
+    await pumpPanel(tester, order, repo, admin: true);
+    await tester.tap(find.text('Decline request'));
+    await tester.pumpAndSettle();
+    expect(find.text('Keep order'), findsNothing);
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(repo.calls, isEmpty);
+  });
+
+  testWidgets('the customer keeps "Keep order" on their own request', (
+    tester,
+  ) async {
+    await pumpPanel(
+      tester,
+      Order.fromMap(orderMap()),
+      CancellationRepository(),
+    );
+    await tester.tap(find.text('Request cancellation'));
+    await tester.pumpAndSettle();
+    expect(find.text('Keep order'), findsOneWidget);
+    expect(find.text('Back'), findsNothing);
+  });
+
+  testWidgets('each side reads the panel in its own voice', (tester) async {
+    final order = Order.fromMap(
+      orderMap({
+        'refund_status': 'failed',
+        'order_cancellation_requests': {
+          'status': 'approved',
+          'reason': 'Ordered twice',
+        },
+      }),
+    );
+    await pumpPanel(tester, order, CancellationRepository(), admin: true);
+    expect(find.text('Customer reason: Ordered twice'), findsOneWidget);
+    expect(
+      find.textContaining('Refund failed — check Stripe'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('contact shop'), findsNothing);
+
+    // A fresh scope: the customer's own view of the same order.
+    await tester.pumpWidget(const SizedBox());
+    await pumpPanel(tester, order, CancellationRepository());
+    expect(find.text('Your reason: Ordered twice'), findsOneWidget);
+    expect(find.textContaining('Customer reason'), findsNothing);
+    expect(find.textContaining('Refund failed — contact shop'), findsOneWidget);
+  });
+
+  test('staff status labels point at Stripe or the courier, never at '
+      '"the shop"', () {
+    final failed = Order.fromMap(
+      orderMap({'status': 'refunded', 'refund_status': 'failed'}),
+    );
+    expect(failed.fulfillmentStatusLabel, 'Refund failed — contact shop');
+    expect(failed.staffFulfillmentStatusLabel, 'Refund failed — check Stripe');
+    expect(
+      Order.fromMap(
+        orderMap({'refund_status': 'requires_action'}),
+      ).staffRefundStatusLabel,
+      'Refund needs attention — check Stripe',
+    );
+    final issue = Order.fromMap(
+      orderMap({
+        'status': 'shipped',
+        'tracking_provider': 'easyparcel',
+        'tracking_status_code': 6,
+      }),
+    );
+    expect(issue.fulfillmentStatusLabel, 'Delivery issue — contact shop');
+    expect(
+      issue.staffFulfillmentStatusLabel,
+      'Delivery issue — check the courier',
+    );
+    // Everything else is the same wording for both.
+    final paid = Order.fromMap(orderMap());
+    expect(paid.staffFulfillmentStatusLabel, paid.fulfillmentStatusLabel);
   });
 }

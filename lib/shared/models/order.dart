@@ -217,6 +217,25 @@ class Order {
     _ => null,
   };
 
+  /// [refundStatusLabel] for staff screens: staff are "the shop", so the
+  /// problem states point at where to look instead of "contact shop".
+  String? get staffRefundStatusLabel => switch (refundStatus) {
+    'requires_action' => 'Refund needs attention — check Stripe',
+    'failed' => 'Refund failed — check Stripe',
+    _ => refundStatusLabel,
+  };
+
+  /// [fulfillmentStatusLabel] for staff screens (see
+  /// [staffRefundStatusLabel]).
+  String get staffFulfillmentStatusLabel {
+    final label = fulfillmentStatusLabel;
+    if (label == refundStatusLabel) return staffRefundStatusLabel ?? label;
+    if (label == 'Delivery issue — contact shop') {
+      return 'Delivery issue — check the courier';
+    }
+    return label;
+  }
+
   bool get canRequestRefund =>
       refundStatus == null &&
       const {

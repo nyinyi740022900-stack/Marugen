@@ -47,6 +47,9 @@ Future<bool> confirmDestructiveAction(
   required String title,
   required String message,
   String confirmLabel = 'Delete',
+  // The dismiss button. Change it where "Cancel" would read as the action
+  // itself ("Cancel this order?" -> "Keep order").
+  String cancelLabel = 'Cancel',
 }) async {
   final confirmed = await showAdaptiveDialog<bool>(
     context: context,
@@ -56,7 +59,7 @@ Future<bool> confirmDestructiveAction(
       actions: [
         adaptiveDialogAction(
           dialogContext,
-          label: 'Cancel',
+          label: cancelLabel,
           onPressed: () => Navigator.pop(dialogContext, false),
         ),
         adaptiveDialogAction(

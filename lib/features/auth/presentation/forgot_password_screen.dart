@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/email_validator.dart';
 import 'auth_providers.dart';
-import 'login_screen.dart' show friendlyAuthError;
+import 'login_screen.dart' show AuthErrorScreen, friendlyAuthError;
 
 /// Simple "forgot password" screen: asks for an email, fires Supabase's
 /// password-reset email flow, then shows a confirmation. Matches the
@@ -43,7 +43,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
           .sendPasswordResetEmail(_emailCtrl.text.trim());
       if (mounted) setState(() => _sent = true);
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyAuthError(e));
+      if (mounted) {
+        setState(
+          () => _error = friendlyAuthError(e, AuthErrorScreen.forgotPassword),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -99,17 +103,21 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.md),
-              Container(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                decoration: BoxDecoration(
-                  color: AppPalette.of(context).accentSoft,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: Text(
-                  _error!,
-                  style: TextStyle(
-                    color: AppPalette.of(context).accent,
-                    fontSize: 13,
+              // Announced the moment it appears.
+              Semantics(
+                liveRegion: true,
+                child: Container(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppPalette.of(context).accentSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: Text(
+                    _error!,
+                    style: TextStyle(
+                      color: AppPalette.of(context).accent,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ),

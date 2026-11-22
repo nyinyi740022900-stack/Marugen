@@ -283,7 +283,7 @@ void main() {
           easyParcelConnectedProvider.overrideWith((ref) async => false),
         ],
       );
-      final packing = find.widgetWithText(OutlinedButton, 'Packing');
+      final packing = find.widgetWithText(OutlinedButton, 'Start packing');
       await reveal(tester, packing);
       await tester.tap(packing);
       await tester.pumpAndSettle();
@@ -345,6 +345,8 @@ void main() {
         // Name sits above Category; fill it while it is still on screen,
         // then scroll on — the photo strip pushes the category field out
         // of the lazily built viewport on a short keyboard-covered screen.
+        // (Save is pinned under the list now, so Name needs a short scroll.)
+        await reveal(tester, field('Name'));
         await tester.enterText(field('Name'), 'Premium koi food');
         await reveal(
           tester,
@@ -636,13 +638,16 @@ void main() {
         }
         expect(tester.takeException(), isNull);
         await shot(tester, 'owner-actions-$brightness');
-        await tester.tap(find.widgetWithText(TextButton, 'Cancelled'));
+        await tester.tap(find.widgetWithText(TextButton, 'Cancel order…'));
         await tester.pumpAndSettle();
         expect(find.text('Cancel this order?'), findsOneWidget);
-        expect(find.text('Cancel').hitTestable(), findsOneWidget);
+        // The dismiss button says what it does; "Cancel" would be the action.
+        expect(find.text('Cancel'), findsNothing);
+        expect(find.text('Cancel order').hitTestable(), findsOneWidget);
+        expect(find.text('Keep order').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
         await shot(tester, 'owner-cancel-$brightness');
-        await tester.tap(find.text('Cancel').hitTestable());
+        await tester.tap(find.text('Keep order').hitTestable());
         await tester.pumpAndSettle();
         expect(repository.writes, 0);
         expect(find.text('Cancel this order?'), findsNothing);

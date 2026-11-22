@@ -12,6 +12,8 @@ import '../../../shared/models/app_user.dart';
 import '../../../shared/models/app_notification.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/undo_snack_bar.dart';
+import '../../admin/admin_shell.dart'
+    show adminTabIndexProvider, kAdminSettingsTab;
 import 'notification_providers.dart';
 
 /// Shared between the customer and admin apps — each only ever sees their
@@ -319,6 +321,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   }
 }
 
+enum _Destination { order, adminSettings, none }
+
 class _NotificationTile extends ConsumerWidget {
   final AppNotification notification;
   final bool selecting;
@@ -332,7 +336,21 @@ class _NotificationTile extends ConsumerWidget {
     required this.onSelect,
   });
 
+  /// Where a tap leads. Order alerts open the order; "EasyParcel
+  /// disconnected" opens admin Settings, where it is reconnected; a
+  /// shop-wide alert with nothing to do in the app leads nowhere.
+  _Destination get _destination {
+    if (notification.orderId != null) return _Destination.order;
+    if (notification.isOpsAlert &&
+        notification.shopWideFinding == 'easyparcel_disconnected') {
+      return _Destination.adminSettings;
+    }
+    return _Destination.none;
+  }
+
   IconData get _icon {
+    // Something is wrong: not the truck used for delivery notices.
+    if (notification.isOpsAlert) return Icons.warning_amber_rounded;
     switch (notification.type) {
       case 'admin_alert':
         return Icons.local_shipping_outlined;
@@ -353,6 +371,7 @@ class _NotificationTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final unread = !notification.read;
+    final destination = _destination;
     return Material(
       color: AppPalette.of(context).surface,
       borderRadius: BorderRadius.circular(AppRadius.md),
@@ -369,8 +388,16 @@ class _NotificationTile extends ConsumerWidget {
                         .read(myNotificationsProvider.notifier)
                         .markRead(notification.id);
                   }
-                  if (notification.orderId != null && context.mounted) {
-                    context.push('/orders/${notification.orderId}');
+                  if (!context.mounted) return;
+                  switch (destination) {
+                    case _Destination.order:
+                      context.push('/orders/${notification.orderId}');
+                    case _Destination.adminSettings:
+                      ref.read(adminTabIndexProvider.notifier).state =
+                          kAdminSettingsTab;
+                      context.go('/admin');
+                    case _Destination.none:
+                      break;
                   }
                 },
           child: Container(
@@ -430,6 +457,21 @@ class _NotificationTile extends ConsumerWidget {
                           color: AppPalette.of(context).textMuted,
                         ),
                       ),
+                      if (notification.isOpsAlert &&
+                          destination != _Destination.order) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          destination == _Destination.adminSettings
+                              ? 'Tap to open Settings.'
+                              : 'There is nothing to open in the app for '
+                                    'this alert.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppPalette.of(context).textMuted,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Text(
                         DateFormat.yMMMd().add_jm().format(
@@ -452,6 +494,13 @@ class _NotificationTile extends ConsumerWidget {
                       color: AppPalette.of(context).accent,
                       shape: BoxShape.circle,
                     ),
+                  ),
+                // A chevron only where a tap goes somewhere.
+                if (!selecting && destination != _Destination.none)
+                  Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: AppPalette.of(context).textMuted,
                   ),
               ],
             ),

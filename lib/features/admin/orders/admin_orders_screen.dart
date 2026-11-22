@@ -9,11 +9,12 @@ import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/order.dart';
 import '../../../shared/utils/contact_launcher.dart';
-import '../../../shared/widgets/confirm_dialog.dart';
+import '../../../shared/widgets/content_width.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../orders/presentation/orders_providers.dart';
 import '../../orders/presentation/order_pull_to_refresh.dart';
+import '../../orders/presentation/staff_order_confirmations.dart';
 import '../../orders/utils/invoice_pdf.dart';
 import '../delivery/admin_delivery_screen.dart';
 import '../../orders/utils/order_payment_line.dart';
@@ -143,188 +144,216 @@ class _OrdersListPaneState extends ConsumerState<_OrdersListPane> {
     // page, not just whatever's been scrolled into view so far.
     final searching = query.isNotEmpty;
 
-    return OrderPullToRefresh(
-      onRefresh: () => refreshAdminOrdersFromCarrier(
-        ProviderScope.containerOf(context, listen: false),
-      ),
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.sm,
-              AppSpacing.lg,
-              0,
-            ),
-            child: _AdminOrderSearchField(),
-          ),
-          SizedBox(
-            height: 32 + MediaQuery.textScalerOf(context).scale(20),
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.lg,
-                vertical: AppSpacing.sm,
+    // Same reading width as Fulfillment on an iPad or in landscape.
+    return ContentWidth(
+      maxWidth: 800,
+      child: OrderPullToRefresh(
+        onRefresh: () => refreshAdminOrdersFromCarrier(
+          ProviderScope.containerOf(context, listen: false),
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                0,
               ),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: AppSpacing.sm),
-                  child: ChoiceChip(
-                    label: const Text('All'),
-                    selected: filter == null,
-                    onSelected: (_) =>
-                        ref
-                                .read(adminOrderStatusFilterProvider.notifier)
-                                .state =
-                            null,
-                  ),
+              child: _AdminOrderSearchField(),
+            ),
+            SizedBox(
+              height: 32 + MediaQuery.textScalerOf(context).scale(20),
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.lg,
+                  vertical: AppSpacing.sm,
                 ),
-                for (final s in OrderStatus.values)
+                children: [
                   Padding(
                     padding: const EdgeInsets.only(right: AppSpacing.sm),
                     child: ChoiceChip(
-                      label: Text(orderStatusLabel(s)),
-                      selected: filter == s,
+                      label: const Text('All'),
+                      selected: filter == null,
                       onSelected: (_) =>
                           ref
                                   .read(adminOrderStatusFilterProvider.notifier)
                                   .state =
-                              s,
+                              null,
                     ),
                   ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: searching
-                ? ref
-                      .watch(adminOrdersProvider)
-                      .when(
-                        data: (orders) {
-                          final filtered = orders.where((o) {
-                            if (o.displayNumber.toLowerCase().contains(query)) {
-                              return true;
-                            }
-                            final name =
-                                o.shippingAddress?['recipient_name'] as String?;
-                            if (name != null &&
-                                name.toLowerCase().contains(query)) {
-                              return true;
-                            }
-                            final phone =
-                                o.shippingAddress?['phone'] as String?;
-                            if (phone != null && phone.contains(query)) {
-                              return true;
-                            }
-                            return o.items.any(
-                              (item) => item.productName.toLowerCase().contains(
-                                query,
-                              ),
-                            );
-                          }).toList();
-
-                          if (filtered.isEmpty) {
-                            return ListView(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              children: [
-                                Center(
-                                  child: Text(
-                                    'No matches.',
-                                    style: TextStyle(
-                                      color: AppPalette.of(context).textMuted,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          return ListView.separated(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpacing.lg,
-                              0,
-                              AppSpacing.lg,
-                              AppSpacing.lg,
-                            ),
-                            itemCount: filtered.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: AppSpacing.md),
-                            itemBuilder: (context, i) =>
-                                _AdminOrderCard(order: filtered[i]),
-                          );
-                        },
-                        loading: () => Center(
-                          child: CircularProgressIndicator(
-                            color: AppPalette.of(context).accent,
-                          ),
-                        ),
-                        error: (e, _) => ErrorState(
-                          onRetry: () => ref.invalidate(adminOrdersProvider),
-                        ),
-                      )
-                : ref
-                      .watch(adminOrdersPagedProvider)
-                      .when(
-                        data: (paged) {
-                          if (paged.items.isEmpty) {
-                            return ListView(
-                              physics: const AlwaysScrollableScrollPhysics(),
-                              children: [
-                                Center(
-                                  child: Text(
-                                    'No orders.',
-                                    style: TextStyle(
-                                      color: AppPalette.of(context).textMuted,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-                          return ListView.separated(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            controller: _scrollController,
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpacing.lg,
-                              0,
-                              AppSpacing.lg,
-                              AppSpacing.lg,
-                            ),
-                            itemCount:
-                                paged.items.length + (paged.hasMore ? 1 : 0),
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: AppSpacing.md),
-                            itemBuilder: (context, i) {
-                              if (i >= paged.items.length) {
-                                return Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    vertical: AppSpacing.lg,
-                                  ),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      color: AppPalette.of(context).accent,
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                );
-                              }
-                              return _AdminOrderCard(order: paged.items[i]);
-                            },
-                          );
-                        },
-                        loading: () => Center(
-                          child: CircularProgressIndicator(
-                            color: AppPalette.of(context).accent,
-                          ),
-                        ),
-                        error: (e, _) => ErrorState(
-                          onRetry: () => ref
-                              .read(adminOrdersPagedProvider.notifier)
-                              .refresh(),
-                        ),
+                  for (final s in OrderStatus.values)
+                    Padding(
+                      padding: const EdgeInsets.only(right: AppSpacing.sm),
+                      child: ChoiceChip(
+                        label: Text(orderStatusLabel(s)),
+                        selected: filter == s,
+                        onSelected: (_) =>
+                            ref
+                                    .read(
+                                      adminOrderStatusFilterProvider.notifier,
+                                    )
+                                    .state =
+                                s,
                       ),
-          ),
-        ],
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: searching
+                  ? ref
+                        .watch(adminOrdersProvider)
+                        .when(
+                          data: (orders) {
+                            final filtered = orders.where((o) {
+                              if (o.displayNumber.toLowerCase().contains(
+                                query,
+                              )) {
+                                return true;
+                              }
+                              final name =
+                                  o.shippingAddress?['recipient_name']
+                                      as String?;
+                              if (name != null &&
+                                  name.toLowerCase().contains(query)) {
+                                return true;
+                              }
+                              final phone =
+                                  o.shippingAddress?['phone'] as String?;
+                              if (phone != null && phone.contains(query)) {
+                                return true;
+                              }
+                              return o.items.any(
+                                (item) => item.productName
+                                    .toLowerCase()
+                                    .contains(query),
+                              );
+                            }).toList();
+
+                            if (filtered.isEmpty) {
+                              return ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: [
+                                  Center(
+                                    child: Text(
+                                      // The status chip narrows the search;
+                                      // say so, or a real order looks lost.
+                                      filter == null
+                                          ? 'No matches.'
+                                          : 'No matches in '
+                                                '${orderStatusLabel(filter)}.',
+                                      style: TextStyle(
+                                        color: AppPalette.of(context).textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                  if (filter != null)
+                                    Center(
+                                      child: TextButton(
+                                        onPressed: () =>
+                                            ref
+                                                    .read(
+                                                      adminOrderStatusFilterProvider
+                                                          .notifier,
+                                                    )
+                                                    .state =
+                                                null,
+                                        child: const Text('Search all orders'),
+                                      ),
+                                    ),
+                                ],
+                              );
+                            }
+                            return ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.lg,
+                                0,
+                                AppSpacing.lg,
+                                AppSpacing.lg,
+                              ),
+                              itemCount: filtered.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: AppSpacing.md),
+                              itemBuilder: (context, i) =>
+                                  _AdminOrderCard(order: filtered[i]),
+                            );
+                          },
+                          loading: () => Center(
+                            child: CircularProgressIndicator(
+                              color: AppPalette.of(context).accent,
+                            ),
+                          ),
+                          error: (e, _) => ErrorState(
+                            onRetry: () => ref.invalidate(adminOrdersProvider),
+                          ),
+                        )
+                  : ref
+                        .watch(adminOrdersPagedProvider)
+                        .when(
+                          data: (paged) {
+                            if (paged.items.isEmpty) {
+                              return ListView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                children: [
+                                  Center(
+                                    child: Text(
+                                      'No orders.',
+                                      style: TextStyle(
+                                        color: AppPalette.of(context).textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+                            return ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              controller: _scrollController,
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.lg,
+                                0,
+                                AppSpacing.lg,
+                                AppSpacing.lg,
+                              ),
+                              itemCount:
+                                  paged.items.length + (paged.hasMore ? 1 : 0),
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: AppSpacing.md),
+                              itemBuilder: (context, i) {
+                                if (i >= paged.items.length) {
+                                  return Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      vertical: AppSpacing.lg,
+                                    ),
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        color: AppPalette.of(context).accent,
+                                        strokeWidth: 2,
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return _AdminOrderCard(order: paged.items[i]);
+                              },
+                            );
+                          },
+                          loading: () => Center(
+                            child: CircularProgressIndicator(
+                              color: AppPalette.of(context).accent,
+                            ),
+                          ),
+                          error: (e, _) => ErrorState(
+                            onRetry: () => ref
+                                .read(adminOrdersPagedProvider.notifier)
+                                .refresh(),
+                          ),
+                        ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -446,6 +475,10 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
     final order = widget.order;
     final phone = order.shippingAddress?['phone'] as String?;
     final hasPhone = phone != null && phone.trim().isNotEmpty;
+    final recipientLine = [
+      (order.shippingAddress?['recipient_name'] as String?)?.trim(),
+      phone?.trim(),
+    ].where((part) => part != null && part.isNotEmpty).join(' · ');
     final firstItem = order.items.isNotEmpty ? order.items.first : null;
     final extraCount = order.items.length - 1;
 
@@ -500,6 +533,16 @@ class _AdminOrderCardState extends ConsumerState<_AdminOrderCard> {
                     ),
                   ],
                 ),
+                if (recipientLine.isNotEmpty) ...[
+                  Text(
+                    recipientLine,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                ],
                 Text(
                   DateFormat.yMMMd().add_jm().format(order.createdAt),
                   style: TextStyle(
@@ -722,6 +765,14 @@ class _StatusSelector extends ConsumerStatefulWidget {
 class _StatusSelectorState extends ConsumerState<_StatusSelector> {
   bool _updating = false;
 
+  /// What the button does, not the status it leads to.
+  static String _actionLabel(OrderStatus s) => switch (s) {
+    OrderStatus.packing => 'Start packing',
+    OrderStatus.refunded => 'Refund order…',
+    OrderStatus.cancelled => 'Cancel order…',
+    _ => orderStatusLabel(s),
+  };
+
   Color _colorFor(OrderStatus s) {
     switch (s) {
       case OrderStatus.delivered:
@@ -738,22 +789,9 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
 
   Future<void> _moveTo(OrderStatus s) async {
     if (s == OrderStatus.cancelled || s == OrderStatus.refunded) {
-      final confirmed = await confirmDestructiveAction(
-        context,
-        title: s == OrderStatus.cancelled
-            ? 'Cancel this order?'
-            : 'Refund this order?',
-        message: s == OrderStatus.refunded
-            ? 'This will issue a real Stripe refund for order '
-                  '#${widget.order.displayNumber} back to the customer\'s original '
-                  'payment method. The order will show Refunded only after '
-                  'the payment provider confirms completion.'
-            : 'Order #${widget.order.displayNumber} will move to "${orderStatusLabel(s)}". '
-                  'This is final — the status can never be changed again after this.',
-        confirmLabel: s == OrderStatus.refunded
-            ? 'Refund'
-            : orderStatusLabel(s),
-      );
+      final confirmed = s == OrderStatus.refunded
+          ? await confirmRefundOrder(context, widget.order)
+          : await confirmCancelOrder(context, widget.order);
       if (!confirmed) return;
     }
 
@@ -810,7 +848,7 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            widget.order.fulfillmentStatusLabel,
+            widget.order.staffFulfillmentStatusLabel,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
           TextButton(
@@ -852,7 +890,7 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
                 border: Border.all(color: color.withValues(alpha: 0.25)),
               ),
               child: Text(
-                widget.order.fulfillmentStatusLabel,
+                widget.order.staffFulfillmentStatusLabel,
                 style: TextStyle(
                   color: color,
                   fontWeight: FontWeight.w700,
@@ -870,9 +908,9 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
             ],
           ],
         ),
-        if (widget.order.refundStatusLabel != null) ...[
+        if (widget.order.staffRefundStatusLabel != null) ...[
           const SizedBox(height: AppSpacing.sm),
-          Text(widget.order.refundStatusLabel!),
+          Text(widget.order.staffRefundStatusLabel!),
           if (widget.order.refundStatus != 'succeeded')
             TextButton(
               onPressed: _updating
@@ -921,7 +959,7 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
                     foregroundColor: _colorFor(s),
                   ),
                   child: Text(
-                    orderStatusLabel(s),
+                    _actionLabel(s),
                     style: const TextStyle(fontSize: 12),
                   ),
                 ),
@@ -959,7 +997,7 @@ class _StatusSelectorState extends ConsumerState<_StatusSelector> {
                     foregroundColor: AppPalette.of(context).textMuted,
                   ),
                   child: Text(
-                    orderStatusLabel(s),
+                    _actionLabel(s),
                     style: const TextStyle(
                       fontSize: 11.5,
                       decoration: TextDecoration.underline,

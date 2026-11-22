@@ -470,17 +470,21 @@ class _AddressFormState extends ConsumerState<AddressForm> {
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: AppSpacing.sm),
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppPalette.of(context).accentSoft,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                    ),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: AppPalette.of(context).accent,
-                        fontSize: 13,
+                  // Announced the moment it appears.
+                  Semantics(
+                    liveRegion: true,
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: AppPalette.of(context).accentSoft,
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
+                      ),
+                      child: Text(
+                        _error!,
+                        style: TextStyle(
+                          color: AppPalette.of(context).accent,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ),

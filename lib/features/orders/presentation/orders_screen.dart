@@ -35,6 +35,21 @@ class OrdersScreen extends ConsumerWidget {
     }
 
     final rawOrdersAsync = ref.watch(myOrdersProvider);
+    // An order whose payment sheet succeeded but which the server has not
+    // confirmed yet: no "Complete payment" for it, and the moment this list
+    // shows it settled the hint (and the cart lines it bought) are cleared.
+    final awaitingPayment = ref.watch(paymentAwaitingConfirmationProvider);
+    ref.listen(myOrdersProvider, (_, next) {
+      final awaiting = ref.read(paymentAwaitingConfirmationProvider);
+      final orders = next.isLoading || next.hasError ? null : next.valueOrNull;
+      if (awaiting == null || orders == null) return;
+      for (final order in orders) {
+        if (order.id == awaiting.orderId) {
+          settlePaymentAwaiting(ref.read, awaiting, order);
+          break;
+        }
+      }
+    });
     final visibleOrdersAsync = ref.watch(visibleMyOrdersProvider);
     final hasQuery = ref.watch(myOrdersSearchQueryProvider).trim().isNotEmpty;
     final showUnpaid = ref.watch(showCancelledUnpaidOrdersProvider);
@@ -182,7 +197,11 @@ class OrdersScreen extends ConsumerWidget {
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
-                                  if (order.status == OrderStatus.pending) ...[
+                                  // Not while this order's payment is
+                                  // being confirmed: the sheet reported
+                                  // success, so never invite a second one.
+                                  if (order.status == OrderStatus.pending &&
+                                      awaitingPayment?.orderId != order.id) ...[
                                     const SizedBox(height: 8),
                                     // The fastest path to the money step;
                                     // the order page resumes the payment.

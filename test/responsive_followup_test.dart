@@ -168,59 +168,57 @@ void main() {
     }
     {
       const screen = AdminDashboardScreen();
-      testWidgets(
-        'AdminDashboardScreen handles large text in $brightness',
-        (tester) async {
-          viewport(tester, const Size(360, 6000));
-          final order = Order(
-            id: '12345678-abcd',
-            userId: 'u',
-            status: OrderStatus.paid,
-            total: 12345.67,
-            stripePaymentIntentId: 'test-layout',
-            createdAt: DateTime(2026, 10, 11),
-          );
-          await tester.pumpWidget(
-            ProviderScope(
-              overrides: [
-                productListProvider.overrideWith((ref) async => [product]),
-                adminAllProductsProvider.overrideWith(
-                  (ref) async => [product],
+      testWidgets('AdminDashboardScreen handles large text in $brightness', (
+        tester,
+      ) async {
+        viewport(tester, const Size(360, 6000));
+        final order = Order(
+          id: '12345678-abcd',
+          userId: 'u',
+          status: OrderStatus.paid,
+          total: 12345.67,
+          stripePaymentIntentId: 'test-layout',
+          createdAt: DateTime(2026, 10, 11),
+        );
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              productListProvider.overrideWith((ref) async => [product]),
+              adminAllProductsProvider.overrideWith((ref) async => [product]),
+              adminOrdersProvider.overrideWith((ref) async => [order]),
+              adminRecentOrdersProvider.overrideWith((ref) async => [order]),
+              adminStuckPendingOrdersProvider.overrideWith(
+                (ref) async => StuckPendingOrders(orders: [order], total: 42),
+              ),
+              adminPaymentsSummaryProvider.overrideWith(
+                (ref) async => const AdminPaymentsSummary(
+                  transactionCount: 1234,
+                  collected: 1234567.89,
                 ),
-                adminOrdersProvider.overrideWith((ref) async => [order]),
-                adminRecentOrdersProvider.overrideWith((ref) async => [order]),
-                adminStuckPendingOrdersProvider.overrideWith(
-                  (ref) async => StuckPendingOrders(orders: [order], total: 42),
+              ),
+              adminOrderSummaryProvider.overrideWith(
+                (ref) async => const AdminOrderSummary(
+                  openOrders: 3,
+                  totalRevenue: 1234567.89,
+                  weekRevenue: 12345,
                 ),
-                adminPaymentsSummaryProvider.overrideWith(
-                  (ref) async => const AdminPaymentsSummary(
-                    transactionCount: 1234,
-                    collected: 1234567.89,
-                  ),
-                ),
-                adminOrderSummaryProvider.overrideWith(
-                  (ref) async => const AdminOrderSummary(
-                    openOrders: 3,
-                    totalRevenue: 1234567.89,
-                    weekRevenue: 12345,
-                  ),
-                ),
-                adminTopProductsProvider.overrideWith((ref) async => []),
-                fulfillmentOrdersProvider.overrideWith((ref) async => [order]),
-                shopSettingsProvider.overrideWith((ref) async => {}),
-                unreadNotificationCountProvider.overrideWith((ref) => 0),
-              ],
-              child: app(screen, 2, brightness),
-            ),
-          );
-          await tester.pumpAndSettle();
-          expect(tester.takeException(), isNull);
-          expect(find.text('Collected through Stripe'), findsOneWidget);
-          expect(find.text('S\$1234567.89'), findsOneWidget);
-          expect(find.text('+41 more in Orders'), findsOneWidget);
-          expect(tester.takeException(), isNull);
-        },
-      );
+              ),
+              adminTopProductsProvider.overrideWith((ref) async => []),
+              fulfillmentOrdersProvider.overrideWith((ref) async => [order]),
+              shopSettingsProvider.overrideWith((ref) async => {}),
+              unreadNotificationCountProvider.overrideWith((ref) => 0),
+            ],
+            child: app(screen, 2, brightness),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Sales after refunds'), findsOneWidget);
+        expect(find.text('1234 paid orders'), findsOneWidget);
+        expect(find.text('S\$1234567.89'), findsOneWidget);
+        expect(find.text('+41 more in Orders'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
     }
   }
 }

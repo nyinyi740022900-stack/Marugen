@@ -7,15 +7,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart'
     show SignInWithAppleButton, SignInWithAppleButtonStyle;
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'
+    show
+        AuthException,
+        AuthRetryableFetchException,
+        AuthSessionMissingException;
 
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/utils/email_validator.dart';
 import '../../../shared/widgets/brand_logo.dart';
+import '../data/auth_repository.dart';
 import 'auth_providers.dart';
 import '../../orders/presentation/purchase_intent.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
-  const LoginScreen({super.key});
+  /// Pre-fills the email field: set when arriving from Sign Up with an
+  /// address that already has an account, or that was just registered.
+  final String? initialEmail;
+  const LoginScreen({super.key, this.initialEmail});
 
   @override
   ConsumerState<LoginScreen> createState() => _LoginScreenState();
@@ -23,12 +32,32 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailCtrl = TextEditingController();
+  late final _emailCtrl = TextEditingController(
+    text: widget.initialEmail?.trim(),
+  );
   final _passwordCtrl = TextEditingController();
   bool _loading = false;
   bool _obscure = true;
   bool _oauthLoading = false;
   String? _error;
+
+  /// Opens Sign Up; when it sends the customer back with an email (already
+  /// registered, or just registered and awaiting confirmation) that address
+  /// is put in the email field.
+  Future<void> _openSignup() async {
+    final email = await context.push<Object?>(
+      authRouteWithRedirect(
+        '/signup',
+        GoRouterState.of(context).uri.queryParameters['redirect'],
+      ),
+    );
+    if (!mounted || email is! String || email.trim().isEmpty) return;
+    setState(() {
+      _emailCtrl.text = email.trim();
+      _passwordCtrl.clear();
+      _error = null;
+    });
+  }
 
   @override
   void dispose() {
@@ -50,7 +79,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           .signInWithEmail(_emailCtrl.text.trim(), _passwordCtrl.text);
       // Router redirect handles navigation once auth state updates.
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e, AuthErrorScreen.login));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -67,7 +96,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // Router redirect handles navigation once the OAuth redirect lands
       // and auth state updates.
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyAuthError(e));
+      if (mounted) setState(() => _error = friendlyAuthError(e, AuthErrorScreen.login));
     } finally {
       if (mounted) setState(() => _oauthLoading = false);
     }
@@ -332,7 +361,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         ? AppSpacing.sm
                                         : AppSpacing.md,
                                   ),
-                                  Container(
+                                  // Announced the moment it appears.
+                                  Semantics(
+                                    liveRegion: true,
+                                    child: Container(
                                     padding: const EdgeInsets.all(
                                       AppSpacing.md,
                                     ),
@@ -348,6 +380,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                         color: AppPalette.of(context).accent,
                                         fontSize: 13,
                                       ),
+                                    ),
                                     ),
                                   ),
                                 ],
@@ -457,14 +490,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                           horizontal: 4,
                                         ),
                                       ),
-                                      onPressed: () => context.push(
-                                        authRouteWithRedirect(
-                                          '/signup',
-                                          GoRouterState.of(context)
-                                              .uri
-                                              .queryParameters['redirect'],
-                                        ),
-                                      ),
+                                      onPressed: _openSignup,
                                       child: Text(
                                         'Sign up',
                                         style: TextStyle(
@@ -497,40 +523,121 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 }
 
-/// Maps a raw auth exception to short, user-safe copy — shared by
-/// LoginScreen and SignupScreen so signup failures (e.g. "duplicate key
-/// value violates unique constraint") never leak raw Postgres/Supabase
-/// error text to the UI.
-String friendlyAuthError(Object e) {
+/// The auth screen an error is shown on: each has its own last-resort line,
+/// so a failed sign-up never reads "Could not log in".
+enum AuthErrorScreen {
+  login('Could not log in. Please try again.'),
+  signUp('Could not create your account. Please try again.'),
+  forgotPassword('Could not send the reset email. Please try again.'),
+  resetPassword('Could not change your password. Please try again.');
+
+  const AuthErrorScreen(this.fallback);
+
+  /// Shown for a failure nothing below recognises.
+  final String fallback;
+}
+
+/// Shown when the recovery link (or the temporary session it opened) is no
+/// longer good.
+const resetLinkExpiredMessage =
+    'This reset link has expired. Request a new one from Forgot password.';
+
+/// GoTrue codes for a recovery link or session that is no longer usable
+/// (`ErrorCode` in the gotrue package).
+const _expiredLinkCodes = {
+  'otp_expired',
+  'session_not_found',
+  'session_missing',
+  'session_expired',
+  'flow_state_expired',
+  'flow_state_not_found',
+};
+
+/// True when [e] says sign-up was refused because the address already has
+/// an account: AuthRepository's own exception, or Supabase's error code.
+/// A reply from a server too old to send codes is recognised by its text.
+bool isEmailAlreadyRegisteredError(Object e) {
+  if (e is EmailAlreadyRegisteredException) return true;
+  if (e is! AuthException) return false;
+  final code = (e.code ?? '').toLowerCase();
+  if (code.isNotEmpty) {
+    return code == 'user_already_exists' || code == 'email_exists';
+  }
+  final message = e.message.toLowerCase();
+  return message.contains('already registered') ||
+      message.contains('already exists');
+}
+
+/// True when [e] means the password-reset link has expired or its session
+/// is gone. On the Set New Password screen ([duringRecovery]) any 401 / 403
+/// means the same: the only session there is the one the link opened.
+bool isExpiredResetLinkError(Object e, {bool duringRecovery = false}) {
+  if (e is! AuthException) return false;
+  if (e is AuthSessionMissingException) return true;
+  final code = (e.code ?? '').toLowerCase();
+  if (_expiredLinkCodes.contains(code)) return true;
+  if (e.message.toLowerCase().contains('auth session missing')) return true;
+  return duringRecovery && (e.statusCode == '401' || e.statusCode == '403');
+}
+
+/// Maps an auth failure to short, user-safe copy — shared by the Log In,
+/// Sign Up, Forgot password and Set New Password screens, each passing the
+/// [screen] it is. Raw Supabase / Postgres / SDK text never reaches the
+/// screen: a Supabase [AuthException] is mapped by its code and status, the
+/// SDK failures by what they are, and only an [AuthRepositoryException] —
+/// copy AuthRepository wrote for the customer — is shown as it is.
+String friendlyAuthError(Object e, AuthErrorScreen screen) {
+  final fallback = screen.fallback;
+  if (e is AuthRepositoryException) return e.message;
+  if (e is AuthException) {
+    final code = (e.code ?? '').toLowerCase();
+    final message = e.message.toLowerCase();
+    if (e.statusCode == '429' ||
+        code == 'over_email_send_rate_limit' ||
+        code.contains('rate_limit')) {
+      return 'Too many attempts. Wait a minute and try again.';
+    }
+    if (isExpiredResetLinkError(
+      e,
+      duringRecovery: screen == AuthErrorScreen.resetPassword,
+    )) {
+      return resetLinkExpiredMessage;
+    }
+    if (code == 'same_password') {
+      return "Choose a password you haven't used before.";
+    }
+    if (code == 'invalid_credentials' ||
+        message.contains('invalid login credentials')) {
+      return 'Email or password is incorrect. Try again, use Forgot password, or Sign up for a new account.';
+    }
+    if (code == 'email_not_confirmed' ||
+        message.contains('email not confirmed')) {
+      return 'Please confirm your email from the link we sent, then try again.';
+    }
+    if (isEmailAlreadyRegisteredError(e)) {
+      return const EmailAlreadyRegisteredException().message;
+    }
+    if (code == 'weak_password' ||
+        (message.contains('password') &&
+            (message.contains('weak') || message.contains('short')))) {
+      return 'Please choose a stronger password: at least 8 characters with a letter and a number.';
+    }
+    if (e is AuthRetryableFetchException) {
+      return 'Network error — check your connection and try again.';
+    }
+    return fallback;
+  }
+  // Google / Apple SDK failures and transport errors: recognised by kind,
+  // answered with fixed copy.
   final raw = e.toString().toLowerCase();
-  if (raw.contains('invalid login credentials') ||
-      raw.contains('invalid_credentials')) {
-    return 'Email or password is incorrect. Try again, use Forgot password, or Sign up for a new account.';
-  }
-  if (raw.contains('email not confirmed')) {
-    return 'Please confirm your email from the link we sent, then try again.';
-  }
-  if (raw.contains('already registered') || raw.contains('already exists')) {
-    return 'An account with this email already exists. Try logging in instead.';
-  }
-  if (raw.contains('password') &&
-      (raw.contains('weak') || raw.contains('short'))) {
-    return 'Please choose a stronger password: at least 8 characters with a letter and a number.';
-  }
-  if (raw.contains('google sign-in is not configured') ||
-      raw.contains('google_web_client_id')) {
-    return 'Google Sign-In is not set up yet. Add Google client IDs to .env (see README).';
-  }
   if (raw.contains('cancelled') || raw.contains('canceled')) {
     return 'Sign-in was cancelled.';
   }
-  if (raw.contains('network') || raw.contains('socket')) {
+  if (raw.contains('network') ||
+      raw.contains('socket') ||
+      raw.contains('failed host lookup') ||
+      raw.contains('clientexception')) {
     return 'Network error — check your connection and try again.';
   }
-  // Prefer short Exception messages we throw from AuthRepository.
-  if (e is Exception) {
-    final msg = e.toString().replaceFirst(RegExp(r'^Exception:\s*'), '');
-    if (msg.isNotEmpty && msg.length < 180) return msg;
-  }
-  return 'Could not log in. Please try again.';
+  return fallback;
 }

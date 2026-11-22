@@ -12,6 +12,7 @@ import '../../../shared/utils/delivery_estimate.dart';
 import '../../../shared/widgets/support_contact_picker.dart';
 import '../../../shared/utils/price_format.dart';
 import '../../../shared/utils/view_tracker.dart';
+import '../../../shared/widgets/cart_badge_button.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/fullscreen_image_gallery.dart';
 import '../../../shared/widgets/heart_icon.dart';
@@ -287,7 +288,27 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
   Widget build(BuildContext context) {
     final productAsync = ref.watch(productDetailProvider(widget.productId));
 
+    // Back to wherever the customer came from; from a shared link there is
+    // nothing underneath, so the Shop itself.
+    void backToShop() => context.canPop() ? context.pop() : context.go('/');
+    // The loaded page brings its own collapsing app bar. Loading, error and
+    // not-found have no content to carry one, and on iOS no system back.
+    final showPlainAppBar = productAsync.maybeWhen(
+      data: (product) => product == null,
+      orElse: () => true,
+    );
+
     return Scaffold(
+      appBar: showPlainAppBar
+          ? AppBar(
+              leading: IconButton(
+                tooltip: 'Back',
+                icon: const BackButtonIcon(),
+                onPressed: backToShop,
+              ),
+              title: const Text('Product'),
+            )
+          : null,
       body: productAsync.when(
         data: (product) {
           if (product == null) {
@@ -296,8 +317,7 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
               title: 'Product not found',
               subtitle: 'It may have been removed or is no longer available.',
               actionLabel: 'Back to Shop',
-              onAction: () =>
-                  context.canPop() ? context.pop() : context.go('/'),
+              onAction: backToShop,
             );
           }
           // Reset the selection if we've navigated to a different product
@@ -393,6 +413,9 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
                       ),
                     ),
                     _FavoriteAppBarButton(productId: product.id),
+                    // The only page an item is added from needs its own
+                    // way to the cart.
+                    const CartBadgeButton(),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
                     background: slideCount > 0
@@ -907,6 +930,8 @@ class _ProductDetailScreenState extends ConsumerState<ProductDetailScreen>
         error: (e, _) => ErrorState(
           onRetry: () =>
               ref.invalidate(productDetailProvider(widget.productId)),
+          secondaryLabel: 'Back to Shop',
+          onSecondary: backToShop,
         ),
       ),
       bottomNavigationBar: productAsync.maybeWhen(

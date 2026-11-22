@@ -137,6 +137,9 @@ void main() {
         250,
         scrollable: find.byType(Scrollable).first,
       );
+      // Lay out the scrolled position before tapping: Save is now pinned
+      // under the list, where the stale position would land.
+      await tester.pump();
       await tester.tap(find.text('Add Fish Option'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);

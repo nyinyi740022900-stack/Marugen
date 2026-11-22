@@ -7,13 +7,14 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/product.dart';
 import '../../../shared/widgets/brand_logo.dart';
+import '../../../shared/widgets/cart_badge_button.dart';
+import '../../../shared/widgets/support_contact_picker.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/product_card.dart';
 import '../../../shared/widgets/notification_bell_button.dart';
 import '../../../shared/widgets/skeleton.dart';
 import '../../banners/presentation/hero_banner_carousel.dart';
 import '../../banners/presentation/home_banner_providers.dart';
-import '../../cart/presentation/cart_providers.dart';
 import 'shop_providers.dart';
 
 class ShopScreen extends ConsumerWidget {
@@ -24,6 +25,17 @@ class ShopScreen extends ConsumerWidget {
     final productsAsync = ref.watch(visibleProductListProvider);
     final selectedCategory = ref.watch(selectedCategoryProvider);
     final sort = ref.watch(productSortProvider);
+    // Pull down for stock and prices changed since opening the app (e.g. a
+    // koi sold to someone else).
+    Future<void> refreshCatalogue() => Future.wait([
+      ref.refresh(productListProvider.future),
+      // Banners too, so a slide the owner just changed shows up. They fail
+      // soft: a banner outage must not turn a good catalogue refresh into
+      // an error.
+      ref
+          .refresh(liveHomeBannersProvider.future)
+          .then<void>((_) {}, onError: (_) {}),
+    ]);
 
     return Scaffold(
       appBar: AppBar(
@@ -45,7 +57,7 @@ class ShopScreen extends ConsumerWidget {
         actions: [
           const NotificationBellButton(),
           const SizedBox(width: 6),
-          const _CartBadgeButton(),
+          const CartBadgeButton(),
           const SizedBox(width: 4),
         ],
       ),
@@ -105,33 +117,55 @@ class ShopScreen extends ConsumerWidget {
             child: productsAsync.when(
               data: (products) {
                 if (products.isEmpty) {
-                  return ref.watch(searchQueryProvider).trim().isNotEmpty ||
-                          selectedCategory != null
-                      ? EmptyState(
-                          icon: Icons.search_off,
-                          title: 'No matching products',
-                          subtitle: 'Try another search or clear your filters.',
-                          actionLabel: 'Clear filters',
-                          onAction: () {
-                            ref.read(searchQueryProvider.notifier).state = '';
-                            ref.read(selectedCategoryProvider.notifier).state =
-                                null;
-                          },
-                        )
-                      : const _EmptyState();
+                  final searching = ref
+                      .watch(searchQueryProvider)
+                      .trim()
+                      .isNotEmpty;
+                  // Empty is still a state worth refreshing: a fish listed
+                  // a minute ago should appear without restarting the app.
+                  return _RefreshableEmpty(
+                    onRefresh: refreshCatalogue,
+                    child: searching
+                        ? EmptyState(
+                            icon: Icons.search_off,
+                            title: 'No matching products',
+                            subtitle:
+                                'Try another search or clear your filters.',
+                            actionLabel: 'Clear filters',
+                            onAction: () {
+                              ref.read(searchQueryProvider.notifier).state =
+                                  '';
+                              ref
+                                      .read(selectedCategoryProvider.notifier)
+                                      .state =
+                                  null;
+                            },
+                          )
+                        : selectedCategory != null
+                        // A category with nothing in it is not a failed
+                        // filter: say so, and offer the farm.
+                        ? EmptyState(
+                            icon: Icons.water_outlined,
+                            title: emptyCategoryTitle(selectedCategory),
+                            subtitle: emptyCategorySubtitle(selectedCategory),
+                            actionLabel: 'Ask the farm',
+                            onAction: () => showSupportContactPicker(
+                              context,
+                              message: emptyCategoryEnquiry(selectedCategory),
+                              messageIsPersonal: false,
+                            ),
+                            secondaryLabel: 'See all products',
+                            onSecondary: () =>
+                                ref
+                                        .read(selectedCategoryProvider.notifier)
+                                        .state =
+                                    null,
+                          )
+                        : const _EmptyState(),
+                  );
                 }
-                // Pull down for stock and prices changed since opening the
-                // app (e.g. a koi sold to someone else).
                 return RefreshIndicator.adaptive(
-                  onRefresh: () => Future.wait([
-                    ref.refresh(productListProvider.future),
-                    // Banners too, so a slide the owner just changed shows
-                    // up. They fail soft: a banner outage must not turn a
-                    // good catalogue refresh into an error.
-                    ref
-                        .refresh(liveHomeBannersProvider.future)
-                        .then<void>((_) {}, onError: (_) {}),
-                  ]),
+                  onRefresh: refreshCatalogue,
                   child: ProductGrid(
                     header: const HeroBannerCarousel(),
                     itemCount: products.length,
@@ -151,52 +185,6 @@ class ShopScreen extends ConsumerWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// Isolated so only this small badge rebuilds when [cartCountProvider]
-/// changes — previously watched at the top of [ShopScreen.build], which
-/// rebuilt the search bar, category chips, and the whole product grid on
-/// every cart mutation. Mirrors the pattern already used correctly by
-/// [ProductCard]'s `_FavoriteButton`.
-class _CartBadgeButton extends ConsumerWidget {
-  const _CartBadgeButton();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cartCount = ref.watch(cartCountProvider);
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        IconButton(
-          tooltip: 'Open cart',
-          icon: const Icon(Icons.shopping_bag_outlined),
-          onPressed: () => context.push('/cart'),
-        ),
-        if (cartCount > 0)
-          Positioned(
-            right: 8,
-            top: 8,
-            child: Container(
-              padding: const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                color: AppColors.red,
-                shape: BoxShape.circle,
-              ),
-              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-              child: Text(
-                '$cartCount',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 10,
-                  color: AppColors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -342,6 +330,48 @@ class _EmptyState extends StatelessWidget {
       icon: Icons.water_outlined,
       title: 'No products yet',
       subtitle: 'Check back soon — new koi and supplies are added regularly.',
+    );
+  }
+}
+
+/// "koi" in "No koi available right now".
+String _categoryNoun(ProductCategory category) => switch (category) {
+  ProductCategory.koi => 'koi',
+  ProductCategory.arowana => 'arowana',
+  _ => categoryLabel(category).toLowerCase(),
+};
+
+/// Title of the Shop's empty state when a category chip is selected and
+/// there is no search text: the category has nothing listed right now.
+String emptyCategoryTitle(ProductCategory category) =>
+    'No ${_categoryNoun(category)} available right now';
+
+String emptyCategorySubtitle(ProductCategory category) =>
+    category == ProductCategory.koi || category == ProductCategory.arowana
+    ? 'New fish are listed as soon as they are ready. Message us to ask what is in the ponds.'
+    : 'New stock is listed as soon as it arrives. Message us to ask what is on the way.';
+
+/// What "Ask the farm" pre-fills. Nothing personal in it, so a guest can
+/// send it too.
+String emptyCategoryEnquiry(ProductCategory category) =>
+    'Hi, do you have any ${_categoryNoun(category)} available?';
+
+/// An empty state that can still be pulled down to refresh.
+class _RefreshableEmpty extends StatelessWidget {
+  final Future<void> Function() onRefresh;
+  final Widget child;
+  const _RefreshableEmpty({required this.onRefresh, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator.adaptive(
+      onRefresh: onRefresh,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: SizedBox(height: constraints.maxHeight, child: child),
+        ),
+      ),
     );
   }
 }

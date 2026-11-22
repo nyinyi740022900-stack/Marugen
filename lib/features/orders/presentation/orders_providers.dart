@@ -4,10 +4,12 @@ import '../../../shared/models/order.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/paged_notifier.dart';
 import '../../auth/presentation/auth_providers.dart';
-import '../../cart/domain/cart_item.dart';
 import '../data/order_repository.dart';
 import '../../admin/delivery/delivery_repository.dart';
 import '../../admin/delivery/easyparcel_providers.dart';
+
+// The "payment sheet succeeded, server not yet" hint and its device storage.
+export 'payment_awaiting.dart';
 
 final orderRepositoryProvider = Provider<OrderRepository>(
   (ref) => OrderRepository(),
@@ -283,35 +285,6 @@ void refreshAdminOrders(WidgetRef ref) {
   ref.invalidate(orderByIdProvider);
   ref.read(adminOrdersPagedProvider.notifier).refresh();
 }
-
-/// "The payment sheet just reported success for this order, but the server
-/// has not recorded it yet" — set by checkout / Complete payment, read by the
-/// order screen, which shows a confirming state and keeps re-checking (see
-/// `_PaymentConfirmationPoller`). It is a display hint only: nothing here
-/// marks an order paid, the order's status still comes from the server.
-///
-/// Held in memory so a deep link or a restart can never claim a payment was
-/// received, and dropped when the signed-in account changes.
-class PaymentAwaitingConfirmation {
-  final String orderId;
-  final String ownerId;
-
-  /// The cart lines this payment bought — removed from the cart once the
-  /// server confirms. Empty for Buy Now, which never used the cart.
-  final List<CartItem> cartLines;
-
-  const PaymentAwaitingConfirmation({
-    required this.orderId,
-    required this.ownerId,
-    this.cartLines = const [],
-  });
-}
-
-final paymentAwaitingConfirmationProvider =
-    StateProvider<PaymentAwaitingConfirmation?>((ref) {
-      ref.watch(currentUserIdProvider);
-      return null;
-    });
 
 /// Session-scoped authoritative detail; backend RLS remains the access boundary.
 ///

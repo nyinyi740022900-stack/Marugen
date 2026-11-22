@@ -236,8 +236,8 @@ void main() {
     expect(cartIds(container), ['bought', 'later']);
   });
 
-  testWidgets('still pending after the window falls back to the normal '
-      'pending order', (tester) async {
+  testWidgets('still pending after the window never falls back to paying '
+      'again', (tester) async {
     final server = ServerOrders();
     final container = await openOrder(tester, server, sheetSucceeded: true);
     expect(find.text(confirmingCopy), findsOneWidget);
@@ -251,13 +251,28 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(find.text(confirmingCopy), findsNothing);
-    expect(await onPage(tester, 'Complete payment'), isTrue);
+    // The sheet reported success: "Complete payment" would invite a second
+    // charge. The order says it is still being confirmed instead.
+    expect(find.text(stillConfirmingPaymentCopy), findsOneWidget);
+    expect(await onPage(tester, 'Complete payment'), isFalse);
+    expect(await onPage(tester, 'Cancel Order'), isFalse);
+    expect(await onPage(tester, 'Contact support'), isTrue);
     // Never paid as far as the server said: the cart is untouched.
     expect(cartIds(container), ['bought', 'later']);
 
     final fetched = server.fetches;
     await tester.pump(const Duration(minutes: 2));
     expect(server.fetches, fetched, reason: 'the window is bounded');
+
+    // The webhook lands late; the next read of the order settles it.
+    server.status = OrderStatus.paid;
+    container.invalidate(orderByIdProvider('order-12345'));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text(stillConfirmingPaymentCopy), findsNothing);
+    expect(cartIds(container), ['later']);
+    expect(container.read(paymentAwaitingConfirmationProvider), isNull);
   });
 
   testWidgets('leaving the order screen stops the re-checking', (tester) async {

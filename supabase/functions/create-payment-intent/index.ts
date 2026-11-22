@@ -591,7 +591,7 @@ Deno.serve(async (req) => {
         .eq("id", 1)
         .maybeSingle();
 
-      const gstPercent = Number(settings?.gst_percent ?? 9);
+      const gstPercent = Number(settings?.gst_percent ?? 0);
       const gstIncluded = settings?.gst_included_in_price !== false;
 
       let payableTotal = checkoutMerchandiseCents(

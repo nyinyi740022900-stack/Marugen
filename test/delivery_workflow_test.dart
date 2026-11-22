@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:marugen_app/shared/models/app_user.dart';
 import 'package:marugen_app/features/auth/presentation/auth_providers.dart';
 import 'package:marugen_app/core/theme/app_theme.dart';
@@ -402,13 +403,22 @@ void main() {
           entry.value,
         );
       }
-      await tester.tap(find.text('Choose pickup date'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('OK'));
-      await tester.pumpAndSettle();
+      // The pickup date starts at tomorrow (Singapore), so the button is
+      // never one that silently does nothing.
+      expect(find.text('Choose pickup date'), findsNothing);
+      final sgNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+      final tomorrow = DateTime(sgNow.year, sgNow.month, sgNow.day + 1);
+      expect(
+        find.text('Pickup: ${DateFormat.yMMMd().format(tomorrow)}'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Get courier rates'));
       await tester.pumpAndSettle();
       expect(courier.quoteCalls, 1);
+      expect(
+        courier.quoted!.collectionDate,
+        DateFormat('yyyy-MM-dd').format(tomorrow),
+      );
       expect(find.text('Ninja Logistics'), findsOneWidget);
       expect(find.textContaining('S\$4.00 total delivery'), findsOneWidget);
       expect(find.textContaining('MYR'), findsNothing);
